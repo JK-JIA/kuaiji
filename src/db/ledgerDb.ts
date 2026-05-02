@@ -27,8 +27,8 @@ const DEFAULT_FIELD_ROWS: FieldDef[] = [
   },
   {
     id: DEFAULT_FIELD_KEYS.quantity,
-    name: '数量',
-    type: 'text',
+    name: '数量（斤）',
+    type: 'number',
     key: 'quantity',
     order: 1,
   },
