@@ -14,10 +14,34 @@ const DOUBAO_CONFIG = {
   ENDPOINT: 'https://ark.cn-beijing.volces.com/api/v3/responses',
 }
 
-interface ParseResult {
+/** 智能识别得到的多行商品（每行对应表单一行） */
+export type DoubaoProductLine = { product: string; quantity: string }
+
+export interface DoubaoParseResult {
   success: boolean
   data?: Record<string, string>
+  /** 多商品时每行一对；单商品时可为 1 条或与 data 首行一致 */
+  productLines?: DoubaoProductLine[]
   error?: string
+}
+
+/** 顿号/逗号拆分「红薯、白薯」与「100斤、15斤」为两行（段数一致时） */
+function splitLegacyListStrings(
+  productStr: string,
+  qtyStr: string,
+): DoubaoProductLine[] {
+  const splitSeg = (s: string) =>
+    s
+      .split(/[、,，]/)
+      .map((x) => x.trim())
+      .filter(Boolean)
+  const products = splitSeg(productStr)
+  const qtys = splitSeg(qtyStr)
+  if (products.length !== qtys.length || products.length <= 1) return []
+  return products.map((product, i) => ({
+    product,
+    quantity: qtys[i] ?? '',
+  }))
 }
 
 /**
@@ -26,7 +50,7 @@ interface ParseResult {
 export async function parseWithDoubao(
   text: string,
   fields: Array<{ id: string; name: string; key?: string }>,
-): Promise<ParseResult> {
+): Promise<DoubaoParseResult> {
   if (!isDoubaoConfigured()) {
     return {
       success: false,
@@ -50,17 +74,32 @@ export async function parseWithDoubao(
 用户输入：${text}
 
 请提取以下信息（如果有的话）：
-- 商品名称
-- 数量（包含单位，如：5斤、10kg、3包等）
-- ${fieldDescriptions}
+- 多种不同商品时：每一项单独一行（见下方「商品明细」数组）
+- 单一商品时：也可用一行商品+数量
+- 公共信息：${fieldDescriptions || '（无额外自定义字段）'}
 
 要求：
 1. 车牌号支持多种格式：完整车牌（如川A12345）、尾号（如1234）、简称（如川A）
-2. 数量要保留单位
-3. 如果某个字段没有提到，就不要返回
-4. 只返回 JSON 格式，不要其他文字
+2. 数量要保留单位；每一种商品对应自己的数量，不可混写串台
+3. **若用户一次提到多种不同商品（如「红薯100斤白薯15斤」），必须使用「商品明细」数组，每项一条；禁止把多种商品压成一个字符串用顿号连接**
+4. 如果某个字段没有提到，就不要返回
+5. 只返回 JSON 格式，不要其他文字
 
-返回格式示例：
+多商品返回示例：
+{
+  "商品明细": [
+    { "商品": "红薯", "数量": "100斤" },
+    { "商品": "白薯", "数量": "15斤" }
+  ],
+  "车牌号": "京A8899"
+}
+
+单商品返回示例（任选其一）：
+{
+  "商品明细": [ { "商品": "苹果", "数量": "5斤" } ],
+  "车牌号": "川A12345"
+}
+或
 {
   "商品": "苹果",
   "数量": "5斤",
@@ -132,9 +171,17 @@ export async function parseWithDoubao(
           console.log('content[' + index + ']:', c)
         })
         
-        const textContent = messageOutput.content.find((c: any) => c.type === 'text')
-        console.log('找到的 textContent:', textContent)
-        content = textContent?.text || ''
+        /** Responses API 多为 output_text；旧版可能是 text */
+        const textBlock = messageOutput.content.find(
+          (c: any) => c.type === 'text' || c.type === 'output_text',
+        )
+        console.log('找到的文本块:', textBlock)
+        content =
+          (typeof textBlock?.text === 'string' ? textBlock.text : '') ||
+          (typeof textBlock?.textContent === 'string'
+            ? textBlock.textContent
+            : '') ||
+          ''
       }
     }
 
@@ -145,40 +192,74 @@ export async function parseWithDoubao(
     
     console.log('提取的文本内容:', content)
 
-    // 解析 JSON
-    let parsed: Record<string, string>
+    // 解析 JSON（整段里第一个完整的 {...} 对象）
+    let parsed: Record<string, unknown>
     try {
-      // 提取 JSON（可能包含在 markdown 代码块中）
       const jsonMatch = content.match(/\{[\s\S]*\}/)
       if (!jsonMatch) {
         return { success: false, error: '无法解析返回结果' }
       }
-      parsed = JSON.parse(jsonMatch[0])
+      parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>
     } catch (e) {
       console.error('JSON 解析失败:', content)
       return { success: false, error: '解析结果格式错误' }
     }
 
-    // 映射字段名到字段 ID
-    const mappedData: Record<string, string> = {}
-    
-    for (const field of fields) {
-      if (parsed[field.name]) {
-        mappedData[field.id] = parsed[field.name]
+    const rawDetail =
+      parsed['商品明细'] ?? parsed['商品列表'] ?? parsed['line_items']
+    let productLines: DoubaoProductLine[] | undefined
+
+    if (Array.isArray(rawDetail) && rawDetail.length > 0) {
+      productLines = rawDetail
+        .map((row: unknown) => {
+          if (row && typeof row === 'object' && !Array.isArray(row)) {
+            const o = row as Record<string, unknown>
+            return {
+              product: String(o['商品'] ?? o['名称'] ?? '').trim(),
+              quantity: String(o['数量'] ?? '').trim(),
+            }
+          }
+          return { product: '', quantity: '' }
+        })
+        .filter((r) => r.product && r.quantity)
+    }
+
+    const flatProduct = String(parsed['商品'] ?? '').trim()
+    const flatQty = String(parsed['数量'] ?? '').trim()
+
+    if (!productLines || productLines.length === 0) {
+      const split = splitLegacyListStrings(flatProduct, flatQty)
+      if (split.length > 0) {
+        productLines = split
+      } else if (flatProduct && flatQty) {
+        productLines = [{ product: flatProduct, quantity: flatQty }]
       }
     }
 
-    // 特殊处理商品和数量
-    if (productField && parsed['商品']) {
-      mappedData[productField.id] = parsed['商品']
+    // 映射字段名到字段 ID（不含商品/数量多行，稍后单独写）
+    const mappedData: Record<string, string> = {}
+
+    for (const field of fields) {
+      if (field.key === 'product' || field.key === 'quantity') continue
+      const v = parsed[field.name]
+      if (v !== undefined && v !== null && String(v).trim()) {
+        mappedData[field.id] = String(v).trim()
+      }
     }
-    if (quantityField && parsed['数量']) {
-      mappedData[quantityField.id] = parsed['数量']
+
+    if (productLines && productLines.length > 0) {
+      if (productField) {
+        mappedData[productField.id] = productLines[0].product
+      }
+      if (quantityField) {
+        mappedData[quantityField.id] = productLines[0].quantity
+      }
     }
 
     return {
       success: true,
       data: mappedData,
+      productLines,
     }
   } catch (error: any) {
     console.error('豆包解析错误:', error)

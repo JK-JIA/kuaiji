@@ -5,6 +5,7 @@ import {
   mergeParsedIntoForm,
 } from '../parser/nlParse'
 import { MonthCalendar } from './MonthCalendar'
+import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
 import { parseWithDoubao, isDoubaoConfigured } from '../utils/doubaoParser'
 
 type LineForm = { id: string; product: string; quantity: string }
@@ -57,6 +58,16 @@ export function AddRecordModal({
   const [saving, setSaving] = useState(false)
   const [parsing, setParsing] = useState(false)
 
+  const getBaseForSpeech = useCallback(() => rawSpeech, [rawSpeech])
+  const speech = useSpeechRecognition({
+    getBaseText: getBaseForSpeech,
+    onText: setRawSpeech,
+  })
+
+  useEffect(() => {
+    if (!open) speech.abort()
+  }, [open, speech.abort])
+
   useEffect(() => {
     if (!open) return
     if (recordToEdit && prodId && qtyId) {
@@ -103,36 +114,57 @@ export function AddRecordModal({
           return
         }
 
-        if (!result.data || Object.keys(result.data).length === 0) {
+        const hasLines =
+          result.productLines &&
+          result.productLines.length > 0 &&
+          result.productLines.some((r) => r.product.trim() || r.quantity.trim())
+        const hasOther =
+          result.data && Object.keys(result.data).some((k) => String(result.data![k] ?? '').trim())
+
+        if (!hasLines && !hasOther) {
           alert('未能识别到有效信息，请重新输入')
           return
         }
 
-        // 合并解析结果到表单
-        setValues((prev) => mergeParsedIntoForm(prev, result.data!))
-        
-        // 更新商品和数量到第一行
+        // 合并解析结果到表单（车牌、金额等）
+        if (result.data && Object.keys(result.data).length > 0) {
+          setValues((prev) => mergeParsedIntoForm(prev, result.data!))
+        }
+
+        // 多商品：一行一项；否则写入第一行
         if (prodId && qtyId) {
-          setLines((prev) => {
-            const first = prev[0] ?? {
-              id: crypto.randomUUID(),
-              product: '',
-              quantity: '',
-            }
-            const rest = prev.slice(1)
-            return [
-              {
-                ...first,
-                product:
-                  (result.data![prodId] && String(result.data![prodId]).trim()) ||
-                  first.product,
-                quantity:
-                  (result.data![qtyId] && String(result.data![qtyId]).trim()) ||
-                  first.quantity,
-              },
-              ...rest,
-            ]
-          })
+          if (result.productLines && result.productLines.length > 0) {
+            setLines(
+              result.productLines.map((row) => ({
+                id: crypto.randomUUID(),
+                product: row.product.trim(),
+                quantity: row.quantity.trim(),
+              })),
+            )
+          } else {
+            setLines((prev) => {
+              const first = prev[0] ?? {
+                id: crypto.randomUUID(),
+                product: '',
+                quantity: '',
+              }
+              const rest = prev.slice(1)
+              return [
+                {
+                  ...first,
+                  product:
+                    (result.data?.[prodId] &&
+                      String(result.data[prodId]).trim()) ||
+                    first.product,
+                  quantity:
+                    (result.data?.[qtyId] &&
+                      String(result.data[qtyId]).trim()) ||
+                    first.quantity,
+                },
+                ...rest,
+              ]
+            })
+          }
         }
 
         // 清空输入框
@@ -274,8 +306,8 @@ export function AddRecordModal({
               智能快速录入
             </p>
             <p className="mb-3 text-left text-xs text-stone-500">
-              {isDoubaoConfigured() 
-                ? '用输入法语音输入或手动输入，AI 自动识别填入下方字段。'
+              {isDoubaoConfigured()
+                ? '可点击下方麦克风说说内容，或手动输入；再点「智能识别」填入字段（需 Chrome / Edge 或安卓壳内 WebView）。'
                 : '请先配置豆包 API Key 以使用智能解析功能。'}
             </p>
             <div className="space-y-2">
@@ -286,14 +318,38 @@ export function AddRecordModal({
                 className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 resize-none"
                 rows={3}
               />
-              <button
-                type="button"
-                onClick={() => applyParse(rawSpeech)}
-                disabled={!rawSpeech.trim() || parsing || !isDoubaoConfigured()}
-                className="w-full rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {parsing ? '智能识别中...' : '智能识别并填入'}
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    speech.listening ? speech.stop() : speech.start()
+                  }
+                  disabled={!speech.supported || parsing}
+                  className={`flex-1 min-w-[8rem] rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors ${
+                    speech.listening
+                      ? 'border-rose-300 bg-rose-50 text-rose-800 ring-2 ring-rose-200'
+                      : 'border-stone-200 bg-white text-stone-800 hover:bg-stone-50'
+                  } disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  {speech.listening ? '结束说话' : '语音输入'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyParse(rawSpeech)}
+                  disabled={!rawSpeech.trim() || parsing || !isDoubaoConfigured()}
+                  className="flex-[2] min-w-[10rem] rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {parsing ? '智能识别中...' : '智能识别并填入'}
+                </button>
+              </div>
+              {!speech.supported && (
+                <p className="text-xs text-stone-400">
+                  当前浏览器不支持网页语音识别，请改用键盘输入或手机输入法自带的语音。
+                </p>
+              )}
+              {speech.error && (
+                <p className="text-xs text-rose-600">{speech.error}</p>
+              )}
             </div>
             {!isDoubaoConfigured() && (
               <p className="mt-2 text-xs text-amber-600">
