@@ -1,9 +1,9 @@
 import { format } from 'date-fns'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FieldDef, LedgerRecord, LineItemRow } from '../types'
-import {
-  mergeParsedIntoForm,
-} from '../parser/nlParse'
+import { useLedger } from '../context/LedgerContext'
+import { mergeParsedIntoForm } from '../parser/nlParse'
+import { getAmountFieldId } from '../utils/recordHelpers'
 import { MonthCalendar } from './MonthCalendar'
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
 import { parseWithDoubao, isDoubaoConfigured } from '../utils/doubaoParser'
@@ -37,12 +37,30 @@ export function AddRecordModal({
   const prodId = prodField?.id
   const qtyId = qtyField?.id
 
+  const { records } = useLedger()
+
+  /** 只保留一列「金额」输入，避免系统金额 + 自定义同名数字字段出现两个框 */
+  const canonicalAmountId = useMemo(
+    () => getAmountFieldId(sortedFields),
+    [sortedFields],
+  )
   const rootFieldIds = useMemo(
     () =>
       sortedFields
         .filter((f) => f.key !== 'product' && f.key !== 'quantity')
+        .filter((f) => {
+          if (!canonicalAmountId) return true
+          if (f.id === canonicalAmountId) return true
+          if (
+            f.type === 'number' &&
+            f.name.trim() === '金额' &&
+            f.id !== canonicalAmountId
+          )
+            return false
+          return true
+        })
         .map((f) => f.id),
-    [sortedFields],
+    [sortedFields, canonicalAmountId],
   )
 
   const [recordDate, setRecordDate] = useState(() =>
@@ -181,16 +199,39 @@ export function AddRecordModal({
 
   const validate = (): string | null => {
     const merged = buildMergedValues(values, lines, prodId, qtyId)
+    if (!prodId || !qtyId) return '缺少商品或数量字段配置'
+
     for (const f of sortedFields) {
       if (f.key === 'product' || f.key === 'quantity') continue
+      if (
+        canonicalAmountId &&
+        f.id !== canonicalAmountId &&
+        f.type === 'number' &&
+        f.name.trim() === '金额'
+      ) {
+        continue
+      }
+      if (!f.required) continue
       if (!(merged[f.id] ?? '').trim()) {
         return `请填写「${f.name}」`
       }
     }
-    if (!prodId || !qtyId) return '缺少商品或数量字段配置'
+
+    const hasAnyLine =
+      lines.some((l) => l.product.trim()) ||
+      lines.some((l) => l.quantity.trim())
+    if (!hasAnyLine) return '请至少填写一行商品或数量'
+
     for (let i = 0; i < lines.length; i++) {
-      if (!lines[i].product.trim()) return `第 ${i + 1} 行商品不能为空`
-      if (!lines[i].quantity.trim()) return `第 ${i + 1} 行数量不能为空`
+      const p = lines[i].product.trim()
+      const q = lines[i].quantity.trim()
+      if (!p && !q) continue
+      if (prodField?.required && !p) {
+        return `第 ${i + 1} 行：请填写「${prodField.name}」`
+      }
+      if (qtyField?.required && !q) {
+        return `第 ${i + 1} 行：请填写「${qtyField.name}」`
+      }
     }
     return null
   }
@@ -207,6 +248,10 @@ export function AddRecordModal({
     setSaving(true)
     try {
       const mergedValues = buildMergedValues(values, lines, prodId, qtyId)
+      const live = recordToEdit
+        ? records.find((r) => r.id === recordToEdit.id)
+        : undefined
+
       let lineItems: LineItemRow[] | undefined
       if (lines.length > 1) {
         lineItems = lines.map((l) => ({
@@ -224,7 +269,8 @@ export function AddRecordModal({
         createdAt: recordToEdit?.createdAt ?? Date.now(),
         values: mergedValues,
         lineItems,
-        settled: recordToEdit?.settled,
+        settled: (live?.settled ?? recordToEdit?.settled) === true,
+        receivedAmount: live?.receivedAmount ?? recordToEdit?.receivedAmount,
       }
       await onSave(rec)
       onClose()
@@ -307,7 +353,7 @@ export function AddRecordModal({
             </p>
             <p className="mb-3 text-left text-xs text-stone-500">
               {isDoubaoConfigured()
-                ? '可点击下方麦克风说说内容，或手动输入；再点「智能识别」填入字段（需 Chrome / Edge 或安卓壳内 WebView）。'
+                ? '可点「语音输入」说话，或手动输入后再「智能识别」。念车牌时尽量按字念清（如京、A、八、八、九、九），白薯/红薯等同音字已做常见纠错。'
                 : '请先配置豆包 API Key 以使用智能解析功能。'}
             </p>
             <div className="space-y-2">
@@ -367,6 +413,11 @@ export function AddRecordModal({
                 className="mb-3 block text-left text-sm text-stone-600"
               >
                 {f.name}
+                {f.required && (
+                  <span className="text-rose-500" aria-hidden>
+                    *
+                  </span>
+                )}
                 <input
                   type={f.type === 'number' ? 'number' : 'text'}
                   inputMode={f.type === 'number' ? 'decimal' : 'text'}
@@ -404,6 +455,11 @@ export function AddRecordModal({
                   >
                     <label className="min-w-[120px] flex-1 text-left text-xs text-stone-600">
                       {prodField.name}
+                      {prodField.required && (
+                        <span className="text-rose-500" aria-hidden>
+                          *
+                        </span>
+                      )}
                       <input
                         value={line.product}
                         onChange={(e) =>
@@ -421,6 +477,11 @@ export function AddRecordModal({
                     </label>
                     <label className="min-w-[100px] flex-1 text-left text-xs text-stone-600">
                       {qtyField.name}
+                      {qtyField.required && (
+                        <span className="text-rose-500" aria-hidden>
+                          *
+                        </span>
+                      )}
                       <input
                         value={line.quantity}
                         onChange={(e) =>
@@ -504,3 +565,4 @@ function buildMergedValues(
   }
   return merged
 }
+

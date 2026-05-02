@@ -30,15 +30,23 @@ export function exportCsv(records: LedgerRecord[], fields: FieldDef[]) {
     'date',
     'createdAt',
     'settled',
+    'receivedAmount',
     'plate',
     'product',
     'quantity',
     ...fields
-      .filter((f) => !f.key || !['plate', 'product', 'quantity'].includes(f.key))
+      .filter(
+        (f) =>
+          !f.key ||
+          !['plate', 'product', 'quantity', 'amount'].includes(f.key),
+      )
       .map((f) => f.name),
   ]
   const extraIds = fields
-    .filter((f) => !f.key || !['plate', 'product', 'quantity'].includes(f.key))
+    .filter(
+      (f) =>
+        !f.key || !['plate', 'product', 'quantity', 'amount'].includes(f.key),
+    )
     .map((f) => f.id)
 
   const rows: string[][] = [headers]
@@ -59,6 +67,11 @@ export function exportCsv(records: LedgerRecord[], fields: FieldDef[]) {
         r.date,
         String(r.createdAt),
         r.settled ? '1' : '0',
+        escapeCsv(
+          r.receivedAmount !== undefined && !Number.isNaN(r.receivedAmount)
+            ? String(r.receivedAmount)
+            : '',
+        ),
         escapeCsv(plate),
         escapeCsv(line.product),
         escapeCsv(line.quantity),

@@ -7,7 +7,7 @@ import {
   useMemo,
   useState,
 } from 'react'
-import type { FieldDef, LedgerRecord } from '../types'
+import type { FieldDef, LedgerRecord, ReconcilePayload } from '../types'
 import {
   addRecord,
   db,
@@ -15,6 +15,7 @@ import {
   ensureDefaultFields,
   updateFields,
 } from '../db/ledgerDb'
+import { getAmountFieldId, parseMoney } from '../utils/recordHelpers'
 
 type LedgerContextValue = {
   ready: boolean
@@ -23,7 +24,7 @@ type LedgerContextValue = {
   refresh: () => Promise<void>
   saveRecord: (rec: LedgerRecord) => Promise<void>
   removeRecord: (id: string) => Promise<void>
-  toggleSettled: (id: string, settled: boolean) => Promise<void>
+  setRecordPayment: (id: string, payload: ReconcilePayload) => Promise<void>
   saveFields: (next: FieldDef[]) => Promise<void>
 }
 
@@ -48,10 +49,25 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
 
   const saveRecord = useCallback(
     async (rec: LedgerRecord) => {
-      await addRecord(rec)
+      const aid = getAmountFieldId(fields)
+      const exp = aid ? parseMoney(rec.values[aid] ?? '') : 0
+      let next = rec
+      if (
+        exp > 0 &&
+        rec.receivedAmount !== undefined &&
+        !Number.isNaN(rec.receivedAmount) &&
+        rec.receivedAmount > exp + 0.005
+      ) {
+        next = {
+          ...rec,
+          receivedAmount: Math.round(exp * 100) / 100,
+          settled: true,
+        }
+      }
+      await addRecord(next)
       await refresh()
     },
-    [refresh],
+    [fields, refresh],
   )
 
   const removeRecord = useCallback(
@@ -62,14 +78,32 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [refresh],
   )
 
-  const toggleSettled = useCallback(
-    async (id: string, settled: boolean) => {
+  const setRecordPayment = useCallback(
+    async (id: string, payload: ReconcilePayload) => {
       const r = await db.records.get(id)
       if (!r) return
-      await addRecord({ ...r, settled })
+      const aid = getAmountFieldId(fields)
+      const exp = aid ? parseMoney(r.values[aid] ?? '') : 0
+
+      if (payload.kind === 'amount') {
+        const rounded = Math.round(payload.cumulativeReceived * 100) / 100
+        const recv =
+          exp > 0
+            ? Math.max(0, Math.min(exp, rounded))
+            : Math.max(0, rounded)
+        const settled =
+          exp > 0
+            ? recv >= exp - 0.005
+            : payload.markSettled === true
+        await addRecord({
+          ...r,
+          receivedAmount: recv,
+          settled,
+        })
+      }
       await refresh()
     },
-    [refresh],
+    [fields, refresh],
   )
 
   const saveFields = useCallback(
@@ -88,7 +122,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       refresh,
       saveRecord,
       removeRecord,
-      toggleSettled,
+      setRecordPayment,
       saveFields,
     }),
     [
@@ -98,7 +132,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       refresh,
       saveRecord,
       removeRecord,
-      toggleSettled,
+      setRecordPayment,
       saveFields,
     ],
   )

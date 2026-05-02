@@ -39,6 +39,13 @@ const DEFAULT_FIELD_ROWS: FieldDef[] = [
     key: 'plate',
     order: 2,
   },
+  {
+    id: DEFAULT_FIELD_KEYS.amount,
+    name: '金额',
+    type: 'number',
+    key: 'amount',
+    order: 3,
+  },
 ]
 
 export async function ensureDefaultFields(): Promise<FieldDef[]> {

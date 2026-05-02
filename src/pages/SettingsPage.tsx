@@ -27,6 +27,7 @@ export function SettingsPage() {
           name: n,
           type,
           order: maxOrder + 1,
+          required: false,
         },
       ]
       await saveFields(next)
@@ -39,7 +40,7 @@ export function SettingsPage() {
   const removeField = async (id: string) => {
     const target = sorted.find((f) => f.id === id)
     if (target?.key) {
-      alert('默认字段（商品 / 数量 / 车牌号）不能删除，可改名。')
+      alert('默认字段（商品 / 数量 / 车牌号 / 金额）不能删除，可改名。')
       return
     }
     setBusy(true)
@@ -57,6 +58,18 @@ export function SettingsPage() {
     await saveFields(next)
   }
 
+  const setFieldRequired = async (id: string, required: boolean) => {
+    setBusy(true)
+    try {
+      const next = sorted.map((f) =>
+        f.id === id ? { ...f, required } : f,
+      )
+      await saveFields(next)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (!ready) {
     return (
       <div className="flex min-h-[50vh] items-center justify-center text-stone-400">
@@ -72,7 +85,7 @@ export function SettingsPage() {
           自定义字段
         </h1>
         <p className="mt-1 text-sm text-stone-500">
-          默认含商品、数量、车牌号；可新增金额、备注等。
+          默认含商品、数量、车牌号、金额（数字）；可新增备注等自定义字段。可为字段勾选「必填」，记账时将标红星并校验。
         </p>
       </header>
 
@@ -140,6 +153,18 @@ export function SettingsPage() {
             <span className="rounded-lg bg-stone-100 px-2 py-0.5 text-xs text-stone-600">
               {f.type === 'number' ? '数字' : '文本'}
             </span>
+            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-stone-700">
+              <input
+                type="checkbox"
+                checked={f.required === true}
+                disabled={busy}
+                onChange={(e) =>
+                  void setFieldRequired(f.id, e.target.checked)
+                }
+                className="rounded border-stone-300"
+              />
+              必填
+            </label>
             {f.key && (
               <span className="text-xs text-stone-400">系统默认</span>
             )}

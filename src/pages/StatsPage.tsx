@@ -10,6 +10,7 @@ import {
   type ReportKind,
   toDateStr,
 } from '../utils/reportRange'
+import { getAmountFieldId, sumOutstanding } from '../utils/recordHelpers'
 import {
   aggregatePlateSales,
   aggregateProductSales,
@@ -52,7 +53,8 @@ export function StatsPage() {
   /** 0=当前周期，-1=上一周期，不可大于 0（不向未来空周期） */
   const [periodOffset, setPeriodOffset] = useState(0)
 
-  const amountId = findFieldIdByName(fields, '金额')
+  const amountId =
+    getAmountFieldId(fields) ?? findFieldIdByName(fields, '金额')
 
   const now = new Date()
 
@@ -117,6 +119,10 @@ export function StatsPage() {
   )
 
   const totalAmount = sumAmount(currentRecords, amountId)
+  const totalOutstanding = useMemo(
+    () => sumOutstanding(currentRecords, fields),
+    [currentRecords, fields],
+  )
   const prevAmount = sumAmount(prevRecords, amountId)
   const dealCount = currentRecords.length
   const prevDealCount = prevRecords.length
@@ -224,7 +230,7 @@ export function StatsPage() {
         </p>
         <div className="mt-4 grid gap-6 sm:grid-cols-2">
           <div>
-            <p className="text-xs text-stone-500">收入总金额（元）</p>
+            <p className="text-xs text-stone-500">应收总金额（元）</p>
             <p className="mt-1 text-3xl font-semibold tabular-nums text-stone-900">
               {amountId ? fmtMoney(totalAmount) : '—'}
             </p>
@@ -235,10 +241,15 @@ export function StatsPage() {
             )}
           </div>
           <div>
-            <p className="text-xs text-stone-500">成交单数</p>
-            <p className="mt-1 text-3xl font-semibold tabular-nums text-stone-900">
-              {dealCount}
+            <p className="text-xs text-stone-500">未收款合计（元）</p>
+            <p className="mt-1 text-3xl font-semibold tabular-nums text-amber-800">
+              {amountId ? fmtMoney(totalOutstanding) : '—'}
             </p>
+            {!amountId && (
+              <p className="mt-1 text-xs text-stone-400">
+                按应收减已收汇总
+              </p>
+            )}
           </div>
         </div>
 

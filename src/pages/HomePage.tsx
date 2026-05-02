@@ -3,17 +3,23 @@ import { zhCN } from 'date-fns/locale'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { AddRecordModal } from '../components/AddRecordModal'
 import { CalendarPickerModal } from '../components/CalendarPickerModal'
+import { ReconcileModal } from '../components/ReconcileModal'
 import { RecordCard } from '../components/RecordCard'
+import {
+  getAmountFieldId,
+  getPlateValue,
+  plateGroupHeading,
+} from '../utils/recordHelpers'
 import { findFieldIdByName, sumAmount } from '../utils/stats'
-import { getPlateValue } from '../utils/recordHelpers'
 import type { FieldDef, LedgerRecord } from '../types'
 import { useLedger } from '../context/LedgerContext'
 
 export function HomePage() {
-  const { ready, fields, records, saveRecord, removeRecord, toggleSettled } =
+  const { ready, fields, records, saveRecord, removeRecord, setRecordPayment } =
     useLedger()
   const [modalOpen, setModalOpen] = useState(false)
   const [editingRecord, setEditingRecord] = useState<LedgerRecord | null>(null)
+  const [reconcileId, setReconcileId] = useState<string | null>(null)
   const [jumpOpen, setJumpOpen] = useState(false)
   const [jumpDate, setJumpDate] = useState(() =>
     format(new Date(), 'yyyy-MM-dd'),
@@ -64,12 +70,18 @@ export function HomePage() {
   }, [grouped.dates, todayStr, pinnedDates])
 
   const todayRecords = grouped.map.get(todayStr) || []
-  const amountId = findFieldIdByName(fields, '金额')
+  const amountId = getAmountFieldId(fields) ?? findFieldIdByName(fields, '金额')
   const todaySum = sumAmount(todayRecords, amountId)
 
   const recordDateSet = useMemo(
     () => new Set(grouped.dates),
     [grouped.dates],
+  )
+
+  const reconcileRecord = useMemo(
+    () =>
+      reconcileId ? records.find((r) => r.id === reconcileId) ?? null : null,
+    [reconcileId, records],
   )
 
   const scrollToDate = useCallback((dateKey: string) => {
@@ -98,10 +110,10 @@ export function HomePage() {
       <header className="mb-4 flex flex-wrap items-center justify-between gap-3 px-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-stone-900">
-            记账
+            批发记账
           </h1>
           <p className="text-sm text-stone-500">
-            数据保存在本机浏览器 · 可封装为 APK
+            本地保存 · 支持金额与核账 · 可封装 APK
           </p>
         </div>
         <div className="flex gap-2">
@@ -136,7 +148,7 @@ export function HomePage() {
         </div>
         {!amountId && (
           <p className="mt-3 text-xs text-stone-400">
-            在「设置」里添加名为「金额」后可汇总金额。
+            默认已含「金额」字段；若被删除可在设置里加回。
           </p>
         )}
       </section>
@@ -170,8 +182,8 @@ export function HomePage() {
                 <div className="space-y-5">
                   {groupRecordsByPlate(list, fields).map(([plate, recs]) => (
                     <div key={`${dateKey}-${plate}`}>
-                      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-stone-400">
-                        {plate}
+                      <p className="mb-1.5 text-[11px] font-semibold tracking-wide text-stone-500">
+                        {plateGroupHeading(plate, fields)}
                       </p>
                       <ul className="space-y-2">
                         {recs.map((r) => (
@@ -186,9 +198,7 @@ export function HomePage() {
                               onDelete={(id) => {
                                 void removeRecord(id)
                               }}
-                              onToggleSettled={(id, settled) => {
-                                void toggleSettled(id, settled)
-                              }}
+                              onReconcile={(rec) => setReconcileId(rec.id)}
                             />
                           </li>
                         ))}
@@ -225,6 +235,14 @@ export function HomePage() {
         onSave={saveRecord}
         recordToEdit={editingRecord}
         recordDates={recordDateSet}
+      />
+
+      <ReconcileModal
+        open={reconcileId !== null && reconcileRecord !== null}
+        record={reconcileRecord}
+        fields={fields}
+        onClose={() => setReconcileId(null)}
+        onConfirm={(id, payload) => void setRecordPayment(id, payload)}
       />
 
       <CalendarPickerModal

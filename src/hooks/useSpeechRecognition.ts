@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  correctLedgerSpeech,
+  speechAlternativeTranscript,
+  transcriptForResult,
+} from '../utils/speechCorrections'
 
 type RecCtor = new () => SpeechRecognition
 
@@ -65,6 +70,11 @@ export function useSpeechRecognition({ getBaseText, onText }: Options) {
     r.lang = 'zh-CN'
     r.continuous = true
     r.interimResults = true
+    try {
+      r.maxAlternatives = 5
+    } catch {
+      /* 部分环境只支持默认 1 */
+    }
 
     const flush = (sessionTail: string) => {
       const base = baseRef.current
@@ -76,13 +86,14 @@ export function useSpeechRecognition({ getBaseText, onText }: Options) {
       let allFinal = ''
       for (let i = 0; i < event.results.length; i++) {
         if (event.results[i]?.isFinal) {
-          allFinal += event.results[i][0]?.transcript ?? ''
+          allFinal += transcriptForResult(event.results[i]!)
         }
       }
       let interim = ''
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (!event.results[i]?.isFinal) {
-          interim += event.results[i][0]?.transcript ?? ''
+          const raw = speechAlternativeTranscript(event.results[i]!, 0)
+          interim += correctLedgerSpeech(raw)
         }
       }
       flush(allFinal + interim)
