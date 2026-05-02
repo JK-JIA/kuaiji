@@ -12,6 +12,20 @@ export class LedgerDatabase extends Dexie {
       fields: '&id, order',
       records: '&id, date, createdAt',
     })
+    this.version(2)
+      .stores({
+        fields: '&id, order',
+        records: '&id, date, createdAt',
+      })
+      .upgrade(async (tx) => {
+        const id = DEFAULT_FIELD_KEYS.quantity
+        const row = await tx.table('fields').get(id)
+        if (!row) return
+        const f = row as FieldDef
+        if (f.key === 'quantity' && f.type === 'text') {
+          await tx.table('fields').put({ ...f, type: 'number' })
+        }
+      })
   }
 }
 

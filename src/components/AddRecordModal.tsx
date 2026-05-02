@@ -483,6 +483,13 @@ export function AddRecordModal({
                         </span>
                       )}
                       <input
+                        type={
+                          qtyField.type === 'number' ? 'number' : 'text'
+                        }
+                        inputMode={
+                          qtyField.type === 'number' ? 'decimal' : 'text'
+                        }
+                        step={qtyField.type === 'number' ? 'any' : undefined}
                         value={line.quantity}
                         onChange={(e) =>
                           setLines((prev) =>
