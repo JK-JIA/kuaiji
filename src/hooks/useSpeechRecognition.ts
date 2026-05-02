@@ -1,9 +1,27 @@
+import { Capacitor } from '@capacitor/core'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   correctLedgerSpeech,
   speechAlternativeTranscript,
   transcriptForResult,
 } from '../utils/speechCorrections'
+
+/**
+ * Android/iOS WebView 里 Web Speech API 往往不经由同一套权限回调，
+ * 先用 getUserMedia 触发 Capacitor Bridge 的麦克风授权（见 BridgeWebChromeClient），再识别。
+ */
+async function ensureNativeMicForWebSpeech(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    return
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    stream.getTracks().forEach((t) => t.stop())
+  } catch {
+    /* 拒绝或未实现时仍尝试 SpeechRecognition，由 onerror 提示 */
+  }
+}
 
 type RecCtor = new () => SpeechRecognition
 
@@ -55,7 +73,7 @@ export function useSpeechRecognition({ getBaseText, onText }: Options) {
     }
   }, [])
 
-  const start = useCallback(() => {
+  const start = useCallback(async () => {
     const Ctor = getRecognitionCtor()
     if (!Ctor) {
       setError('当前浏览器不支持语音识别')
@@ -64,6 +82,8 @@ export function useSpeechRecognition({ getBaseText, onText }: Options) {
     setError(null)
     abort()
     baseRef.current = getBaseText()
+
+    await ensureNativeMicForWebSpeech()
 
     const r = new Ctor()
     recRef.current = r
@@ -101,9 +121,15 @@ export function useSpeechRecognition({ getBaseText, onText }: Options) {
 
     r.onerror = (event: SpeechRecognitionErrorEvent) => {
       if (event.error === 'aborted') return
+      const nativeMicHint =
+        Capacitor.getPlatform() === 'android'
+          ? '系统已授权仍失败时，多见于 APK 内网页语音受限；请点输入法键盘上的「话筒」把话转成文字填入上方框，或重装应用后在弹出麦克风时选择允许。'
+          : '可改用系统键盘的语音输入把文字打进文本框。'
       const msg =
         event.error === 'not-allowed'
-          ? '麦克风权限被拒绝，请在浏览器设置中允许使用麦克风'
+          ? Capacitor.isNativePlatform()
+            ? `无法使用麦克风。${nativeMicHint}`
+            : '麦克风权限被拒绝，请在浏览器设置中允许使用麦克风'
           : event.error === 'no-speech'
             ? '未检测到语音，请重试'
             : event.error === 'network'
