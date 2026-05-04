@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie'
+import { getDefaultFieldDefs } from '../constants/defaultLedgerFields'
 import type { FieldDef, LedgerRecord } from '../types'
 import { DEFAULT_FIELD_KEYS } from '../types'
 
@@ -31,40 +32,10 @@ export class LedgerDatabase extends Dexie {
 
 export const db = new LedgerDatabase()
 
-const DEFAULT_FIELD_ROWS: FieldDef[] = [
-  {
-    id: DEFAULT_FIELD_KEYS.product,
-    name: '商品',
-    type: 'text',
-    key: 'product',
-    order: 0,
-  },
-  {
-    id: DEFAULT_FIELD_KEYS.quantity,
-    name: '数量（斤）',
-    type: 'number',
-    key: 'quantity',
-    order: 1,
-  },
-  {
-    id: DEFAULT_FIELD_KEYS.plate,
-    name: '车牌号',
-    type: 'text',
-    key: 'plate',
-    order: 2,
-  },
-  {
-    id: DEFAULT_FIELD_KEYS.amount,
-    name: '金额',
-    type: 'number',
-    key: 'amount',
-    order: 3,
-  },
-]
-
 export async function ensureDefaultFields(): Promise<FieldDef[]> {
+  const defaults = getDefaultFieldDefs()
   await db.transaction('rw', db.fields, async () => {
-    for (const row of DEFAULT_FIELD_ROWS) {
+    for (const row of defaults) {
       try {
         await db.fields.add(row)
       } catch (e: unknown) {
@@ -89,5 +60,18 @@ export async function updateFields(fields: FieldDef[]): Promise<void> {
   await db.transaction('rw', db.fields, async () => {
     await db.fields.clear()
     await db.fields.bulkAdd(fields)
+  })
+}
+
+/** 用备份文件整体替换本地库（卸载重装后可用 JSON 恢复） */
+export async function replaceAllData(
+  fields: FieldDef[],
+  records: LedgerRecord[],
+): Promise<void> {
+  await db.transaction('rw', db.fields, db.records, async () => {
+    await db.fields.clear()
+    await db.records.clear()
+    if (fields.length > 0) await db.fields.bulkAdd(fields)
+    if (records.length > 0) await db.records.bulkPut(records)
   })
 }

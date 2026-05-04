@@ -1,0 +1,36 @@
+# 账本 API + PostgreSQL。前端通过环境变量 VITE_API_URL 指向 http://<主机>:3000
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ledger
+      POSTGRES_DB: ledger
+    volumes:
+      - ledger_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledger -d ledger"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: postgresql://ledger:ledger@db:5432/ledger
+      JWT_SECRET: ${JWT_SECRET:-please-change-this-secret-min-32-characters-long}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-*}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  ledger_pgdata:

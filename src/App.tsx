@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { BottomNav } from './components/BottomNav'
+import { AuthProvider } from './context/AuthContext'
 import { LedgerProvider } from './context/LedgerContext'
 import { HomePage } from './pages/HomePage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -7,7 +8,8 @@ import { StatsPage } from './pages/StatsPage'
 
 export default function App() {
   return (
-    <LedgerProvider>
+    <AuthProvider>
+      <LedgerProvider>
       <BrowserRouter>
         <div className="mx-auto min-h-dvh max-w-lg">
           <Routes>
@@ -19,6 +21,7 @@ export default function App() {
           <BottomNav />
         </div>
       </BrowserRouter>
-    </LedgerProvider>
+      </LedgerProvider>
+    </AuthProvider>
   )
 }

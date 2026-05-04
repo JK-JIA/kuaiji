@@ -5,7 +5,6 @@ import { useLedger } from '../context/LedgerContext'
 import { mergeParsedIntoForm } from '../parser/nlParse'
 import { getAmountFieldId } from '../utils/recordHelpers'
 import { MonthCalendar } from './MonthCalendar'
-import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
 import { parseWithDoubao, isDoubaoConfigured } from '../utils/doubaoParser'
 
 type LineForm = { id: string; product: string; quantity: string }
@@ -75,16 +74,6 @@ export function AddRecordModal({
   const [rawSpeech, setRawSpeech] = useState('')
   const [saving, setSaving] = useState(false)
   const [parsing, setParsing] = useState(false)
-
-  const getBaseForSpeech = useCallback(() => rawSpeech, [rawSpeech])
-  const speech = useSpeechRecognition({
-    getBaseText: getBaseForSpeech,
-    onText: setRawSpeech,
-  })
-
-  useEffect(() => {
-    if (!open) speech.abort()
-  }, [open, speech.abort])
 
   useEffect(() => {
     if (!open) return
@@ -353,49 +342,25 @@ export function AddRecordModal({
             </p>
             <p className="mb-3 text-left text-xs text-stone-500">
               {isDoubaoConfigured()
-                ? '可点「语音输入」说话，或手动输入后再「智能识别」。念车牌时尽量按字念清（如京、A、八、八、九、九），白薯/红薯等同音字已做常见纠错。'
+                ? '请在下框输入或粘贴文字；手机上可改用输入法键盘上的「话筒」语音输入，再点「智能识别」。念车牌时尽量按字念清（如京、A、八、八、九、九），白薯/红薯等同音字已做常见纠错。'
                 : '请先配置豆包 API Key 以使用智能解析功能。'}
             </p>
             <div className="space-y-2">
               <textarea
                 value={rawSpeech}
                 onChange={(e) => setRawSpeech(e.target.value)}
-                placeholder="例如：今天卖了5斤苹果给川A12345，收了50块钱"
+                placeholder="例如：今天卖了5斤苹果给川A12345，收了50块钱（可用输入法语音输入）"
                 className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 resize-none"
                 rows={3}
               />
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    speech.listening ? speech.stop() : speech.start()
-                  }
-                  disabled={!speech.supported || parsing}
-                  className={`flex-1 min-w-[8rem] rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors ${
-                    speech.listening
-                      ? 'border-rose-300 bg-rose-50 text-rose-800 ring-2 ring-rose-200'
-                      : 'border-stone-200 bg-white text-stone-800 hover:bg-stone-50'
-                  } disabled:cursor-not-allowed disabled:opacity-50`}
-                >
-                  {speech.listening ? '结束说话' : '语音输入'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => applyParse(rawSpeech)}
-                  disabled={!rawSpeech.trim() || parsing || !isDoubaoConfigured()}
-                  className="flex-[2] min-w-[10rem] rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {parsing ? '智能识别中...' : '智能识别并填入'}
-                </button>
-              </div>
-              {!speech.supported && (
-                <p className="text-xs text-stone-400">
-                  当前浏览器不支持网页语音识别，请改用键盘输入或手机输入法自带的语音。
-                </p>
-              )}
-              {speech.error && (
-                <p className="text-xs text-rose-600">{speech.error}</p>
-              )}
+              <button
+                type="button"
+                onClick={() => applyParse(rawSpeech)}
+                disabled={!rawSpeech.trim() || parsing || !isDoubaoConfigured()}
+                className="w-full rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {parsing ? '智能识别中...' : '智能识别并填入'}
+              </button>
             </div>
             {!isDoubaoConfigured() && (
               <p className="mt-2 text-xs text-amber-600">
@@ -482,14 +447,10 @@ export function AddRecordModal({
                           *
                         </span>
                       )}
+                      {/** 数量列勿用 type="number"：智能识别会填入「100斤」等，number 控件会拒收导致显示为空 */}
                       <input
-                        type={
-                          qtyField.type === 'number' ? 'number' : 'text'
-                        }
-                        inputMode={
-                          qtyField.type === 'number' ? 'decimal' : 'text'
-                        }
-                        step={qtyField.type === 'number' ? 'any' : undefined}
+                        type="text"
+                        inputMode="decimal"
                         value={line.quantity}
                         onChange={(e) =>
                           setLines((prev) =>

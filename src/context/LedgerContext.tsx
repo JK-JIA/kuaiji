@@ -7,15 +7,22 @@ import {
   useMemo,
   useState,
 } from 'react'
+import {
+  fetchLedger,
+  putLedger,
+} from '../api/ledgerClient'
+import { getDefaultFieldDefs } from '../constants/defaultLedgerFields'
 import type { FieldDef, LedgerRecord, ReconcilePayload } from '../types'
 import {
   addRecord,
   db,
   deleteRecord,
   ensureDefaultFields,
+  replaceAllData,
   updateFields,
 } from '../db/ledgerDb'
 import { getAmountFieldId, parseMoney } from '../utils/recordHelpers'
+import { useAuth } from './AuthContext'
 
 type LedgerContextValue = {
   ready: boolean
@@ -26,22 +33,45 @@ type LedgerContextValue = {
   removeRecord: (id: string) => Promise<void>
   setRecordPayment: (id: string, payload: ReconcilePayload) => Promise<void>
   saveFields: (next: FieldDef[]) => Promise<void>
+  restoreFullBackup: (fields: FieldDef[], records: LedgerRecord[]) => Promise<void>
 }
 
 const LedgerContext = createContext<LedgerContextValue | null>(null)
 
+function sortRecordsDesc(recs: LedgerRecord[]): LedgerRecord[] {
+  return [...recs].sort((a, b) => b.createdAt - a.createdAt)
+}
+
 export function LedgerProvider({ children }: { children: ReactNode }) {
+  const { useRemoteLedger, apiBase, token } = useAuth()
   const [fields, setFields] = useState<FieldDef[]>([])
   const [records, setRecords] = useState<LedgerRecord[]>([])
   const [ready, setReady] = useState(false)
 
   const refresh = useCallback(async () => {
+    if (useRemoteLedger && apiBase && token) {
+      const data = await fetchLedger(apiBase, token)
+      let fieldsNext = data.fields as FieldDef[]
+      let recordsNext = sortRecordsDesc(data.records as LedgerRecord[])
+      if (fieldsNext.length === 0) {
+        fieldsNext = getDefaultFieldDefs()
+        await putLedger(apiBase, token, {
+          fields: fieldsNext,
+          records: recordsNext,
+        })
+      }
+      setFields(fieldsNext)
+      setRecords(recordsNext)
+      setReady(true)
+      return
+    }
+
     const f = await ensureDefaultFields()
     setFields(f)
     const r = await db.records.orderBy('createdAt').reverse().toArray()
     setRecords(r)
     setReady(true)
-  }, [])
+  }, [useRemoteLedger, apiBase, token])
 
   useEffect(() => {
     void refresh()
@@ -64,25 +94,69 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           settled: true,
         }
       }
+
+      if (useRemoteLedger && apiBase && token) {
+        const list = records.filter((x) => x.id !== next.id)
+        list.push(next)
+        await putLedger(apiBase, token, {
+          fields,
+          records: sortRecordsDesc(list),
+        })
+        await refresh()
+        return
+      }
+
       await addRecord(next)
       await refresh()
     },
-    [fields, refresh],
+    [fields, records, useRemoteLedger, apiBase, token, refresh],
   )
 
   const removeRecord = useCallback(
     async (id: string) => {
+      if (useRemoteLedger && apiBase && token) {
+        const list = records.filter((x) => x.id !== id)
+        await putLedger(apiBase, token, { fields, records: list })
+        await refresh()
+        return
+      }
       await deleteRecord(id)
       await refresh()
     },
-    [refresh],
+    [fields, records, useRemoteLedger, apiBase, token, refresh],
   )
 
   const setRecordPayment = useCallback(
     async (id: string, payload: ReconcilePayload) => {
+      const aid = getAmountFieldId(fields)
+
+      if (useRemoteLedger && apiBase && token) {
+        if (payload.kind !== 'amount') return
+        const r = records.find((x) => x.id === id)
+        if (!r) return
+        const exp = aid ? parseMoney(r.values[aid] ?? '') : 0
+        const rounded = Math.round(payload.cumulativeReceived * 100) / 100
+        const recv =
+          exp > 0
+            ? Math.max(0, Math.min(exp, rounded))
+            : Math.max(0, rounded)
+        const settled =
+          exp > 0
+            ? recv >= exp - 0.005
+            : payload.markSettled === true
+        const updated: LedgerRecord = {
+          ...r,
+          receivedAmount: recv,
+          settled,
+        }
+        const list = records.map((x) => (x.id === id ? updated : x))
+        await putLedger(apiBase, token, { fields, records: list })
+        await refresh()
+        return
+      }
+
       const r = await db.records.get(id)
       if (!r) return
-      const aid = getAmountFieldId(fields)
       const exp = aid ? parseMoney(r.values[aid] ?? '') : 0
 
       if (payload.kind === 'amount') {
@@ -103,15 +177,36 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       }
       await refresh()
     },
-    [fields, refresh],
+    [fields, records, useRemoteLedger, apiBase, token, refresh],
   )
 
   const saveFields = useCallback(
     async (next: FieldDef[]) => {
+      if (useRemoteLedger && apiBase && token) {
+        await putLedger(apiBase, token, { fields: next, records })
+        await refresh()
+        return
+      }
       await updateFields(next)
       await refresh()
     },
-    [refresh],
+    [records, useRemoteLedger, apiBase, token, refresh],
+  )
+
+  const restoreFullBackup = useCallback(
+    async (nextFields: FieldDef[], nextRecords: LedgerRecord[]) => {
+      if (useRemoteLedger && apiBase && token) {
+        await putLedger(apiBase, token, {
+          fields: nextFields,
+          records: nextRecords,
+        })
+        await refresh()
+        return
+      }
+      await replaceAllData(nextFields, nextRecords)
+      await refresh()
+    },
+    [useRemoteLedger, apiBase, token, refresh],
   )
 
   const value = useMemo(
@@ -124,6 +219,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       removeRecord,
       setRecordPayment,
       saveFields,
+      restoreFullBackup,
     }),
     [
       ready,
@@ -134,6 +230,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       removeRecord,
       setRecordPayment,
       saveFields,
+      restoreFullBackup,
     ],
   )
 
