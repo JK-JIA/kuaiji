@@ -7,7 +7,7 @@ import { z } from 'zod'
 
 const prisma = new PrismaClient()
 
-const PORT = Number(process.env.PORT) || 3000
+const PORT = Number(process.env.PORT) || 3001
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-only-change-JWT_SECRET-in-production-min-32-chars'
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? '*'
 

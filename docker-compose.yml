@@ -1,4 +1,4 @@
-# 账本 API + PostgreSQL。前端通过环境变量 VITE_API_URL 指向 http://<主机>:3000
+# 账本 API + PostgreSQL。对外默认 3001（避免与宿主机 3000 冲突）；VITE_API_URL 填 http://<主机>:3001
 services:
   db:
     image: postgres:16-alpine
@@ -21,10 +21,10 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3001:3001"
     environment:
       NODE_ENV: production
-      PORT: "3000"
+      PORT: "3001"
       DATABASE_URL: postgresql://ledger:ledger@db:5432/ledger
       JWT_SECRET: ${JWT_SECRET:-please-change-this-secret-min-32-characters-long}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-*}
