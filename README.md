@@ -1,6 +1,6 @@
 # 批发记账（个人账本）
 
-React + Vite + Dexie（IndexedDB）本地记账；可选 Capacitor 打包 Android。
+**正式使用：Android APK + 后端（PostgreSQL）**；已登录时数据在服务器。项目不提供对外网页版：用 `npm run build` 得到的静态资源若用浏览器直接打开，只会看到「请使用 Android 应用」的提示。本地开发请用 `npm run dev`；若必须浏览器里调试生产包，构建前在 `.env` 中设置 `VITE_ALLOW_BROWSER=true`（勿用于公网站点）。
 
 ## 开发
 
@@ -28,9 +28,9 @@ npx cap sync android
 
 记一笔里的语音录入请使用**系统输入法自带的语音**（话筒键），无需应用麦克风权限。
 
-## 云端同步（可选）
+## 后端与数据
 
-后端见仓库根目录 `docker-compose.yml`。部署后在前端复制 `.env.example` 为 `.env`，将 `VITE_API_URL` 指向 API（示例已填当前服务器 `http://8.153.12.131:3000`，本地开发可改为 `http://localhost:3000`），再执行 `npm run build` / `npx cap sync`。
+后端见仓库根目录 `docker-compose.yml`（PostgreSQL + API）。打 APK 前复制 `.env.example` 为 `.env`，配置 `VITE_API_URL` 指向你的 API（示例见 `.env.example`），再执行 `npm run build` 与 `npx cap sync`。登录后账本读写走服务端。
 
 ## 豆包智能解析
 
