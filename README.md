@@ -28,6 +28,10 @@ npx cap sync android
 
 记一笔里的语音录入请使用**系统输入法自带的语音**（话筒键），无需应用麦克风权限。
 
+## 云端同步（可选）
+
+后端见仓库根目录 `docker-compose.yml`。部署后在前端复制 `.env.example` 为 `.env`，将 `VITE_API_URL` 指向 API（示例已填当前服务器 `http://8.153.12.131:3000`，本地开发可改为 `http://localhost:3000`），再执行 `npm run build` / `npx cap sync`。
+
 ## 豆包智能解析
 
 配置 API Key 与说明见 [DOUBAO_SETUP.md](./DOUBAO_SETUP.md)。
