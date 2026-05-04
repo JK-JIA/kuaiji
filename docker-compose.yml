@@ -1,7 +1,10 @@
 # 账本 API + PostgreSQL。对外默认 3001（避免与宿主机 3000 冲突）；VITE_API_URL 填 http://<主机>:3001
+#
+# db / Dockerfile 使用 DaoCloud 的 Docker Hub 代理加速国内拉取；若失败可改回官方：
+#   postgres:16-alpine、node:22-alpine
 services:
   db:
-    image: postgres:16-alpine
+    image: docker.m.daocloud.io/library/postgres:16-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ledger

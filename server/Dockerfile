@@ -1,5 +1,5 @@
-# Build
-FROM node:22-alpine AS build
+# DaoCloud 代理 Docker Hub（国内拉取更快）；可改为官方 node:22-alpine
+FROM docker.m.daocloud.io/library/node:22-alpine AS build
 WORKDIR /app
 
 COPY package.json ./
@@ -12,8 +12,7 @@ COPY src ./src
 RUN npx prisma generate
 RUN npm run build
 
-# Runtime
-FROM node:22-alpine
+FROM docker.m.daocloud.io/library/node:22-alpine
 WORKDIR /app
 
 ENV NODE_ENV=production
