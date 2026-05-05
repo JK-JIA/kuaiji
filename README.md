@@ -36,9 +36,9 @@ npx cap sync android
 docker compose up -d --build
 ```
 
-默认对外 **http://\<主机\>:3001**。首次启动后 API 会写入默认账号：**用户名 `admin`，密码 `123456`**（存于用户表的 `email` 字段，在设置页登录时「账号」填 `admin` 即可）。生产环境请尽快修改密码或新建账号，并修改 `JWT_SECRET` 与 MySQL `MYSQL_ROOT_PASSWORD`。
+部署示例对外地址：**http://8.153.12.131:3001**（端口 `3001`）。首次启动后 API 会写入默认账号：**用户名 `admin`，密码 `123456`**（存于用户表的 `email` 字段，在设置页登录时「账号」填 `admin` 即可）。生产环境请尽快修改密码或新建账号，并修改 `JWT_SECRET` 与 MySQL `MYSQL_ROOT_PASSWORD`。
 
-打 APK 前复制 `.env.example` 为 `.env`，将 `VITE_API_URL` 指向你的 API，再执行 `npm run build` 与 `npx cap sync`。新用户可在设置页使用「注册」并填写有效邮箱。
+打 APK 前复制 `.env.example` 为 `.env`，确认 `VITE_API_URL` 指向你的 API（示例已填公网地址），再执行 `npm run build` 与 `npx cap sync`。新用户可在设置页使用「注册」并填写有效邮箱。
 
 本地仅跑后端时，复制 `server/.env.example` 为 `server/.env`，将 `DATABASE_URL` 指向本机或容器内的 MySQL，在 `server` 目录执行 `npx prisma migrate deploy` 后 `npm run dev`。
 
