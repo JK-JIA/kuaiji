@@ -10,12 +10,22 @@ const RELEASES_PATH =
   process.env.RELEASES_PATH || path.join('/data/public', 'releases.json')
 
 const app = express()
+app.use(express.json({ limit: '1mb' }))
 
 function safeBasename(name) {
   const base = path.basename(name || '').replace(/[^\w.\-()+ ]/g, '_')
   if (!base || base === '.' || base === '..') return null
   if (!/\.apk$/i.test(base)) return null
   return base
+}
+
+function tokenOk(req) {
+  if (!UPLOAD_TOKEN) return false
+  const h = req.headers.authorization || ''
+  const bearer = h.startsWith('Bearer ') ? h.slice(7).trim() : ''
+  const bodyToken =
+    typeof req.body?.token === 'string' ? req.body.token.trim() : ''
+  return bearer === UPLOAD_TOKEN || bodyToken === UPLOAD_TOKEN
 }
 
 const storage = multer.diskStorage({
@@ -46,10 +56,7 @@ app.post('/api/upload', (req, res) => {
       res.status(503).json({ error: '未配置 UPLOAD_TOKEN，上传已禁用' })
       return
     }
-    const h = req.headers.authorization || ''
-    const bearer = h.startsWith('Bearer ') ? h.slice(7).trim() : ''
-    const bodyToken = String(req.body?.token || '').trim()
-    if (bearer !== UPLOAD_TOKEN && bodyToken !== UPLOAD_TOKEN) {
+    if (!tokenOk(req)) {
       if (req.file) await fs.unlink(req.file.path).catch(() => {})
       res.status(401).json({ error: '无效或缺少上传令牌' })
       return
@@ -102,6 +109,57 @@ app.post('/api/upload', (req, res) => {
       })
     }
   })
+})
+
+app.post('/api/release/delete', async (req, res) => {
+  if (!UPLOAD_TOKEN) {
+    res.status(503).json({ error: '未配置 UPLOAD_TOKEN' })
+    return
+  }
+  if (!tokenOk(req)) {
+    res.status(401).json({ error: '无效或缺少上传令牌' })
+    return
+  }
+  const file = safeBasename(req.body?.file)
+  if (!file) {
+    res.status(400).json({ error: '无效的 APK 文件名' })
+    return
+  }
+  try {
+    let raw
+    try {
+      raw = await fs.readFile(RELEASES_PATH, 'utf8')
+    } catch {
+      raw = '{"appName":"记账本","items":[]}'
+    }
+    let data
+    try {
+      data = JSON.parse(raw)
+    } catch {
+      data = { appName: '记账本', items: [] }
+    }
+    if (!Array.isArray(data.items)) data.items = []
+    const before = data.items.length
+    data.items = data.items.filter((x) => x?.file !== file)
+    if (data.items.length === before) {
+      res.status(404).json({ error: '列表中无此文件' })
+      return
+    }
+
+    const tmp = `${RELEASES_PATH}.${process.pid}.tmp`
+    await fs.writeFile(tmp, JSON.stringify(data, null, 2), 'utf8')
+    await fs.rename(tmp, RELEASES_PATH)
+
+    const apkPath = path.join(DOWNLOADS_DIR, file)
+    await fs.unlink(apkPath).catch(() => {})
+
+    res.json({ ok: true, removed: file })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({
+      error: e instanceof Error ? e.message : '服务器错误',
+    })
+  }
 })
 
 app.listen(PORT, '0.0.0.0', () => {

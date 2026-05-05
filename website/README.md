@@ -21,6 +21,9 @@ docker compose up -d --build
 
 限制：单文件最大 **200MB**；仅接受扩展名为 **`.apk`** 的文件名（服务端会校验）。
 
+**删除列表项**：配置令牌后，每条版本旁有「删除」按钮；需先在「上传」区域填写同一令牌。会从 `releases.json` 移除该条，并尝试删除 `downloads/` 里同名 APK（若已手动删掉文件也会成功移除列表）。  
+API：`POST /api/release/delete`，JSON 体 `{ "token": "…", "file": "xxx.apk" }`，或头 `Authorization: Bearer …`。
+
 也可使用 HTTP 头：`Authorization: Bearer <UPLOAD_TOKEN>` 调用 `POST /api/upload`（multipart）。
 
 ## 手动发布（不上传服务）

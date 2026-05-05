@@ -1,3 +1,6 @@
+/** @type {boolean} */
+let uploadEnabled = false
+
 async function loadReleases() {
   const loading = document.getElementById('loading')
   const errEl = document.getElementById('error')
@@ -17,8 +20,9 @@ async function loadReleases() {
     loading.classList.add('hidden')
 
     if (items.length === 0) {
-      errEl.textContent =
-        '暂无版本。使用下方上传，或在服务器上向 downloads/ 放 APK 并编辑 releases.json。'
+      errEl.innerHTML =
+        '暂无版本。使用下方上传，或在服务器上向 <code>downloads/</code> 放 APK 并编辑 <code>releases.json</code>。' +
+        '<br /><span class="hint-muted">仅删 APK 文件不会更新列表，需同步改 releases.json 或使用「删除」按钮。</span>'
       errEl.classList.remove('hidden')
       return
     }
@@ -29,18 +33,35 @@ async function loadReleases() {
         const date = escapeHtml(row.date ?? '')
         const channel = row.channel ? escapeHtml(String(row.channel)) : ''
         const notes = row.notes ? escapeHtml(String(row.notes)) : ''
-        const href = `/downloads/${encodeURIComponent(row.file)}`
+        const file = String(row.file ?? '')
+        const fileEsc = escapeHtml(file)
+        const href = `/downloads/${encodeURIComponent(file)}`
         const meta = [date, channel].filter(Boolean).join(' · ')
+        const deleteBtn = uploadEnabled
+          ? `<button type="button" class="btn-del" data-file="${encodeURIComponent(file)}">删除</button>`
+          : ''
         return `<li class="item">
           <div class="item-top">
             <span class="ver">v${ver}</span>
             ${meta ? `<span class="meta">${meta}</span>` : ''}
           </div>
+          <p class="file-line"><code>${fileEsc}</code></p>
           ${notes ? `<p class="notes">${notes}</p>` : ''}
-          <a class="btn" href="${href}" download>下载 APK</a>
+          <div class="item-actions">
+            <a class="btn" href="${href}" download>下载 APK</a>
+            ${deleteBtn}
+          </div>
         </li>`
       })
       .join('')
+
+    list.querySelectorAll('.btn-del').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const raw = btn.getAttribute('data-file')
+        const f = raw ? decodeURIComponent(raw) : ''
+        if (f) void deleteRelease(f)
+      })
+    })
 
     list.classList.remove('hidden')
   } catch (e) {
@@ -58,6 +79,43 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;')
 }
 
+function getManageToken() {
+  return (
+    document.querySelector('#upload-form input[name="token"]')?.value?.trim() ||
+    ''
+  )
+}
+
+async function deleteRelease(file) {
+  const token = getManageToken()
+  if (!token) {
+    window.alert('请先在「上传新版本 APK」里填写「上传令牌」后再删除。')
+    return
+  }
+  if (
+    !window.confirm(
+      `确定删除「${file}」？\n将从下载列表移除，并尝试删除服务器上的文件（若仍存在）。`,
+    )
+  ) {
+    return
+  }
+  try {
+    const res = await fetch('/api/release/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, file }),
+    })
+    const j = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      window.alert(j.error || `删除失败（HTTP ${res.status}）`)
+      return
+    }
+    await loadReleases()
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : '网络错误')
+  }
+}
+
 async function setupUpload() {
   const disabledHint = document.getElementById('upload-disabled')
   const form = document.getElementById('upload-form')
@@ -69,7 +127,8 @@ async function setupUpload() {
   try {
     const h = await fetch('/api/health', { cache: 'no-store' })
     const j = h.ok ? await h.json() : {}
-    if (j.uploadEnabled) {
+    uploadEnabled = Boolean(j.uploadEnabled)
+    if (uploadEnabled) {
       disabledHint.classList.add('hidden')
       form.classList.remove('hidden')
     } else {
@@ -77,6 +136,7 @@ async function setupUpload() {
       form.classList.add('hidden')
     }
   } catch {
+    uploadEnabled = false
     disabledHint.textContent =
       '无法检测上传服务。若已配置 UPLOAD_TOKEN，请刷新重试。'
     disabledHint.classList.remove('hidden')
