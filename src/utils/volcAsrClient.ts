@@ -28,6 +28,22 @@ export type VolcAsrSession = {
   stop: () => void
 }
 
+function micAccessErrorMessage(err: unknown): string {
+  const dom = err as { name?: string; message?: string }
+  const name = dom?.name ?? ''
+  const msg = err instanceof Error ? err.message : String(err)
+  if (
+    name === 'NotAllowedError' ||
+    /Permission denied|NotAllowedError/i.test(msg)
+  ) {
+    return '无法使用麦克风：请在系统弹窗中选「允许」，或到 设置 → 应用 → 本应用 → 权限 中开启麦克风。'
+  }
+  if (name === 'NotFoundError') {
+    return '未检测到麦克风设备。'
+  }
+  return err instanceof Error ? err.message : '无法访问麦克风'
+}
+
 /**
  * 通过自建后端 WebSocket 代理连接火山流式 ASR（浏览器无法自带鉴权头建连）。
  * PCM 16kHz mono s16le，由服务端按文档分包发往火山。
@@ -160,11 +176,7 @@ export function startVolcAsrSession(
       } catch (e) {
         cleanup()
         ws.close()
-        reject(
-          e instanceof Error
-            ? e
-            : new Error('无法访问麦克风，请检查浏览器或系统权限'),
-        )
+        reject(new Error(micAccessErrorMessage(e)))
       }
     }
   })

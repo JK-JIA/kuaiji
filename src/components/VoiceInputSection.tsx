@@ -65,7 +65,7 @@ export function VoiceInputSection({
     }
     if (!isDoubaoConfigured()) {
       onFillFirstLine(text, '')
-      setHint('已填入首行商品；配置豆包后可一键解析全表')
+      setHint('已填入首行商品，其余请手改或更新带「智能填入」的安装包。')
       return
     }
     setBusy(true)
@@ -92,10 +92,12 @@ export function VoiceInputSection({
 
   return (
     <div className="mb-4 rounded-2xl border border-stone-200 bg-stone-50/80 px-3 py-3 text-left">
-      <p className="text-sm font-medium text-stone-800">语音输入（识别）</p>
+      <p className="text-sm font-medium text-stone-800">语音记账</p>
       <p className="mt-0.5 text-xs text-stone-500">
-        按住说话流式识别；停止后可填入表单
-        {isDoubaoConfigured() ? '或智能解析' : '（配置豆包 API 后可智能解析）'}。
+        直接说车牌、商品、数量、金额等；停止录音后
+        {isDoubaoConfigured()
+          ? '点「智能填入表单」可自动拆到各栏。'
+          : '可先「填入首行商品」，其余在下方手改。'}
       </p>
 
       <div className="mt-2 flex flex-wrap gap-2">
@@ -124,8 +126,8 @@ export function VoiceInputSection({
         >
           {isDoubaoConfigured()
             ? busy
-              ? '解析中…'
-              : '智能解析并填入'
+              ? '填入中…'
+              : '智能填入表单'
             : '填入首行商品'}
         </button>
       </div>

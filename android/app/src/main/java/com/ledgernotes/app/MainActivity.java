@@ -1,7 +1,11 @@
 package com.ledgernotes.app;
 
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.webkit.WebSettings;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeActivity;
 
@@ -11,6 +15,8 @@ import com.getcapacitor.BridgeActivity;
  */
 public class MainActivity extends BridgeActivity {
 
+    private static final int REQ_RECORD_AUDIO = 0x5243; // 'RC'
+
     private void applyWebViewNetworkPolicy() {
         Bridge bridge = getBridge();
         if (bridge == null || bridge.getWebView() == null) return;
@@ -18,6 +24,22 @@ public class MainActivity extends BridgeActivity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         }
+    }
+
+    /** 提前申请麦克风，避免 WebView 内 getUserMedia 直接报 Permission denied（仍依赖 Manifest 声明 MODIFY_AUDIO_SETTINGS） */
+    private void ensureRecordAudioPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.RECORD_AUDIO}, REQ_RECORD_AUDIO);
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        ensureRecordAudioPermission();
     }
 
     @Override

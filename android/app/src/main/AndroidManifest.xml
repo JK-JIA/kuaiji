@@ -40,4 +40,10 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Capacitor WebView 申请麦克风时会同时请求此项，未声明会导致整次授权失败、getUserMedia 报 Permission denied -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
 </manifest>
