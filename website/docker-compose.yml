@@ -1,13 +1,29 @@
-# 官网静态页 + APK 下载目录。默认 http://<主机>:8080
+# 官网静态页 + APK 下载 + 带令牌的上传 API。默认 http://<主机>:8080
+# 复制 .env.example 为 .env 并设置 UPLOAD_TOKEN 后，网页内可上传 APK
 # 镜像使用 DaoCloud 代理，便于国内拉取
 services:
+  uploader:
+    build:
+      context: ./uploader
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: '3005'
+      UPLOAD_TOKEN: ${UPLOAD_TOKEN:-}
+      DOWNLOADS_DIR: /data/downloads
+      RELEASES_PATH: /data/public/releases.json
+    volumes:
+      - ./downloads:/data/downloads
+      - ./public:/data/public
+
   web:
     image: docker.m.daocloud.io/library/nginx:alpine
     restart: unless-stopped
     ports:
       - '${WEB_PORT:-8080}:80'
+    depends_on:
+      - uploader
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-      # public 只读挂载时，不能再把子目录 downloads 挂进同一路径，故 APK 单独挂到 /var/www/downloads
       - ./public:/usr/share/nginx/html:ro
       - ./downloads:/var/www/downloads:ro

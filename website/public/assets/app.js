@@ -1,7 +1,12 @@
-async function main() {
+async function loadReleases() {
   const loading = document.getElementById('loading')
   const errEl = document.getElementById('error')
   const list = document.getElementById('list')
+
+  loading.classList.remove('hidden')
+  errEl.classList.add('hidden')
+  errEl.textContent = ''
+  list.classList.add('hidden')
 
   try {
     const res = await fetch('/releases.json', { cache: 'no-store' })
@@ -13,7 +18,7 @@ async function main() {
 
     if (items.length === 0) {
       errEl.textContent =
-        '暂无版本。请将 APK 放入 downloads/ 并编辑 public/releases.json。'
+        '暂无版本。使用下方上传，或在服务器上向 downloads/ 放 APK 并编辑 releases.json。'
       errEl.classList.remove('hidden')
       return
     }
@@ -51,6 +56,68 @@ function escapeHtml(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+async function setupUpload() {
+  const disabledHint = document.getElementById('upload-disabled')
+  const form = document.getElementById('upload-form')
+  const dateInput = document.getElementById('upload-date')
+  const msg = document.getElementById('upload-msg')
+
+  dateInput.value = new Date().toISOString().slice(0, 10)
+
+  try {
+    const h = await fetch('/api/health', { cache: 'no-store' })
+    const j = h.ok ? await h.json() : {}
+    if (j.uploadEnabled) {
+      disabledHint.classList.add('hidden')
+      form.classList.remove('hidden')
+    } else {
+      disabledHint.classList.remove('hidden')
+      form.classList.add('hidden')
+    }
+  } catch {
+    disabledHint.textContent =
+      '无法检测上传服务。若已配置 UPLOAD_TOKEN，请刷新重试。'
+    disabledHint.classList.remove('hidden')
+    form.classList.add('hidden')
+  }
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault()
+    msg.textContent = ''
+    msg.classList.remove('ok', 'err')
+    const btn = form.querySelector('.btn-submit')
+    btn.disabled = true
+    try {
+      const fd = new FormData(form)
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: fd,
+      })
+      const j = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        msg.textContent = j.error || `上传失败（HTTP ${res.status}）`
+        msg.classList.add('err')
+        return
+      }
+      msg.textContent = '已发布，列表已更新。'
+      msg.classList.add('ok')
+      form.reset()
+      dateInput.value = new Date().toISOString().slice(0, 10)
+      await loadReleases()
+    } catch (e) {
+      msg.textContent = e instanceof Error ? e.message : '网络错误'
+      msg.classList.add('err')
+    } finally {
+      btn.disabled = false
+    }
+  })
+}
+
+async function main() {
+  await setupUpload()
+  await loadReleases()
 }
 
 main()

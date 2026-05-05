@@ -1,0 +1,9 @@
+{
+  "name": "website-uploader",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "express": "^4.21.2",
+    "multer": "^2.0.0"
+  }
+}

@@ -1,43 +1,44 @@
 # 记账本 · 官网（下载页）
 
-极简静态站 + Nginx，色调与 App（stone 中性色）一致。用于对外提供各版本 APK 下载。
+极简静态站 + Nginx + 可选上传服务，色调与 App（stone 中性色）一致。
 
 ## 启动
 
 ```bash
 cd website
-docker compose up -d
+cp .env.example .env
+# 编辑 .env：设置 UPLOAD_TOKEN（足够长的随机串），否则网页内上传不可用
+docker compose up -d --build
 ```
 
-浏览器访问：`http://<服务器IP>:8080`（默认端口可在同目录创建 `.env` 写入 `WEB_PORT=80` 后重启）。
+浏览器访问：`http://<服务器IP>:8080`（端口用 `.env` 里 `WEB_PORT`，默认 `8080`）。
 
-## 发布新版本
+## 网页内上传 APK
 
-1. 将 APK 复制到本目录 **`downloads/`**（文件名与 JSON 里一致，建议 `kuaiji-v1.x.x.apk`）。
-2. 编辑 **`public/releases.json`**，在 `items` 数组**靠前位置**插入新版本（页面按数组顺序从上到下展示）：
+1. 在 **`website/.env`** 中设置 **`UPLOAD_TOKEN`**，与页面上填的「上传令牌」一致。
+2. 打开首页，展开 **「上传新版本 APK」**，选择 APK、填写版本号等，提交。
+3. 服务会把文件写入 **`downloads/`**，并把条目插入 **`public/releases.json`** 最前。
 
-```json
-{
-  "version": "1.0.5",
-  "file": "kuaiji-v1.0.5.apk",
-  "date": "2026-05-06",
-  "channel": "debug",
-  "notes": "可选：更新说明"
-}
-```
+限制：单文件最大 **200MB**；仅接受扩展名为 **`.apk`** 的文件名（服务端会校验）。
 
-3. 无需重建镜像；若已运行 `docker compose up -d`，改完文件后刷新网页即可（必要时强刷或清缓存）。
+也可使用 HTTP 头：`Authorization: Bearer <UPLOAD_TOKEN>` 调用 `POST /api/upload`（multipart）。
+
+## 手动发布（不上传服务）
+
+1. 将 APK 放到 **`downloads/`**。
+2. 编辑 **`public/releases.json`**，在 `items` 数组靠前位置增加一条（展示顺序从上到下）。
 
 ## 目录说明
 
 | 路径 | 作用 |
 |------|------|
-| `public/` | 首页、`releases.json`、样式与脚本 |
-| `downloads/` | 实际 APK 文件（默认不提交到 Git） |
-| `nginx/default.conf` | Nginx 配置；APK 在容器内路径为 `/var/www/downloads`，对外 URL 仍为 `/downloads/` |
+| `public/` | 首页、`releases.json`、静态资源 |
+| `downloads/` | APK 文件（默认不提交到 Git） |
+| `nginx/default.conf` | Nginx；`/api/` 反代到 `uploader`；`/downloads/` 走只读挂载 |
+| `uploader/` | Node 上传服务镜像构建上下文 |
 
-说明：`public` 以只读方式挂载时，不能把 `downloads` 再挂到其子目录，否则会报 read-only file system；因此 compose 将 `downloads/` 单独挂载到 `/var/www/downloads`。
+`public` 对 Nginx 只读挂载；`downloads` 单独挂到 `/var/www/downloads`，避免只读冲突。上传服务对 `public`、`downloads` 读写挂载以更新 `releases.json` 与保存 APK。
 
 ## 与主项目关系
 
-本目录独立部署，不参与账本 API；仅提供安装包下载入口。
+本目录独立部署，不参与账本 API；仅提供安装包下载与发布入口。

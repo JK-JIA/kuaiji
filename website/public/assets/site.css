@@ -170,3 +170,119 @@ a.btn:focus-visible {
   font-size: 0.8rem;
   color: var(--muted);
 }
+
+.upload-box {
+  margin-bottom: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0 1rem 1rem;
+  box-shadow: 0 1px 2px rgba(28, 25, 23, 0.04);
+}
+
+.upload-summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  padding: 1rem 0;
+  list-style: none;
+}
+
+.upload-summary::-webkit-details-marker {
+  display: none;
+}
+
+.upload-summary::before {
+  content: '▸ ';
+  color: var(--muted);
+}
+
+.upload-box[open] .upload-summary::before {
+  content: '▾ ';
+}
+
+.upload-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.upload-hint code {
+  font-size: 0.8em;
+  padding: 0.1em 0.35em;
+  border-radius: 0.35rem;
+  background: #f5f5f4;
+}
+
+.upload-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+}
+
+.field .label {
+  color: #57534e;
+  font-weight: 500;
+}
+
+.field input[type='text'],
+.field input[type='password'],
+.field input[type='date'],
+.field input[type='file'] {
+  font: inherit;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: #fafaf9;
+  color: var(--text);
+}
+
+.field input:focus-visible {
+  outline: 2px solid #1c1917;
+  outline-offset: 1px;
+}
+
+.btn-submit {
+  margin-top: 0.25rem;
+  align-self: flex-start;
+  padding: 0.55rem 1.1rem;
+  font: inherit;
+  font-weight: 500;
+  font-size: 0.875rem;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 0.75rem;
+  cursor: pointer;
+}
+
+.btn-submit:hover {
+  background: #292524;
+}
+
+.btn-submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.upload-msg {
+  margin: 0;
+  min-height: 1.25em;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.upload-msg.ok {
+  color: #15803d;
+}
+
+.upload-msg.err {
+  color: #b91c1c;
+}

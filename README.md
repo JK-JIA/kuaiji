@@ -50,4 +50,4 @@ docker compose up -d --build
 
 ## 官网（APK 下载页）
 
-独立目录 **[website](./website/)**：`docker compose` + Nginx，极简风格与 App 色调一致。将 APK 放入 `website/downloads/` 并编辑 `website/public/releases.json` 即可对外提供多版本下载。说明见 [website/README.md](./website/README.md)。
+独立目录 **[website](./website/)**：`docker compose` + Nginx + 可选上传 API；配置 `UPLOAD_TOKEN` 后可在网页内上传 APK 并自动更新列表。说明见 [website/README.md](./website/README.md)。
