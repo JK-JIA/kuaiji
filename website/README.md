@@ -11,6 +11,8 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+更新代码后务必带 **`--build`** 重建 `uploader` 镜像，否则浏览器里仍可能是旧接口（例如删除报 HTTP 404）。
+
 浏览器访问：`http://<服务器IP>:8080`（端口用 `.env` 里 `WEB_PORT`，默认 `8080`）。
 
 ## 管理后台（登录后上传 / 删除）

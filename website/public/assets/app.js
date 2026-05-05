@@ -133,7 +133,13 @@ async function deleteRelease(file) {
       },
       body: JSON.stringify({ file }),
     })
-    const j = await res.json().catch(() => ({}))
+    const text = await res.text()
+    let j = {}
+    try {
+      j = text ? JSON.parse(text) : {}
+    } catch {
+      j = {}
+    }
     if (res.status === 401) {
       setStoredToken('')
       showLoginView()
@@ -142,7 +148,11 @@ async function deleteRelease(file) {
       return
     }
     if (!res.ok) {
-      window.alert(j.error || `删除失败（HTTP ${res.status}）`)
+      const hint404 =
+        res.status === 404 && !j.error
+          ? '接口不存在或服务未更新：请在服务器进入 website 目录执行 docker compose up -d --build 后重试。'
+          : ''
+      window.alert(j.error || hint404 || `删除失败（HTTP ${res.status}）`)
       return
     }
     await loadReleases()

@@ -19,6 +19,15 @@ function safeBasename(name) {
   return base
 }
 
+/** 删除列表项时按「basename + 忽略大小写」匹配，避免与 JSON 里文件名略有出入时误报 404 */
+function apkBasenameForMatch(ref) {
+  const s = String(ref ?? '').trim()
+  if (!s || s.includes('..')) return ''
+  const b = path.basename(s)
+  if (!/\.apk$/i.test(b)) return ''
+  return b
+}
+
 function tokenOk(req) {
   if (!UPLOAD_TOKEN) return false
   const h = req.headers.authorization || ''
@@ -134,11 +143,12 @@ app.post('/api/release/delete', async (req, res) => {
     res.status(401).json({ error: '无效或缺少上传令牌' })
     return
   }
-  const file = safeBasename(req.body?.file)
-  if (!file) {
+  const target = apkBasenameForMatch(req.body?.file)
+  if (!target) {
     res.status(400).json({ error: '无效的 APK 文件名' })
     return
   }
+  const targetLower = target.toLowerCase()
   try {
     let raw
     try {
@@ -153,10 +163,21 @@ app.post('/api/release/delete', async (req, res) => {
       data = { appName: '记账本', items: [] }
     }
     if (!Array.isArray(data.items)) data.items = []
-    const before = data.items.length
-    data.items = data.items.filter((x) => x?.file !== file)
-    if (data.items.length === before) {
-      res.status(404).json({ error: '列表中无此文件' })
+
+    const removedNames = []
+    data.items = data.items.filter((x) => {
+      const bn = apkBasenameForMatch(x?.file)
+      if (bn && bn.toLowerCase() === targetLower) {
+        removedNames.push(bn)
+        return false
+      }
+      return true
+    })
+
+    if (removedNames.length === 0) {
+      res.status(404).json({
+        error: `列表中找不到「${target}」。请刷新页面后重试；若服务端未重建镜像，请在 website 目录执行 docker compose up -d --build。`,
+      })
       return
     }
 
@@ -164,10 +185,11 @@ app.post('/api/release/delete', async (req, res) => {
     await fs.writeFile(tmp, JSON.stringify(data, null, 2), 'utf8')
     await fs.rename(tmp, RELEASES_PATH)
 
-    const apkPath = path.join(DOWNLOADS_DIR, file)
-    await fs.unlink(apkPath).catch(() => {})
+    for (const n of removedNames) {
+      await fs.unlink(path.join(DOWNLOADS_DIR, n)).catch(() => {})
+    }
 
-    res.json({ ok: true, removed: file })
+    res.json({ ok: true, removed: removedNames })
   } catch (e) {
     console.error(e)
     res.status(500).json({
