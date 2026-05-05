@@ -3,9 +3,14 @@ import type { FieldDef, LedgerRecord } from '../types'
 const TOKEN_KEY = 'ledger_auth_token'
 const EMAIL_KEY = 'ledger_auth_email'
 
+/** 生产构建未注入 VITE_API_URL 时使用，避免 APK 内看不到登录入口 */
+const DEFAULT_PUBLIC_API = 'http://8.153.12.131:3001'
+
 export function getApiBase(): string | undefined {
   const v = import.meta.env.VITE_API_URL?.trim()
-  return v || undefined
+  if (v) return v
+  if (import.meta.env.PROD) return DEFAULT_PUBLIC_API
+  return undefined
 }
 
 export function getStoredToken(): string | null {

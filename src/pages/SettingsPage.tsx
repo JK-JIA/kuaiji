@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FieldDef } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { useLedger } from '../context/LedgerContext'
+import { getApiBase } from '../api/ledgerClient'
 import { exportCsv, exportJson, parseLedgerBackupJson } from '../utils/exportData'
 
 export function SettingsPage() {
@@ -19,7 +20,9 @@ export function SettingsPage() {
   const [name, setName] = useState('')
   const [type, setType] = useState<'text' | 'number'>('text')
   const [busy, setBusy] = useState(false)
-  const [authEmail, setAuthEmail] = useState('')
+  const [authEmail, setAuthEmail] = useState(() =>
+    getApiBase() ? 'admin' : '',
+  )
   const [authPw, setAuthPw] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
 
@@ -94,22 +97,23 @@ export function SettingsPage() {
 
   return (
     <div className="pb-28 pt-16">
-      <header className="mb-6 px-4">
+      <header className="mb-5 px-4">
         <h1 className="text-2xl font-semibold tracking-tight text-stone-900">
-          自定义字段
+          设置
         </h1>
         <p className="mt-1 text-sm text-stone-500">
-          默认含商品、数量、车牌号、金额（数字）；可新增备注等自定义字段。可为字段勾选「必填」，记账时将标红星并校验。
+          打开底部「设置」后，先在本页顶部完成云端登录；再管理字段与备份。
         </p>
       </header>
 
       <section className="mx-4 mb-8 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
-        <p className="mb-3 text-sm font-medium text-stone-800">云端账号</p>
+        <p className="mb-3 text-sm font-medium text-stone-800">云端账号与登录</p>
         {!apiBase && (
-          <p className="mb-3 text-xs text-stone-500 leading-relaxed">
-            构建时在环境变量中设置{' '}
-            <code className="rounded bg-stone-100 px-1">VITE_API_URL</code>{' '}
-            指向后端（例如 https://你的域名 ），重新打包后即可在此登录；未配置时数据仅存本机。
+          <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 leading-relaxed">
+            当前构建未包含可用的 API 地址，无法登录云端。请在源码根目录配置{' '}
+            <code className="rounded bg-amber-100/80 px-1">VITE_API_URL</code>{' '}
+            后重新执行 <code className="rounded bg-amber-100/80 px-1">npm run build</code> 再打
+            APK；未登录时数据仅存本机。
           </p>
         )}
         {apiBase && (
@@ -211,6 +215,15 @@ export function SettingsPage() {
           </>
         )}
       </section>
+
+      <header className="mb-4 px-4">
+        <h2 className="text-lg font-semibold tracking-tight text-stone-900">
+          自定义字段
+        </h2>
+        <p className="mt-1 text-sm text-stone-500">
+          默认含商品、数量、车牌号、金额（数字）；可新增备注等自定义字段。可为字段勾选「必填」，记账时将标红星并校验。
+        </p>
+      </header>
 
       <section className="mx-4 mb-8 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
         <p className="mb-3 text-sm font-medium text-stone-800">导出 / 恢复备份</p>
