@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import type { Server } from 'http'
-import WebSocket, { WebSocketServer } from 'ws'
+import WebSocket, { type RawData, WebSocketServer } from 'ws'
 import {
   buildAudioOnlyRequest,
   buildFullClientRequest,
@@ -14,6 +14,7 @@ const VOLC_DEFAULT_URL =
   'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel'
 
 const PCM_CHUNK_BYTES = 6400 // 200ms @ 16kHz mono s16le
+const AUTH_TIMEOUT_MS = 15000
 
 type VerifyToken = (token: string) => string | null
 
@@ -63,49 +64,63 @@ export function attachAsrWebSocket(
   server: Server,
   options: { verifyToken: VerifyToken },
 ): void {
-  const wss = new WebSocketServer({ noServer: true })
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false })
 
   server.on('upgrade', (req, socket, head) => {
     const host = req.headers.host ?? '127.0.0.1'
-    const url = new URL(req.url ?? '/', `http://${host}`)
-    if (url.pathname !== '/api/asr/stream') {
+    let pathname: string
+    try {
+      const url = new URL(req.url ?? '/', `http://${host}`)
+      pathname = url.pathname
+    } catch {
       socket.destroy()
       return
     }
 
-    const token = url.searchParams.get('token')?.trim()
-    if (!token || !options.verifyToken(token)) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
+    if (pathname !== '/api/asr/stream') {
       socket.destroy()
       return
     }
 
     if (!isAsrConfigured()) {
-      socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n')
+      socket.write(
+        'HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n',
+      )
       socket.destroy()
       return
     }
 
-    wss.handleUpgrade(req, socket, head, (clientWs) => {
-      void runAsrSession(clientWs)
+    wss.handleUpgrade(req, socket, head, (clientWs: WebSocket) => {
+      void runAsrSession(clientWs, options.verifyToken)
     })
   })
 }
 
-async function runAsrSession(clientWs: WebSocket): Promise<void> {
+function runAsrSession(
+  clientWs: WebSocket,
+  verifyToken: VerifyToken,
+): void {
   const volcUrl = process.env.VOLC_ASR_WS_URL?.trim() || VOLC_DEFAULT_URL
   let volcWs: WebSocket | null = null
   let pcmBuf = Buffer.alloc(0)
-  /** 上游未 open 时暂存客户端 PCM */
   let earlyClientPcm = Buffer.alloc(0)
   let pendingStop = false
   let closed = false
+  let authenticated = false
+  let readySent = false
 
   const safeSendClient = (obj: unknown) => {
     if (clientWs.readyState === WebSocket.OPEN) {
       clientWs.send(JSON.stringify(obj))
     }
   }
+
+  const authTimer = setTimeout(() => {
+    if (!authenticated && !closed) {
+      safeSendClient({ type: 'error', message: '连接超时，请重新点录音' })
+      clientWs.close()
+    }
+  }, AUTH_TIMEOUT_MS)
 
   const flushPcm = (forceLast: boolean) => {
     if (!volcWs || volcWs.readyState !== WebSocket.OPEN) return
@@ -129,77 +144,120 @@ async function runAsrSession(clientWs: WebSocket): Promise<void> {
     }
   }
 
-  try {
-    const headers = volcHeaders()
-    volcWs = new WebSocket(volcUrl, { headers })
-  } catch {
-    safeSendClient({ type: 'error', message: '语音识别配置错误' })
-    clientWs.close()
-    return
-  }
-
-  volcWs.on('open', () => {
-    resetAudioSequence()
-    if (earlyClientPcm.length) {
-      pcmBuf = Buffer.concat([pcmBuf, earlyClientPcm])
-      earlyClientPcm = Buffer.alloc(0)
-    }
+  const startVolcUpstream = () => {
+    let headers: Record<string, string>
     try {
-      volcWs!.send(buildFullClientRequest(defaultAsrInitPayload()))
-      flushPcm(false)
-      if (pendingStop) {
-        flushPcm(true)
-        pendingStop = false
-      }
-    } catch (e) {
-      safeSendClient({
-        type: 'error',
-        message: e instanceof Error ? e.message : '初始化识别失败',
-      })
+      headers = volcHeaders()
+    } catch {
+      safeSendClient({ type: 'error', message: '语音识别未配置' })
       clientWs.close()
-    }
-  })
-
-  volcWs.on('message', (data: WebSocket.RawData) => {
-    const buf = Buffer.isBuffer(data)
-      ? data
-      : Array.isArray(data)
-        ? Buffer.concat(data)
-        : Buffer.from(data as ArrayBuffer)
-    const parsed = parseVolcServerBinaryMessage(buf)
-    if (!parsed) return
-    if (parsed.kind === 'error') {
-      safeSendClient({
-        type: 'error',
-        message: parsed.message,
-        code: parsed.code,
-      })
       return
     }
-    if (parsed.text || parsed.definite !== undefined) {
-      safeSendClient({
-        type: 'result',
-        text: parsed.text,
-        definite: parsed.definite,
-      })
+
+    try {
+      volcWs = new WebSocket(volcUrl, { headers })
+    } catch {
+      safeSendClient({ type: 'error', message: '语音识别配置错误' })
+      clientWs.close()
+      return
     }
-  })
 
-  volcWs.on('error', (err) => {
-    safeSendClient({
-      type: 'error',
-      message: err.message || '上游语音识别连接失败',
+    volcWs.on('open', () => {
+      resetAudioSequence()
+      if (earlyClientPcm.length) {
+        pcmBuf = Buffer.concat([pcmBuf, earlyClientPcm])
+        earlyClientPcm = Buffer.alloc(0)
+      }
+      try {
+        volcWs!.send(buildFullClientRequest(defaultAsrInitPayload()))
+        flushPcm(false)
+        if (pendingStop) {
+          flushPcm(true)
+          pendingStop = false
+        }
+        if (!readySent && clientWs.readyState === WebSocket.OPEN) {
+          readySent = true
+          safeSendClient({ type: 'ready' })
+        }
+      } catch (e) {
+        safeSendClient({
+          type: 'error',
+          message: e instanceof Error ? e.message : '初始化识别失败',
+        })
+        clientWs.close()
+      }
     })
-  })
 
-  volcWs.on('close', () => {
-    if (!closed) safeSendClient({ type: 'closed' })
-    closed = true
-    if (clientWs.readyState === WebSocket.OPEN) clientWs.close()
-  })
+    volcWs.on('message', (data: RawData) => {
+      const buf = Buffer.isBuffer(data)
+        ? data
+        : Array.isArray(data)
+          ? Buffer.concat(data)
+          : Buffer.from(data as ArrayBuffer)
+      const parsed = parseVolcServerBinaryMessage(buf)
+      if (!parsed) return
+      if (parsed.kind === 'error') {
+        safeSendClient({
+          type: 'error',
+          message: parsed.message,
+          code: parsed.code,
+        })
+        return
+      }
+      if (parsed.text || parsed.definite !== undefined) {
+        safeSendClient({
+          type: 'result',
+          text: parsed.text,
+          definite: parsed.definite,
+        })
+      }
+    })
 
-  clientWs.on('message', (data: WebSocket.RawData, isBinary) => {
+    volcWs.on('error', (err: unknown) => {
+      const msg =
+        err instanceof Error ? err.message : '上游语音识别连接失败'
+      safeSendClient({ type: 'error', message: msg })
+    })
+
+    volcWs.on('close', () => {
+      if (!closed) safeSendClient({ type: 'closed' })
+      closed = true
+      if (clientWs.readyState === WebSocket.OPEN) clientWs.close()
+    })
+  }
+
+  clientWs.on('message', (data: RawData, isBinary: boolean) => {
     if (closed) return
+
+    if (!authenticated) {
+      if (isBinary) return
+      const text =
+        typeof data === 'string'
+          ? data
+          : Buffer.isBuffer(data)
+            ? data.toString('utf8')
+            : ''
+      try {
+        const msg = JSON.parse(text) as { type?: string; token?: string }
+        if (msg.type === 'auth' && typeof msg.token === 'string') {
+          if (!verifyToken(msg.token.trim())) {
+            safeSendClient({ type: 'error', message: '未登录或登录已过期' })
+            clientWs.close()
+            return
+          }
+          clearTimeout(authTimer)
+          authenticated = true
+          startVolcUpstream()
+          return
+        }
+      } catch {
+        /* fallthrough */
+      }
+      safeSendClient({ type: 'error', message: '请先登录应用' })
+      clientWs.close()
+      return
+    }
+
     if (!isBinary) {
       const text =
         typeof data === 'string'
@@ -221,6 +279,7 @@ async function runAsrSession(clientWs: WebSocket): Promise<void> {
       }
       return
     }
+
     const chunk = Buffer.isBuffer(data)
       ? data
       : Array.isArray(data)
@@ -236,11 +295,13 @@ async function runAsrSession(clientWs: WebSocket): Promise<void> {
 
   clientWs.on('close', () => {
     closed = true
+    clearTimeout(authTimer)
     volcWs?.close()
   })
 
   clientWs.on('error', () => {
     closed = true
+    clearTimeout(authTimer)
     volcWs?.close()
   })
 }

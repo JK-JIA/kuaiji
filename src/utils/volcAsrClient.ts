@@ -45,8 +45,8 @@ function micAccessErrorMessage(err: unknown): string {
 }
 
 /**
- * 通过自建后端 WebSocket 代理连接火山流式 ASR（浏览器无法自带鉴权头建连）。
- * PCM 16kHz mono s16le，由服务端按文档分包发往火山。
+ * 通过自建后端 WebSocket 代理连接火山流式 ASR。
+ * 鉴权在连接后首条 JSON 完成，避免 JWT 放在 URL 触发网关 400。
  */
 export function startVolcAsrSession(
   apiBase: string,
@@ -57,7 +57,7 @@ export function startVolcAsrSession(
     onEnded?: () => void
   },
 ): Promise<VolcAsrSession> {
-  const url = `${getAsrWebSocketUrl(apiBase)}?token=${encodeURIComponent(token)}`
+  const url = getAsrWebSocketUrl(apiBase)
   const ws = new WebSocket(url)
   ws.binaryType = 'arraybuffer'
 
@@ -88,23 +88,24 @@ export function startVolcAsrSession(
   }
 
   return new Promise((resolve, reject) => {
-    let started = false
+    let sessionResolved = false
+    let micStarted = false
+    let readyHandled = false
 
-    ws.onerror = () => {
+    const failEarly = (message: string) => {
+      if (sessionResolved) return
+      sessionResolved = true
       cleanup()
-      if (!started) {
-        reject(
-          new Error(
-            '语音识别连接失败（请确认已登录且服务端已配置火山密钥）',
-          ),
-        )
-      } else {
-        handlers.onError('语音识别连接中断')
+      try {
+        ws.close()
+      } catch {
+        /* ignore */
       }
+      reject(new Error(message))
     }
 
-    ws.onopen = async () => {
-      started = true
+    const startMicPipeline = async () => {
+      if (sessionResolved) return
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
@@ -138,26 +139,8 @@ export function startVolcAsrSession(
         processor.connect(mute)
         mute.connect(audioContext.destination)
 
-        ws.onmessage = (ev) => {
-          if (typeof ev.data !== 'string') return
-          try {
-            const msg = JSON.parse(ev.data) as {
-              type?: string
-              text?: string
-              message?: string
-            }
-            if (msg.type === 'result' && typeof msg.text === 'string') {
-              handlers.onText(msg.text)
-            } else if (msg.type === 'error') {
-              handlers.onError(msg.message || '识别出错')
-            } else if (msg.type === 'closed') {
-              handlers.onEnded?.()
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-
+        micStarted = true
+        sessionResolved = true
         resolve({
           stop: () => {
             if (ws.readyState === WebSocket.OPEN) {
@@ -174,9 +157,58 @@ export function startVolcAsrSession(
           },
         })
       } catch (e) {
+        failEarly(micAccessErrorMessage(e))
+      }
+    }
+
+    ws.onerror = () => {
+      if (!sessionResolved) {
+        failEarly(
+          '语音识别连接失败（请确认已登录且服务器已开启语音识别）',
+        )
+      } else if (micStarted) {
+        handlers.onError('语音识别连接中断')
         cleanup()
-        ws.close()
-        reject(new Error(micAccessErrorMessage(e)))
+      }
+    }
+
+    ws.onopen = () => {
+      try {
+        ws.send(JSON.stringify({ type: 'auth', token }))
+      } catch {
+        failEarly('无法发送登录信息')
+      }
+    }
+
+    ws.onmessage = (ev: MessageEvent) => {
+      if (typeof ev.data !== 'string') return
+      try {
+        const msg = JSON.parse(ev.data) as {
+          type?: string
+          text?: string
+          message?: string
+        }
+        if (msg.type === 'error') {
+          const m = msg.message || '语音识别失败'
+          if (!micStarted) failEarly(m)
+          else handlers.onError(m)
+          return
+        }
+        if (msg.type === 'ready') {
+          if (readyHandled) return
+          readyHandled = true
+          void startMicPipeline()
+          return
+        }
+        if (msg.type === 'result' && typeof msg.text === 'string') {
+          handlers.onText(msg.text)
+          return
+        }
+        if (msg.type === 'closed') {
+          handlers.onEnded?.()
+        }
+      } catch {
+        /* ignore */
       }
     }
   })
