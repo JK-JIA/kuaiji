@@ -47,3 +47,7 @@ docker compose up -d --build
 ## 豆包（可选）
 
 仓库内仍保留豆包解析相关工具代码，当前 App 界面已关闭对应入口。若需自行接入，可参考 [DOUBAO_SETUP.md](./DOUBAO_SETUP.md)。
+
+## 官网（APK 下载页）
+
+独立目录 **[website](./website/)**：`docker compose` + Nginx，极简风格与 App 色调一致。将 APK 放入 `website/downloads/` 并编辑 `website/public/releases.json` 即可对外提供多版本下载。说明见 [website/README.md](./website/README.md)。

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>记账本 · 下载</title>
+    <link rel="stylesheet" href="/assets/site.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="hero">
+        <p class="eyebrow">批发记账</p>
+        <h1>记账本</h1>
+        <p class="lede">
+          Android 安装包下载页。将 APK 放入服务的 <code>downloads/</code> 文件夹，并在
+          <code>releases.json</code> 中登记版本即可展示。
+        </p>
+      </header>
+
+      <section class="panel" id="panel">
+        <p class="loading" id="loading">加载版本列表…</p>
+        <p class="error hidden" id="error"></p>
+        <ul class="list hidden" id="list"></ul>
+      </section>
+
+      <footer class="foot">
+        <p>数据与账号由自建后端服务提供，与本下载页无关。</p>
+      </footer>
+    </div>
+    <script src="/assets/app.js" type="module"></script>
+  </body>
+</html>

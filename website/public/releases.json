@@ -1,0 +1,12 @@
+{
+  "appName": "记账本",
+  "items": [
+    {
+      "version": "1.0.4",
+      "file": "kuaiji-v1.0.4.apk",
+      "date": "2026-05-05",
+      "channel": "debug",
+      "notes": "示例：请将同名 APK 放到 downloads/ 目录；可删改本条目。"
+    }
+  ]
+}
