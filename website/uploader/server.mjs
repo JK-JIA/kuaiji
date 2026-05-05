@@ -45,6 +45,20 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, uploadEnabled: Boolean(UPLOAD_TOKEN) })
 })
 
+/** 管理页登录校验（仅 JSON body.token） */
+app.post('/api/auth/login', (req, res) => {
+  if (!UPLOAD_TOKEN) {
+    res.status(503).json({ error: '服务端未配置 UPLOAD_TOKEN' })
+    return
+  }
+  const t = typeof req.body?.token === 'string' ? req.body.token.trim() : ''
+  if (t === UPLOAD_TOKEN) {
+    res.json({ ok: true })
+    return
+  }
+  res.status(401).json({ error: '令牌错误' })
+})
+
 app.post('/api/upload', (req, res) => {
   upload.single('file')(req, res, async (err) => {
     if (err) {

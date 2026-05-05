@@ -13,18 +13,20 @@ docker compose up -d --build
 
 浏览器访问：`http://<服务器IP>:8080`（端口用 `.env` 里 `WEB_PORT`，默认 `8080`）。
 
-## 网页内上传 APK
+## 管理后台（登录后上传 / 删除）
 
-1. 在 **`website/.env`** 中设置 **`UPLOAD_TOKEN`**，与页面上填的「上传令牌」一致。
-2. 打开首页，展开 **「上传新版本 APK」**，选择 APK、填写版本号等，提交。
-3. 服务会把文件写入 **`downloads/`**，并把条目插入 **`public/releases.json`** 最前。
+1. 在 **`website/.env`** 中设置 **`UPLOAD_TOKEN`**。
+2. 打开首页 → **管理后台** → 输入令牌 → **登录**（令牌保存在浏览器 `sessionStorage`，关闭浏览器后需重新登录）。
+3. 登录后出现 **版本管理**：可**连续上传**多个 APK；下方 **版本列表** 中每条在登录状态下显示 **删除**（同步更新 `releases.json` 并删除 `downloads/` 中文件）。
+4. **退出登录** 后访客仅可下载，看不到删除按钮，也无法调用需鉴权的接口。
 
-限制：单文件最大 **200MB**；仅接受扩展名为 **`.apk`** 的文件名（服务端会校验）。
+限制：单文件最大 **200MB**；仅接受扩展名为 **`.apk`** 的文件名。
 
-**删除列表项**：配置令牌后，每条版本旁有「删除」按钮；需先在「上传」区域填写同一令牌。会从 `releases.json` 移除该条，并尝试删除 `downloads/` 里同名 APK（若已手动删掉文件也会成功移除列表）。  
-API：`POST /api/release/delete`，JSON 体 `{ "token": "…", "file": "xxx.apk" }`，或头 `Authorization: Bearer …`。
+API 摘要：
 
-也可使用 HTTP 头：`Authorization: Bearer <UPLOAD_TOKEN>` 调用 `POST /api/upload`（multipart）。
+- `POST /api/auth/login` — JSON `{ "token": "…" }` 校验令牌。
+- `POST /api/upload` — `multipart/form-data`，头 `Authorization: Bearer <UPLOAD_TOKEN>`。
+- `POST /api/release/delete` — JSON `{ "file": "xxx.apk" }`，头 `Authorization: Bearer <UPLOAD_TOKEN>`。
 
 ## 手动发布（不上传服务）
 
