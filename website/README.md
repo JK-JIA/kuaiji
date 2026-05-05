@@ -34,7 +34,9 @@ docker compose up -d
 |------|------|
 | `public/` | 首页、`releases.json`、样式与脚本 |
 | `downloads/` | 实际 APK 文件（默认不提交到 Git） |
-| `nginx/default.conf` | Nginx 配置，下载路径为 `/downloads/` |
+| `nginx/default.conf` | Nginx 配置；APK 在容器内路径为 `/var/www/downloads`，对外 URL 仍为 `/downloads/` |
+
+说明：`public` 以只读方式挂载时，不能把 `downloads` 再挂到其子目录，否则会报 read-only file system；因此 compose 将 `downloads/` 单独挂载到 `/var/www/downloads`。
 
 ## 与主项目关系
 
