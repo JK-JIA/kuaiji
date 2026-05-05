@@ -2,8 +2,10 @@ import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import cors from 'cors'
 import express from 'express'
+import http from 'http'
 import jwt from 'jsonwebtoken'
 import { z } from 'zod'
+import { attachAsrWebSocket } from './asrStream.js'
 
 const prisma = new PrismaClient()
 
@@ -182,7 +184,11 @@ async function ensureDefaultAdmin() {
 
 async function bootstrap() {
   await ensureDefaultAdmin()
-  app.listen(PORT, () => {
+  const httpServer = http.createServer(app)
+  attachAsrWebSocket(httpServer, {
+    verifyToken: (t) => userIdFromToken(t),
+  })
+  httpServer.listen(PORT, () => {
     console.log(`ledger-api listening on :${PORT}`)
   })
 }

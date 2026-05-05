@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useLedger } from '../context/LedgerContext'
 import { getApiBase } from '../api/ledgerClient'
 import { exportCsv, exportJson, parseLedgerBackupJson } from '../utils/exportData'
+import { APP_VERSION } from '../version'
 
 export function SettingsPage() {
   const {
@@ -359,6 +360,18 @@ export function SettingsPage() {
           </li>
         ))}
       </ul>
+
+      <footer className="mx-4 mb-10 mt-1 rounded-2xl border border-stone-100 bg-stone-50/70 px-4 py-3 text-xs text-stone-500 leading-relaxed">
+        <p className="font-medium text-stone-600">应用版本 {APP_VERSION}</p>
+        <p className="mt-1.5">
+          本版为<strong className="font-medium text-stone-600">纯手动录入</strong>
+          ：在记账页逐项填写或粘贴；无应用内语音解析。配置{' '}
+          <code className="rounded bg-stone-200/80 px-1 text-stone-800">
+            VITE_API_URL
+          </code>{' '}
+          后，可在上方使用账号密码登录，数据同步至自建后端。
+        </p>
+      </footer>
     </div>
   )
 }

@@ -4,6 +4,7 @@ import type { FieldDef, LedgerRecord, LineItemRow } from '../types'
 import { useLedger } from '../context/LedgerContext'
 import { getAmountFieldId } from '../utils/recordHelpers'
 import { MonthCalendar } from './MonthCalendar'
+import { VoiceInputSection } from './VoiceInputSection'
 
 type LineForm = { id: string; product: string; quantity: string }
 
@@ -235,6 +236,28 @@ export function AddRecordModal({
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <VoiceInputSection
+            fields={sortedFields}
+            onApplyParsed={(data, productLines) => {
+              setValues((v) => ({ ...v, ...data }))
+              if (productLines?.length && prodId && qtyId) {
+                setLines(
+                  productLines.map((l) => ({
+                    id: crypto.randomUUID(),
+                    product: l.product,
+                    quantity: l.quantity,
+                  })),
+                )
+              }
+            }}
+            onFillFirstLine={(product) => {
+              setLines((prev) =>
+                prev.map((row, i) =>
+                  i === 0 ? { ...row, product: product || row.product } : row,
+                ),
+              )
+            }}
+          />
           <div className="mb-4">
             <p className="mb-2 text-left text-sm font-medium text-stone-800">
               记账日期

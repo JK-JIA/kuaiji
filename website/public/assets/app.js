@@ -171,6 +171,11 @@ function showPanelView() {
   document.getElementById('admin-panel')?.classList.remove('hidden')
 }
 
+function loginApiMissingHint(status) {
+  if (status !== 404) return ''
+  return ' 常见原因：未部署最新 nginx 配置（缺少 /api/ 反代）或 uploader 镜像过旧。请在服务器进入 website 目录执行 git pull 与 docker compose up -d --build。'
+}
+
 async function tryRestoreSession() {
   const t = getStoredToken()
   if (!t) {
@@ -242,9 +247,16 @@ async function setupAdmin() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token }),
       })
-      const j = await res.json().catch(() => ({}))
+      const text = await res.text()
+      let j = {}
+      try {
+        j = text ? JSON.parse(text) : {}
+      } catch {
+        j = {}
+      }
       if (!res.ok) {
-        loginMsg.textContent = j.error || `登录失败（HTTP ${res.status}）`
+        loginMsg.textContent =
+          (j.error || `登录失败（HTTP ${res.status}）`) + loginApiMissingHint(res.status)
         loginMsg.classList.add('err')
         return
       }

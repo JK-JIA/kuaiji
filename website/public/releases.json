@@ -5,8 +5,8 @@
       "version": "1.0.4",
       "file": "kuaiji-v1.0.4.apk",
       "date": "2026-05-05",
-      "channel": "debug",
-      "notes": "示例：请将同名 APK 放到 downloads/ 目录；可删改本条目。"
+      "channel": "release",
+      "notes": "纯手动录入；设置页账号密码登录云端同步。需自建 API（VITE_API_URL）。详见 GitHub Release v1.0.4 说明。"
     }
   ]
 }

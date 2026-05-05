@@ -15,6 +15,16 @@ docker compose up -d --build
 
 浏览器访问：`http://<服务器IP>:8080`（端口用 `.env` 里 `WEB_PORT`，默认 `8080`）。
 
+### 登录或上传接口返回 404
+
+1. 在服务器 **`website`** 目录执行 **`git pull`** 后 **`docker compose up -d --build`**（同时重建 `uploader` 并重启 `web`，使 Nginx 加载含 **`location ^~ /api/`** 的配置）。
+2. 宿主机自检：  
+   `curl -sS http://127.0.0.1:8080/api/health`  
+   应返回 JSON（含 `uploadEnabled`）。若此处 404，说明 **Nginx 未把 `/api/` 转到 uploader** 或端口不是 compose 映射端口。
+3. 容器内自检（uploader 是否监听）：  
+   `docker compose exec uploader node -e "fetch('http://127.0.0.1:3005/api/health').then(r=>r.text()).then(console.log)"`  
+   应打印 JSON；若失败，检查 **`docker compose ps`** 中 `uploader` 是否 **Up**。
+
 ## 管理后台（登录后上传 / 删除）
 
 1. 在 **`website/.env`** 中设置 **`UPLOAD_TOKEN`**。

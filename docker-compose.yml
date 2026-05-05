@@ -41,6 +41,11 @@ services:
       DATABASE_URL: mysql://ledger:ledger@db:3306/ledger
       JWT_SECRET: ${JWT_SECRET:-please-change-this-secret-min-32-characters-long}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-*}
+      # 火山流式语音识别（二选一：旧控制台 APP+Token，或新控制台仅 API Key）
+      # VOLC_ASR_APP_KEY: "控制台 APP ID"
+      # VOLC_ASR_ACCESS_KEY: "控制台 Access Token"
+      # VOLC_ASR_RESOURCE_ID: "volc.seedasr.sauc.duration"
+      # VOLC_ASR_API_KEY: "新控制台 X-Api-Key"
     depends_on:
       db:
         condition: service_healthy

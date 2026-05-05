@@ -28,7 +28,9 @@ npx cap sync android
 
 若 API 使用 **HTTP（非 HTTPS）**：`AndroidManifest.xml` 已开启 `usesCleartextTraffic`；`MainActivity` 中对 WebView 设置 `MIXED_CONTENT_ALWAYS_ALLOW`，否则在 **https://localhost** 页面里请求 `http://` 接口仍会被 WebView 拦截，表现为 `Failed to fetch`。生产环境建议为 API 配置 TLS。
 
-当前版本**不包含应用内语音输入**；请在记账表单中手动填写或粘贴文字。
+**v1.0.4**：纯手动录入；设置页**账号密码登录**云端（需配置 `VITE_API_URL` 与自建后端）。不含应用内语音输入；若需豆包等扩展见 [DOUBAO_SETUP.md](./DOUBAO_SETUP.md)。
+
+GitHub Release 说明草稿见 [RELEASE_NOTES_1.0.4.md](./RELEASE_NOTES_1.0.4.md)（发布时可复制到 Release 正文）。
 
 ## 后端与数据
 

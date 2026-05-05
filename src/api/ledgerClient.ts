@@ -13,6 +13,13 @@ export function getApiBase(): string | undefined {
   return undefined
 }
 
+/** 与账本 API 同源的语音识别 WebSocket（需后端配置火山 ASR 环境变量） */
+export function getAsrWebSocketUrl(base: string): string {
+  const b = base.replace(/\/$/, '')
+  if (b.startsWith('https://')) return `wss://${b.slice(8)}/api/asr/stream`
+  return `ws://${b.replace(/^http:\/\//, '')}/api/asr/stream`
+}
+
 export function getStoredToken(): string | null {
   try {
     return localStorage.getItem(TOKEN_KEY)
