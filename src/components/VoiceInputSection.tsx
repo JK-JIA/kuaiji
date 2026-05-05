@@ -5,8 +5,6 @@ import { isDoubaoConfigured, parseWithDoubao } from '../utils/doubaoParser'
 import { startVolcAsrSession } from '../utils/volcAsrClient'
 import type { FieldDef } from '../types'
 
-type LineForm = { id: string; product: string; quantity: string }
-
 type Props = {
   fields: FieldDef[]
   onApplyParsed: (
