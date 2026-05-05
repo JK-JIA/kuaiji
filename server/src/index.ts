@@ -16,7 +16,11 @@ const RegisterSchema = z.object({
   password: z.string().min(6).max(128),
 })
 
-const LoginSchema = RegisterSchema
+/** 登录：账号存于 `email` 字段，可为默认 `admin` 或任意注册邮箱 */
+const LoginSchema = z.object({
+  email: z.string().min(1).max(191),
+  password: z.string().min(6).max(128),
+})
 
 const LedgerPutSchema = z.object({
   fields: z.array(z.unknown()),
@@ -86,13 +90,13 @@ app.post('/auth/register', async (req, res) => {
 app.post('/auth/login', async (req, res) => {
   const parsed = LoginSchema.safeParse(req.body)
   if (!parsed.success) {
-    res.status(400).json({ error: '邮箱或密码格式无效' })
+    res.status(400).json({ error: '账号或密码格式无效（密码至少 6 位）' })
     return
   }
   const { email, password } = parsed.data
-  const user = await prisma.user.findUnique({ where: { email } })
+  const user = await prisma.user.findUnique({ where: { email: email.trim() } })
   if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
-    res.status(401).json({ error: '邮箱或密码错误' })
+    res.status(401).json({ error: '账号或密码错误' })
     return
   }
   const token = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' })
@@ -156,6 +160,34 @@ app.put('/api/ledger', async (req, res) => {
   })
 })
 
-app.listen(PORT, () => {
-  console.log(`ledger-api listening on :${PORT}`)
+async function ensureDefaultAdmin() {
+  const seedEmail = 'admin'
+  const existing = await prisma.user.findUnique({ where: { email: seedEmail } })
+  if (existing) return
+  const passwordHash = await bcrypt.hash('123456', 10)
+  await prisma.user.create({
+    data: {
+      email: seedEmail,
+      passwordHash,
+      ledger: {
+        create: {
+          fieldsJson: [],
+          recordsJson: [],
+        },
+      },
+    },
+  })
+  console.log('[ledger-api] seeded default user: admin / 123456')
+}
+
+async function bootstrap() {
+  await ensureDefaultAdmin()
+  app.listen(PORT, () => {
+    console.log(`ledger-api listening on :${PORT}`)
+  })
+}
+
+bootstrap().catch((err) => {
+  console.error(err)
+  process.exit(1)
 })

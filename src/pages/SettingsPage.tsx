@@ -120,7 +120,7 @@ export function SettingsPage() {
             {useRemoteLedger ? (
               <div className="flex flex-wrap items-center gap-3">
                 <span className="text-sm text-stone-800">
-                  已登录：{cloudEmail}
+                  已登录：{cloudEmail ?? '—'}
                 </span>
                 <button
                   type="button"
@@ -132,12 +132,17 @@ export function SettingsPage() {
               </div>
             ) : (
               <div className="flex flex-col gap-3">
+                <p className="text-xs text-stone-500 leading-relaxed">
+                  默认账号为 <span className="font-mono text-stone-700">admin</span>
+                  ，密码 <span className="font-mono text-stone-700">123456</span>
+                  （与 docker-compose 首次启动的服务器配套）。新用户请点「注册」并填写有效邮箱。
+                </p>
                 <input
-                  type="email"
-                  autoComplete="email"
+                  type="text"
+                  autoComplete="username"
                   value={authEmail}
                   onChange={(e) => setAuthEmail(e.target.value)}
-                  placeholder="邮箱"
+                  placeholder="账号（默认 admin）或注册邮箱"
                   className="rounded-xl border border-stone-200 bg-stone-50/80 px-3 py-2 text-stone-900 placeholder:text-stone-400"
                 />
                 <input
@@ -158,7 +163,7 @@ export function SettingsPage() {
                       void (async () => {
                         setAuthBusy(true)
                         try {
-                          await login(authEmail, authPw)
+                          await login(authEmail.trim(), authPw)
                           setAuthPw('')
                         } catch (e) {
                           alert(
@@ -176,13 +181,16 @@ export function SettingsPage() {
                   <button
                     type="button"
                     disabled={
-                      authBusy || !authEmail.trim() || authPw.length < 6
+                      authBusy ||
+                      !authEmail.trim() ||
+                      authPw.length < 6 ||
+                      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(authEmail.trim())
                     }
                     onClick={() => {
                       void (async () => {
                         setAuthBusy(true)
                         try {
-                          await register(authEmail, authPw)
+                          await register(authEmail.trim(), authPw)
                           setAuthPw('')
                         } catch (e) {
                           alert(

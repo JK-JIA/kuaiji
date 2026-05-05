@@ -1,22 +1,32 @@
-# 账本 API + PostgreSQL。对外默认 3001（避免与宿主机 3000 冲突）；VITE_API_URL 填 http://<主机>:3001
-#
-# db / Dockerfile 使用 DaoCloud 的 Docker Hub 代理加速国内拉取；若失败可改回官方：
-#   postgres:16-alpine、node:22-alpine
+# 账本 API + MySQL。对外默认 3001；App 的 VITE_API_URL 填 http://<主机IP>:3001
+# db / Dockerfile 中 Node 镜像使用 DaoCloud 代理加速国内拉取。
 services:
   db:
-    image: docker.m.daocloud.io/library/postgres:16-alpine
+    image: docker.m.daocloud.io/library/mysql:8.0
     restart: unless-stopped
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     environment:
-      POSTGRES_USER: ledger
-      POSTGRES_PASSWORD: ledger
-      POSTGRES_DB: ledger
+      MYSQL_ROOT_PASSWORD: rootsecret_change_me
+      MYSQL_DATABASE: ledger
+      MYSQL_USER: ledger
+      MYSQL_PASSWORD: ledger
     volumes:
-      - ledger_pgdata:/var/lib/postgresql/data
+      - ledger_mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ledger -d ledger"]
+      test:
+        [
+          'CMD',
+          'mysqladmin',
+          'ping',
+          '-h',
+          '127.0.0.1',
+          '-uroot',
+          '-prootsecret_change_me',
+        ]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 30
+      start_period: 30s
 
   api:
     build:
@@ -24,11 +34,11 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "3001:3001"
+      - '3001:3001'
     environment:
       NODE_ENV: production
-      PORT: "3001"
-      DATABASE_URL: postgresql://ledger:ledger@db:5432/ledger
+      PORT: '3001'
+      DATABASE_URL: mysql://ledger:ledger@db:3306/ledger
       JWT_SECRET: ${JWT_SECRET:-please-change-this-secret-min-32-characters-long}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-*}
     depends_on:
@@ -36,4 +46,4 @@ services:
         condition: service_healthy
 
 volumes:
-  ledger_pgdata:
+  ledger_mysql_data:

@@ -1,6 +1,6 @@
 # 批发记账（个人账本）
 
-**正式使用：Android APK + 后端（PostgreSQL）**；已登录时数据在服务器。项目不提供对外网页版：用 `npm run build` 得到的静态资源若用浏览器直接打开，只会看到「请使用 Android 应用」的提示。本地开发请用 `npm run dev`；若必须浏览器里调试生产包，构建前在 `.env` 中设置 `VITE_ALLOW_BROWSER=true`（勿用于公网站点）。
+**正式使用：Android APK + 后端（MySQL）**；已登录时数据在服务器。项目不提供对外网页版：用 `npm run build` 得到的静态资源若用浏览器直接打开，只会看到「请使用 Android 应用」的提示。本地开发请用 `npm run dev`；若必须浏览器里调试生产包，构建前在 `.env` 中设置 `VITE_ALLOW_BROWSER=true`（勿用于公网站点）。
 
 ## 开发
 
@@ -26,12 +26,22 @@ npx cap sync android
 
 `npm run cap:android` 等同于 `build` + `cap sync` + 打开 Android Studio，一般改 UI 后走这一条即可。
 
-记一笔里的语音录入请使用**系统输入法自带的语音**（话筒键），无需应用麦克风权限。
+当前版本（v1.0.1）**不包含应用内语音输入**；请在记账表单中手动填写或粘贴文字。
 
 ## 后端与数据
 
-后端见仓库根目录 `docker-compose.yml`（PostgreSQL + API）。打 APK 前复制 `.env.example` 为 `.env`，配置 `VITE_API_URL` 指向你的 API（示例见 `.env.example`），再执行 `npm run build` 与 `npx cap sync`。登录后账本读写走服务端。
+根目录 `docker-compose.yml` 使用 **DaoCloud 镜像代理** 拉取 **MySQL 8** 与自构建 API，一条命令启动数据库与接口：
 
-## 豆包智能解析
+```bash
+docker compose up -d --build
+```
 
-配置 API Key 与说明见 [DOUBAO_SETUP.md](./DOUBAO_SETUP.md)。
+默认对外 **http://\<主机\>:3001**。首次启动后 API 会写入默认账号：**用户名 `admin`，密码 `123456`**（存于用户表的 `email` 字段，在设置页登录时「账号」填 `admin` 即可）。生产环境请尽快修改密码或新建账号，并修改 `JWT_SECRET` 与 MySQL `MYSQL_ROOT_PASSWORD`。
+
+打 APK 前复制 `.env.example` 为 `.env`，将 `VITE_API_URL` 指向你的 API，再执行 `npm run build` 与 `npx cap sync`。新用户可在设置页使用「注册」并填写有效邮箱。
+
+本地仅跑后端时，复制 `server/.env.example` 为 `server/.env`，将 `DATABASE_URL` 指向本机或容器内的 MySQL，在 `server` 目录执行 `npx prisma migrate deploy` 后 `npm run dev`。
+
+## 豆包（可选）
+
+仓库内仍保留豆包解析相关工具代码，当前 App 界面已关闭对应入口。若需自行接入，可参考 [DOUBAO_SETUP.md](./DOUBAO_SETUP.md)。

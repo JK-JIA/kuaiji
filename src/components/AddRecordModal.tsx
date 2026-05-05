@@ -1,11 +1,9 @@
 import { format } from 'date-fns'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FieldDef, LedgerRecord, LineItemRow } from '../types'
 import { useLedger } from '../context/LedgerContext'
-import { mergeParsedIntoForm } from '../parser/nlParse'
 import { getAmountFieldId } from '../utils/recordHelpers'
 import { MonthCalendar } from './MonthCalendar'
-import { parseWithDoubao, isDoubaoConfigured } from '../utils/doubaoParser'
 
 type LineForm = { id: string; product: string; quantity: string }
 
@@ -71,9 +69,7 @@ export function AddRecordModal({
   const [lines, setLines] = useState<LineForm[]>([
     { id: crypto.randomUUID(), product: '', quantity: '' },
   ])
-  const [rawSpeech, setRawSpeech] = useState('')
   const [saving, setSaving] = useState(false)
-  const [parsing, setParsing] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -102,89 +98,7 @@ export function AddRecordModal({
       setValues(emptyFields(sortedFields))
       setLines([{ id: crypto.randomUUID(), product: '', quantity: '' }])
     }
-    setRawSpeech('')
   }, [open, sortedFields, recordToEdit?.id, prodId, qtyId])
-
-  const applyParse = useCallback(
-    async (text: string) => {
-      if (!text.trim()) {
-        alert('请输入内容')
-        return
-      }
-
-      setParsing(true)
-      try {
-        const result = await parseWithDoubao(text, sortedFields)
-        
-        if (!result.success) {
-          alert(result.error || '解析失败')
-          return
-        }
-
-        const hasLines =
-          result.productLines &&
-          result.productLines.length > 0 &&
-          result.productLines.some((r) => r.product.trim() || r.quantity.trim())
-        const hasOther =
-          result.data && Object.keys(result.data).some((k) => String(result.data![k] ?? '').trim())
-
-        if (!hasLines && !hasOther) {
-          alert('未能识别到有效信息，请重新输入')
-          return
-        }
-
-        // 合并解析结果到表单（车牌、金额等）
-        if (result.data && Object.keys(result.data).length > 0) {
-          setValues((prev) => mergeParsedIntoForm(prev, result.data!))
-        }
-
-        // 多商品：一行一项；否则写入第一行
-        if (prodId && qtyId) {
-          if (result.productLines && result.productLines.length > 0) {
-            setLines(
-              result.productLines.map((row) => ({
-                id: crypto.randomUUID(),
-                product: row.product.trim(),
-                quantity: row.quantity.trim(),
-              })),
-            )
-          } else {
-            setLines((prev) => {
-              const first = prev[0] ?? {
-                id: crypto.randomUUID(),
-                product: '',
-                quantity: '',
-              }
-              const rest = prev.slice(1)
-              return [
-                {
-                  ...first,
-                  product:
-                    (result.data?.[prodId] &&
-                      String(result.data[prodId]).trim()) ||
-                    first.product,
-                  quantity:
-                    (result.data?.[qtyId] &&
-                      String(result.data[qtyId]).trim()) ||
-                    first.quantity,
-                },
-                ...rest,
-              ]
-            })
-          }
-        }
-
-        // 清空输入框
-        setRawSpeech('')
-      } catch (error: any) {
-        console.error('解析错误:', error)
-        alert('解析失败: ' + (error.message || '未知错误'))
-      } finally {
-        setParsing(false)
-      }
-    },
-    [sortedFields, prodId, qtyId],
-  )
 
   const validate = (): string | null => {
     const merged = buildMergedValues(values, lines, prodId, qtyId)
@@ -334,39 +248,6 @@ export function AddRecordModal({
                 showQuickToday
               />
             </div>
-          </div>
-
-          <div className="mb-4 rounded-2xl border border-stone-200 bg-stone-50 p-4">
-            <p className="mb-2 text-left text-sm font-medium text-stone-800">
-              智能快速录入
-            </p>
-            <p className="mb-3 text-left text-xs text-stone-500">
-              {isDoubaoConfigured()
-                ? '请在下框输入或粘贴文字；手机上可改用输入法键盘上的「话筒」语音输入，再点「智能识别」。念车牌时尽量按字念清（如京、A、八、八、九、九），白薯/红薯等同音字已做常见纠错。'
-                : '请先配置豆包 API Key 以使用智能解析功能。'}
-            </p>
-            <div className="space-y-2">
-              <textarea
-                value={rawSpeech}
-                onChange={(e) => setRawSpeech(e.target.value)}
-                placeholder="例如：今天卖了5斤苹果给川A12345，收了50块钱（可用输入法语音输入）"
-                className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 resize-none"
-                rows={3}
-              />
-              <button
-                type="button"
-                onClick={() => applyParse(rawSpeech)}
-                disabled={!rawSpeech.trim() || parsing || !isDoubaoConfigured()}
-                className="w-full rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {parsing ? '智能识别中...' : '智能识别并填入'}
-              </button>
-            </div>
-            {!isDoubaoConfigured() && (
-              <p className="mt-2 text-xs text-amber-600">
-                💡 提示：配置豆包 API Key 后可使用 AI 智能解析
-              </p>
-            )}
           </div>
 
           {rootFieldIds.map((fid) => {
