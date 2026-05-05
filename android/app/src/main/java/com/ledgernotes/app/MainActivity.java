@@ -1,34 +1,28 @@
 package com.ledgernotes.app;
 
-import android.Manifest;
-import android.os.Bundle;
-import android.webkit.PermissionRequest;
-import com.getcapacitor.BridgeActivity;
+import android.os.Build;
+import android.webkit.WebSettings;
 import com.getcapacitor.Bridge;
+import com.getcapacitor.BridgeActivity;
 
+/**
+ * Capacitor 页面源为 https://localhost，请求 http:// 的 API 时，WebView 会拦截「混合内容」，
+ * 导致 fetch 报 Failed to fetch。此处允许混合内容；勿再 setWebChromeClient 覆盖 BridgeWebChromeClient。
+ */
 public class MainActivity extends BridgeActivity {
-    @Override
-    public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        
-        // 请求麦克风权限
-        requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1);
+
+    private void applyWebViewNetworkPolicy() {
+        Bridge bridge = getBridge();
+        if (bridge == null || bridge.getWebView() == null) return;
+        WebSettings settings = bridge.getWebView().getSettings();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        }
     }
 
     @Override
-    public void onStart() {
-        super.onStart();
-        
-        // 配置 WebView 自动授予麦克风权限
-        Bridge bridge = this.getBridge();
-        if (bridge != null && bridge.getWebView() != null) {
-            bridge.getWebView().setWebChromeClient(new android.webkit.WebChromeClient() {
-                @Override
-                public void onPermissionRequest(final PermissionRequest request) {
-                    // 自动授予麦克风权限
-                    request.grant(request.getResources());
-                }
-            });
-        }
+    public void onResume() {
+        super.onResume();
+        applyWebViewNetworkPolicy();
     }
 }

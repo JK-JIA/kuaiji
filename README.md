@@ -26,7 +26,9 @@ npx cap sync android
 
 `npm run cap:android` 等同于 `build` + `cap sync` + 打开 Android Studio，一般改 UI 后走这一条即可。
 
-当前版本（v1.0.1）**不包含应用内语音输入**；请在记账表单中手动填写或粘贴文字。
+若 API 使用 **HTTP（非 HTTPS）**：`AndroidManifest.xml` 已开启 `usesCleartextTraffic`；`MainActivity` 中对 WebView 设置 `MIXED_CONTENT_ALWAYS_ALLOW`，否则在 **https://localhost** 页面里请求 `http://` 接口仍会被 WebView 拦截，表现为 `Failed to fetch`。生产环境建议为 API 配置 TLS。
+
+当前版本**不包含应用内语音输入**；请在记账表单中手动填写或粘贴文字。
 
 ## 后端与数据
 
