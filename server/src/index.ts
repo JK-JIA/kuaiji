@@ -5,7 +5,7 @@ import express from 'express'
 import http from 'http'
 import jwt from 'jsonwebtoken'
 import { z } from 'zod'
-import { attachAsrWebSocket } from './asrStream.js'
+import { attachAsrWebSocket, volcAsrEnvReady } from './asrStream.js'
 
 const prisma = new PrismaClient()
 
@@ -55,6 +55,18 @@ app.use(express.json({ limit: '8mb' }))
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true })
+})
+
+/** 语音诊断：不含密钥，供 App 预检与复制日志排查 */
+app.get('/api/asr/health', (_req, res) => {
+  res.json({
+    ok: true,
+    volcAsrEnvReady: volcAsrEnvReady(),
+    websocketPath: '/api/asr/stream',
+    handshakeNotes:
+      'After WS connect, send first text JSON: type auth + JWT token field',
+    node: process.version,
+  })
 })
 
 app.post('/auth/register', async (req, res) => {

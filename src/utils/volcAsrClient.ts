@@ -1,4 +1,6 @@
 import { getAsrWebSocketUrl } from '../api/ledgerClient'
+import { APP_VERSION } from '../version'
+import { asrDiagLog } from './asrDiagLog'
 
 function floatTo16BitPCM(float32: Float32Array): Int16Array {
   const out = new Int16Array(float32.length)
@@ -44,6 +46,45 @@ function micAccessErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : '无法访问麦克风'
 }
 
+async function runPreflight(apiBase: string, wsUrl: string, tokenLen: number) {
+  const base = apiBase.replace(/\/$/, '')
+  asrDiagLog(`—— 开始诊断 APP_VERSION=${APP_VERSION} ——`)
+  try {
+    asrDiagLog(
+      `location.href=${typeof globalThis.location !== 'undefined' ? globalThis.location.href : '(none)'}`,
+    )
+  } catch {
+    asrDiagLog('location.href=(unavailable)')
+  }
+  asrDiagLog(`apiBase=${base}`)
+  asrDiagLog(`WebSocket target url=${wsUrl}`)
+  asrDiagLog(`JWT length=${tokenLen} (内容不记录)`)
+
+  try {
+    const r = await fetch(`${base}/health`, { cache: 'no-store' })
+    const body = await r.text()
+    asrDiagLog(`GET /health → HTTP ${r.status} body=${body.slice(0, 240)}`)
+  } catch (e) {
+    asrDiagLog(`GET /health → fetch error: ${e instanceof Error ? e.message : String(e)}`)
+  }
+
+  try {
+    const r = await fetch(`${base}/api/asr/health`, { cache: 'no-store' })
+    const body = await r.text()
+    asrDiagLog(
+      `GET /api/asr/health → HTTP ${r.status} body=${body.slice(0, 600)}`,
+    )
+  } catch (e) {
+    asrDiagLog(
+      `GET /api/asr/health → fetch error: ${e instanceof Error ? e.message : String(e)}`,
+    )
+  }
+
+  asrDiagLog(
+    '说明：若此处 HTTP 正常但下面出现「Unexpected server response: 400」，多为前置网关/反代未放行 WebSocket，或 URL 未指向本 API 进程。',
+  )
+}
+
 /**
  * 通过自建后端 WebSocket 代理连接火山流式 ASR。
  * 鉴权在连接后首条 JSON 完成，避免 JWT 放在 URL 触发网关 400。
@@ -58,158 +99,189 @@ export function startVolcAsrSession(
   },
 ): Promise<VolcAsrSession> {
   const url = getAsrWebSocketUrl(apiBase)
-  const ws = new WebSocket(url)
-  ws.binaryType = 'arraybuffer'
-
-  let stream: MediaStream | null = null
-  let audioContext: AudioContext | null = null
-  let processor: ScriptProcessorNode | null = null
-  let source: MediaStreamAudioSourceNode | null = null
-  let mute: GainNode | null = null
-  let cleaned = false
-
-  const cleanup = () => {
-    if (cleaned) return
-    cleaned = true
-    try {
-      processor?.disconnect()
-      source?.disconnect()
-      mute?.disconnect()
-    } catch {
-      /* ignore */
-    }
-    processor = null
-    source = null
-    mute = null
-    stream?.getTracks().forEach((t) => t.stop())
-    stream = null
-    void audioContext?.close()
-    audioContext = null
-  }
 
   return new Promise((resolve, reject) => {
-    let sessionResolved = false
-    let micStarted = false
-    let readyHandled = false
+    void (async () => {
+      await runPreflight(apiBase, url, token.length)
 
-    const failEarly = (message: string) => {
-      if (sessionResolved) return
-      sessionResolved = true
-      cleanup()
-      try {
-        ws.close()
-      } catch {
-        /* ignore */
+      const ws = new WebSocket(url)
+      ws.binaryType = 'arraybuffer'
+
+      let stream: MediaStream | null = null
+      let audioContext: AudioContext | null = null
+      let processor: ScriptProcessorNode | null = null
+      let source: MediaStreamAudioSourceNode | null = null
+      let mute: GainNode | null = null
+      let cleaned = false
+
+      const cleanup = () => {
+        if (cleaned) return
+        cleaned = true
+        try {
+          processor?.disconnect()
+          source?.disconnect()
+          mute?.disconnect()
+        } catch {
+          /* ignore */
+        }
+        processor = null
+        source = null
+        mute = null
+        stream?.getTracks().forEach((t) => t.stop())
+        stream = null
+        void audioContext?.close()
+        audioContext = null
       }
-      reject(new Error(message))
-    }
 
-    const startMicPipeline = async () => {
-      if (sessionResolved) return
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            channelCount: 1,
-          },
-        })
-        audioContext = new AudioContext()
-        await audioContext.resume()
-        const inRate = audioContext.sampleRate
-        source = audioContext.createMediaStreamSource(stream)
-        processor = audioContext.createScriptProcessor(4096, 1, 1)
-        mute = audioContext.createGain()
-        mute.gain.value = 0
+      let sessionResolved = false
+      let micStarted = false
+      let readyHandled = false
 
-        processor.onaudioprocess = (e) => {
-          if (ws.readyState !== WebSocket.OPEN) return
-          const input = e.inputBuffer.getChannelData(0)
-          const down = downsampleTo16k(input, inRate)
-          const pcm = floatTo16BitPCM(down)
-          ws.send(
-            pcm.buffer.slice(
-              pcm.byteOffset,
-              pcm.byteOffset + pcm.byteLength,
-            ) as ArrayBuffer,
+      const failEarly = (message: string) => {
+        if (sessionResolved) return
+        sessionResolved = true
+        asrDiagLog(`failEarly: ${message}`)
+        cleanup()
+        try {
+          ws.close()
+        } catch {
+          /* ignore */
+        }
+        reject(new Error(message))
+      }
+
+      const startMicPipeline = async () => {
+        if (sessionResolved) return
+        asrDiagLog('收到 ready，请求麦克风…')
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              channelCount: 1,
+            },
+          })
+          audioContext = new AudioContext()
+          await audioContext.resume()
+          const inRate = audioContext.sampleRate
+          asrDiagLog(`AudioContext.sampleRate=${inRate}`)
+          source = audioContext.createMediaStreamSource(stream)
+          processor = audioContext.createScriptProcessor(4096, 1, 1)
+          mute = audioContext.createGain()
+          mute.gain.value = 0
+
+          processor.onaudioprocess = (e) => {
+            if (ws.readyState !== WebSocket.OPEN) return
+            const input = e.inputBuffer.getChannelData(0)
+            const down = downsampleTo16k(input, inRate)
+            const pcm = floatTo16BitPCM(down)
+            ws.send(
+              pcm.buffer.slice(
+                pcm.byteOffset,
+                pcm.byteOffset + pcm.byteLength,
+              ) as ArrayBuffer,
+            )
+          }
+
+          source.connect(processor)
+          processor.connect(mute)
+          mute.connect(audioContext.destination)
+
+          micStarted = true
+          sessionResolved = true
+          asrDiagLog('麦克风已启动，正在推流')
+          resolve({
+            stop: () => {
+              asrDiagLog('用户点击停止录音')
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'stop' }))
+                window.setTimeout(() => {
+                  cleanup()
+                  ws.close()
+                  handlers.onEnded?.()
+                }, 400)
+              } else {
+                cleanup()
+                handlers.onEnded?.()
+              }
+            },
+          })
+        } catch (e) {
+          failEarly(micAccessErrorMessage(e))
+        }
+      }
+
+      ws.onopen = () => {
+        asrDiagLog(
+          `WebSocket onopen readyState=${ws.readyState} protocol=${ws.protocol || '(empty)'}`,
+        )
+        try {
+          ws.send(JSON.stringify({ type: 'auth', token }))
+          asrDiagLog('已发送 auth 帧（token 未写入日志）')
+        } catch (e) {
+          failEarly(
+            `无法发送登录信息: ${e instanceof Error ? e.message : String(e)}`,
           )
         }
-
-        source.connect(processor)
-        processor.connect(mute)
-        mute.connect(audioContext.destination)
-
-        micStarted = true
-        sessionResolved = true
-        resolve({
-          stop: () => {
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: 'stop' }))
-              window.setTimeout(() => {
-                cleanup()
-                ws.close()
-                handlers.onEnded?.()
-              }, 400)
-            } else {
-              cleanup()
-              handlers.onEnded?.()
-            }
-          },
-        })
-      } catch (e) {
-        failEarly(micAccessErrorMessage(e))
       }
-    }
 
-    ws.onerror = () => {
-      if (!sessionResolved) {
-        failEarly(
-          '语音识别连接失败（请确认已登录且服务器已开启语音识别）',
+      ws.onclose = (ev) => {
+        asrDiagLog(
+          `WebSocket onclose code=${ev.code} reason=${ev.reason || '(empty)'} wasClean=${ev.wasClean}`,
         )
-      } else if (micStarted) {
-        handlers.onError('语音识别连接中断')
-        cleanup()
       }
-    }
 
-    ws.onopen = () => {
-      try {
-        ws.send(JSON.stringify({ type: 'auth', token }))
-      } catch {
-        failEarly('无法发送登录信息')
+      ws.onerror = () => {
+        asrDiagLog(
+          'WebSocket onerror（浏览器常不提供 HTTP 状态码；若握手失败多与网关/WebSocket 配置有关）',
+        )
+        if (!sessionResolved) {
+          failEarly(
+            '语音识别连接失败（请复制下方诊断日志排查：网关是否支持 WS、URL 是否直连 API）',
+          )
+        } else if (micStarted) {
+          handlers.onError('语音识别连接中断')
+          cleanup()
+        }
       }
-    }
 
-    ws.onmessage = (ev: MessageEvent) => {
-      if (typeof ev.data !== 'string') return
-      try {
-        const msg = JSON.parse(ev.data) as {
-          type?: string
-          text?: string
-          message?: string
+      ws.onmessage = (ev: MessageEvent) => {
+        if (typeof ev.data !== 'string') return
+        try {
+          const msg = JSON.parse(ev.data) as {
+            type?: string
+            text?: string
+            message?: string
+          }
+          if (msg.type === 'error') {
+            const m = msg.message || '语音识别失败'
+            asrDiagLog(`服务端 error 帧: ${m.slice(0, 400)}`)
+            if (!micStarted) failEarly(m)
+            else handlers.onError(m)
+            return
+          }
+          if (msg.type === 'ready') {
+            asrDiagLog('收到服务端 ready')
+            if (readyHandled) return
+            readyHandled = true
+            void startMicPipeline()
+            return
+          }
+          if (msg.type === 'result' && typeof msg.text === 'string') {
+            asrDiagLog(`result 文本长度=${msg.text.length}`)
+            handlers.onText(msg.text)
+            return
+          }
+          if (msg.type === 'closed') {
+            asrDiagLog('收到 closed')
+            handlers.onEnded?.()
+          }
+        } catch {
+          /* ignore */
         }
-        if (msg.type === 'error') {
-          const m = msg.message || '语音识别失败'
-          if (!micStarted) failEarly(m)
-          else handlers.onError(m)
-          return
-        }
-        if (msg.type === 'ready') {
-          if (readyHandled) return
-          readyHandled = true
-          void startMicPipeline()
-          return
-        }
-        if (msg.type === 'result' && typeof msg.text === 'string') {
-          handlers.onText(msg.text)
-          return
-        }
-        if (msg.type === 'closed') {
-          handlers.onEnded?.()
-        }
-      } catch {
-        /* ignore */
       }
-    }
+
+      asrDiagLog(`WebSocket 已创建，protocols 默认，即将握手…`)
+    })()
   })
 }

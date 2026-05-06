@@ -60,6 +60,11 @@ function isAsrConfigured(): boolean {
   }
 }
 
+/** HTTP 诊断接口用：火山 ASR 环境变量是否就绪（不含密钥） */
+export function volcAsrEnvReady(): boolean {
+  return isAsrConfigured()
+}
+
 export function attachAsrWebSocket(
   server: Server,
   options: { verifyToken: VerifyToken },
@@ -68,16 +73,46 @@ export function attachAsrWebSocket(
 
   server.on('upgrade', (req, socket, head) => {
     const host = req.headers.host ?? '127.0.0.1'
+    const rawUrl = req.url ?? ''
     let pathname: string
     try {
-      const url = new URL(req.url ?? '/', `http://${host}`)
+      const url = new URL(rawUrl, `http://${host}`)
       pathname = url.pathname
     } catch {
+      console.warn('[ledger-api][asr-upgrade] bad url', rawUrl.slice(0, 200))
       socket.destroy()
       return
     }
 
+    const up = (req.headers.upgrade ?? '').toLowerCase()
+    if (pathname === '/api/asr/stream') {
+      console.info(
+        '[ledger-api][asr-upgrade]',
+        JSON.stringify({
+          pathname,
+          upgrade: up,
+          host,
+          'x-forwarded-for': req.headers['x-forwarded-for'] ?? null,
+          'x-forwarded-proto': req.headers['x-forwarded-proto'] ?? null,
+          'sec-websocket-key': req.headers['sec-websocket-key']
+            ? '(present)'
+            : '(missing)',
+          'user-agent': (req.headers['user-agent'] ?? '').slice(0, 120),
+        }),
+      )
+    }
+
     if (pathname !== '/api/asr/stream') {
+      socket.destroy()
+      return
+    }
+
+    if (up && up !== 'websocket') {
+      console.warn(
+        '[ledger-api][asr-upgrade] reject: Upgrade header unexpected:',
+        up,
+      )
+      socket.write('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n')
       socket.destroy()
       return
     }

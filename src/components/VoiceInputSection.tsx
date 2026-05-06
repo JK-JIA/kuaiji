@@ -1,7 +1,12 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useRef, useState, useSyncExternalStore } from 'react'
 import { useAuth } from '../context/AuthContext'
 import type { DoubaoParseResult } from '../utils/doubaoParser'
 import { isDoubaoConfigured, parseWithDoubao } from '../utils/doubaoParser'
+import {
+  clearAsrDiag,
+  getAsrDiagSnapshot,
+  subscribeAsrDiag,
+} from '../utils/asrDiagLog'
 import { startVolcAsrSession } from '../utils/volcAsrClient'
 import type { FieldDef } from '../types'
 
@@ -31,6 +36,22 @@ export function VoiceInputSection({
     ReturnType<typeof startVolcAsrSession>
   > | null>(null)
 
+  const diagText = useSyncExternalStore(
+    subscribeAsrDiag,
+    getAsrDiagSnapshot,
+    getAsrDiagSnapshot,
+  )
+
+  const copyDiag = useCallback(async () => {
+    const t = getAsrDiagSnapshot()
+    try {
+      await navigator.clipboard.writeText(t)
+      setHint('诊断日志已复制到剪贴板')
+    } catch {
+      setHint('复制失败：请长按下方日志手动全选复制')
+    }
+  }, [])
+
   const stopRecording = useCallback(() => {
     sessionRef.current?.stop()
     sessionRef.current = null
@@ -39,6 +60,7 @@ export function VoiceInputSection({
 
   const startRecording = useCallback(async () => {
     if (!apiBase || !token) return
+    clearAsrDiag()
     setHint(null)
     setTranscript('')
     setRecording(true)
@@ -148,6 +170,38 @@ export function VoiceInputSection({
           {hint}
         </p>
       )}
+
+      <details className="mt-3 rounded-xl border border-stone-200 bg-white px-3 py-2 text-left">
+        <summary className="cursor-pointer text-xs font-medium text-stone-700">
+          语音连接诊断日志（出错时展开，复制发给开发者）
+        </summary>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void copyDiag()}
+            className="rounded-lg bg-stone-800 px-3 py-1.5 text-xs font-medium text-white"
+          >
+            复制全部日志
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              clearAsrDiag()
+              setHint('已清空诊断日志')
+            }}
+            className="rounded-lg border border-stone-200 px-3 py-1.5 text-xs text-stone-700"
+          >
+            清空
+          </button>
+        </div>
+        <textarea
+          readOnly
+          value={diagText || '（点「开始录音」后此处会有日志）'}
+          rows={8}
+          className="mt-2 w-full resize-y font-mono text-[11px] leading-snug text-stone-800"
+          spellCheck={false}
+        />
+      </details>
     </div>
   )
 }
