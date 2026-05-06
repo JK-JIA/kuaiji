@@ -27,7 +27,7 @@ export function nextAudioSequence(): number {
   return audioSeq
 }
 
-/** 非最后一包：header + sequence(4) + size + gzip(pcm)。最后一包：header + size + gzip(pcm) */
+/** 新版 bigasr 协议：所有音频包均用自动序列号（flags=0x00），不携带 sequence 字段 */
 export function buildAudioOnlyRequest(
   pcm: Buffer,
   options: { isLast: boolean; sequence: number },
@@ -36,9 +36,9 @@ export function buildAudioOnlyRequest(
   const header = Buffer.alloc(4)
   header[0] = PROTO_VER1_HEADER_UNITS
   if (options.isLast) {
-    header[1] = (0x02 << 4) | 0x02 // audio, last packet
+    header[1] = (0x02 << 4) | 0x02 // audio, last packet, no sequence
   } else {
-    header[1] = (0x02 << 4) | 0x01 // audio, positive sequence follows
+    header[1] = (0x02 << 4) | 0x00 // audio, auto-assign sequence (bigasr requirement)
   }
   header[2] = (0x00 << 4) | 0x01 // raw + gzip
   header[3] = 0x00
@@ -46,12 +46,8 @@ export function buildAudioOnlyRequest(
   const size = Buffer.alloc(4)
   size.writeUInt32BE(gz.length, 0)
 
-  if (options.isLast) {
-    return Buffer.concat([header, size, gz])
-  }
-  const seq = Buffer.alloc(4)
-  seq.writeInt32BE(options.sequence, 0)
-  return Buffer.concat([header, seq, size, gz])
+  // 不附加 sequence 字段，由服务端自动分配
+  return Buffer.concat([header, size, gz])
 }
 
 export type VolcAsrServerPayload =
