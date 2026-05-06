@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import type { Server } from 'http'
+import type { IncomingMessage, Server } from 'http'
 import WebSocket, { type RawData, WebSocketServer } from 'ws'
 import {
   buildAudioOnlyRequest,
@@ -17,6 +17,12 @@ const PCM_CHUNK_BYTES = 6400 // 200ms @ 16kHz mono s16le
 const AUTH_TIMEOUT_MS = 15000
 
 type VerifyToken = (token: string) => string | null
+
+function headerOne(res: IncomingMessage, name: string): string {
+  const v = res.headers[name.toLowerCase()]
+  if (!v) return ''
+  return Array.isArray(v) ? v[0] : v
+}
 
 function volcHeaders(): Record<string, string> {
   const resourceId =
@@ -189,6 +195,18 @@ function runAsrSession(
       return
     }
 
+    let volcFailReported = false
+    const reportVolcFailure = (message: string) => {
+      if (volcFailReported) return
+      volcFailReported = true
+      safeSendClient({ type: 'error', message })
+      try {
+        volcWs?.terminate()
+      } catch {
+        /* ignore */
+      }
+    }
+
     try {
       volcWs = new WebSocket(volcUrl, { headers })
     } catch {
@@ -196,6 +214,29 @@ function runAsrSession(
       clientWs.close()
       return
     }
+
+    volcWs.on('unexpected-response', (_req, res: IncomingMessage) => {
+      const code = res.statusCode ?? 0
+      const logid = headerOne(res, 'x-tt-logid')
+      console.warn(
+        '[ledger-api][volc-ws] unexpected-response',
+        JSON.stringify({ httpStatus: code, logid: logid || null }),
+      )
+      res.resume()
+      const resourceId =
+        process.env.VOLC_ASR_RESOURCE_ID?.trim() ||
+        'volc.seedasr.sauc.duration'
+      const usingApiKey = Boolean(process.env.VOLC_ASR_API_KEY?.trim())
+      const authHint = usingApiKey
+        ? '已使用 VOLC_ASR_API_KEY，请核对密钥权限、是否对应「流式语音识别」及 ResourceId 与控制台一致。'
+        : '当前为 X-Api-App-Key + X-Api-Access-Key。若控制台已切到新版，请在豆包语音「API Key 管理」创建密钥，仅设置 VOLC_ASR_API_KEY（并留空 APP/ACCESS）。Access Token 过期也会 400。'
+      const msg =
+        code === 400
+          ? `火山语音识别拒绝了连接（HTTP 400，与公网 HTTP/无 Nginx 无关）。logid=${logid || '无'}` +
+            ` ResourceId=${resourceId}。${authHint} 文档：https://www.volcengine.com/docs/6561/1354869`
+          : `火山语音识别握手异常 HTTP ${code}。logid=${logid || '无'}。${authHint}`
+      reportVolcFailure(msg)
+    })
 
     volcWs.on('open', () => {
       resetAudioSequence()
@@ -249,9 +290,18 @@ function runAsrSession(
     })
 
     volcWs.on('error', (err: unknown) => {
-      const msg =
-        err instanceof Error ? err.message : '上游语音识别连接失败'
-      safeSendClient({ type: 'error', message: msg })
+      if (volcFailReported) return
+      const raw = err instanceof Error ? err.message : String(err)
+      console.warn('[ledger-api][volc-ws] error event:', raw)
+      if (raw.includes('Unexpected server response: 400')) {
+        reportVolcFailure(
+          '火山 WebSocket 返回 400（鉴权或资源不匹配，与 Nginx/HTTP 无关）。' +
+            '请拉取最新 API 镜像后看 docker logs 中的 [volc-ws]；新版控制台改用 VOLC_ASR_API_KEY；' +
+            '或核对 APP_ID、Access Token、VOLC_ASR_RESOURCE_ID。文档：https://www.volcengine.com/docs/6561/1354869',
+        )
+        return
+      }
+      reportVolcFailure(raw || '上游语音识别连接失败')
     })
 
     volcWs.on('close', () => {
