@@ -20,7 +20,12 @@ const DOUBAO_CONFIG = {
 }
 
 /** 智能识别得到的多行商品（每行对应表单一行） */
-export type DoubaoProductLine = { product: string; quantity: string }
+export type DoubaoProductLine = {
+  product: string
+  quantity: string
+  /** 该行金额（元），可选 */
+  lineAmount?: string
+}
 
 export interface DoubaoParseResult {
   success: boolean
@@ -181,7 +186,7 @@ export async function parseWithDoubao(
 须提取的字段名必须与系统一致（含自定义列）：${fieldDescriptions || '车牌号等'}；其中**金额类字段名固定为「${amountLabel}」**（不要用收款、价钱等别的键名）。
 
 【商品与数量】
-- 多种商品：必须用「商品明细」数组，每项一条：{ "商品":"名称", "数量":"数字+单位" }。
+- 多种商品：必须用「商品明细」数组，每项一条：{ "商品":"名称", "数量":"数字+单位" }；若用户说了**该行货款**，再加 "金额":"数字"（该行小计，元）。
 - **数量一律写成数字+单位**，例如：5斤、100斤、12.5公斤、3包；禁止只写「100」不写单位（除非原文完全没有单位则用「斤」）。
 - 用户说「五斤」「一百斤」分别写成「5斤」「100斤」。
 - 多种商品禁止把名称堆在一个字段里用顿号拼接；每种一行。
@@ -198,8 +203,8 @@ export async function parseWithDoubao(
 多商品示例：
 {
   "商品明细": [
-    { "商品": "红薯", "数量": "100斤" },
-    { "商品": "白薯", "数量": "15斤" }
+    { "商品": "红薯", "数量": "30斤", "金额": "50" },
+    { "商品": "白薯", "数量": "15斤", "金额": "30" }
   ],
   "车牌号": "京A8899",
   "${amountLabel}": "3150"
@@ -319,11 +324,20 @@ export async function parseWithDoubao(
         .map((row: unknown) => {
           if (row && typeof row === 'object' && !Array.isArray(row)) {
             const o = row as Record<string, unknown>
+            const rowAmt =
+              o['金额'] ?? o['小计'] ?? o['行金额'] ?? o['价款'] ?? o['价钱']
+            const lineAmountRaw =
+              rowAmt !== undefined && rowAmt !== null
+                ? String(rowAmt).trim()
+                : ''
             return {
               product: String(o['商品'] ?? o['名称'] ?? '').trim(),
               quantity: String(
                 o['数量'] ?? o['斤'] ?? o['重量'] ?? '',
               ).trim(),
+              lineAmount: lineAmountRaw
+                ? normalizeMoneyDigits(lineAmountRaw)
+                : undefined,
             }
           }
           return { product: '', quantity: '' }

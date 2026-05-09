@@ -28,8 +28,12 @@ export interface LedgerRecord {
   lineItems?: LineItemRow[]
   /** 已结清/legacy 核销（无金额场景可与核账并用）；缺省 false */
   settled?: boolean
-  /** 累计实收金额（与「金额」应收对比）；缺省视同为 0，旧数据 settled 视为全额收讫 */
+  /** 核账累计实收（与「金额」应收对比）；仅通过「核账」维护，勿与约定价混淆 */
   receivedAmount?: number
+  /**
+   * 总价 / 优惠后实收价（元），与各行明细合计（应收）可不同；真实已收现金在「核账」里登记。
+   */
+  dealAmount?: number
 }
 
 export const DEFAULT_FIELD_KEYS = {

@@ -1,5 +1,5 @@
 import type { FieldDef, LedgerRecord } from '../types'
-import { expandProductLines } from './recordHelpers'
+import { expandProductLines, parseMoney } from './recordHelpers'
 
 export function parseNumericHint(s: string): number {
   const m = String(s).match(/(\d+(?:\.\d+)?)/)
@@ -10,19 +10,51 @@ export function findFieldIdByName(fields: FieldDef[], name: string): string | un
   return fields.find((f) => f.name === name)?.id
 }
 
-/** 将单笔总金额按各行斤数占比分摊；无斤数则均分 */
+/**
+ * 各行对应金额：优先用行上填写的「行金额」；未填写的行用「应收 − 已填行合计」按斤数占比分摊；全无行金额时整单按斤数分摊。
+ */
 function distributeRecordAmount(
   record: LedgerRecord,
-  lines: { quantity: string }[],
+  lines: { quantity: string; lineAmountStr: string }[],
   amountFieldId: string | undefined,
 ): number[] {
   if (!amountFieldId || lines.length === 0) return lines.map(() => 0)
   const total = parseFloat(record.values[amountFieldId] || '')
-  const ta = Number.isNaN(total) ? 0 : total
-  const jins = lines.map((l) => parseJinFromQuantity(l.quantity))
-  const sum = jins.reduce((a, b) => a + b, 0)
-  if (sum <= 0) return lines.map(() => ta / lines.length)
-  return jins.map((j) => Math.round(ta * (j / sum) * 100) / 100)
+  const ta = Number.isNaN(total) ? 0 : Math.round(total * 100) / 100
+
+  const explicit = lines.map((l) => parseMoney(l.lineAmountStr))
+  const sumExp = Math.round(explicit.reduce((a, b) => a + b, 0) * 100) / 100
+
+  if (sumExp <= 0) {
+    const jins = lines.map((l) => parseJinFromQuantity(l.quantity))
+    const sum = jins.reduce((a, b) => a + b, 0)
+    if (sum <= 0) return lines.map(() => ta / lines.length)
+    return jins.map((j) => Math.round(ta * (j / sum) * 100) / 100)
+  }
+
+  const out = [...explicit]
+  const rem = Math.round((ta - sumExp) * 100) / 100
+  if (rem <= 0.005) return out
+
+  const needIdx = explicit
+    .map((e, i) => (e <= 0 ? i : -1))
+    .filter((i) => i >= 0)
+  if (needIdx.length === 0) return out
+
+  const jins = needIdx.map((i) => parseJinFromQuantity(lines[i].quantity))
+  const jsum = jins.reduce((a, b) => a + b, 0)
+  if (jsum <= 0) {
+    const each = rem / needIdx.length
+    needIdx.forEach((i) => {
+      out[i] = Math.round((out[i] + each) * 100) / 100
+    })
+    return out
+  }
+  needIdx.forEach((i, k) => {
+    const j = jins[k]
+    out[i] = Math.round((out[i] + rem * (j / jsum)) * 100) / 100
+  })
+  return out
 }
 
 export function sumAmount(

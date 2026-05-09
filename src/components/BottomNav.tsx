@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 
 const linkCls =
-  'flex flex-1 items-center justify-center py-3 text-[13px] transition-colors'
+  'flex flex-1 items-center justify-center py-3 text-[12px] transition-colors'
 
 export function BottomNav() {
   return (

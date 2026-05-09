@@ -6,6 +6,7 @@ import {
   getOutstanding,
   getReceivedAmount,
   parseNonNegativeMoney,
+  sanitizeUnsignedDecimalInput,
 } from '../utils/recordHelpers'
 
 type Props = {
@@ -87,6 +88,7 @@ export function ReconcileModal({
         onClick={() => !busy && onClose()}
       />
       <form
+        noValidate
         onSubmit={handleSubmit}
         className="relative z-10 w-full max-w-md rounded-t-3xl border border-stone-200 bg-white p-5 shadow-xl sm:rounded-2xl"
       >
@@ -151,16 +153,14 @@ export function ReconcileModal({
               )}
             </span>
             <input
-              type="number"
+              type="text"
               inputMode="decimal"
               autoComplete="off"
-              min={0}
-              max={exp > 0 && out > 0 ? out : undefined}
-              step="any"
               disabled={exp > 0 && out <= 0}
               value={thisPay}
+              spellCheck={false}
               onChange={(e) => {
-                const raw = e.target.value
+                const raw = sanitizeUnsignedDecimalInput(e.target.value)
                 if (raw === '') {
                   setThisPay('')
                   return

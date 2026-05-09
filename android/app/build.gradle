@@ -7,8 +7,8 @@ android {
         applicationId "com.ledgernotes.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 9
-        versionName "1.0.8"
+        versionCode 11
+        versionName "1.0.10"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -19,6 +19,9 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // 未配置 upload keystore 时，release 默认无签名，安装会报「无效 / 缺乏证书」。
+            // 使用 debug 证书签名，便于本机/侧载安装（与 assembleDebug 证书一致）。
+            signingConfig signingConfigs.debug
         }
     }
 }

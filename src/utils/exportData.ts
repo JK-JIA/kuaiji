@@ -98,6 +98,10 @@ export function parseLedgerBackupJson(text: string):
     if (typeof ra === 'number' && !Number.isNaN(ra)) {
       rec.receivedAmount = ra
     }
+    const da = r.dealAmount
+    if (typeof da === 'number' && !Number.isNaN(da)) {
+      rec.dealAmount = da
+    }
     records.push(rec)
   }
 
@@ -147,9 +151,11 @@ export function exportCsv(records: LedgerRecord[], fields: FieldDef[]) {
     'createdAt',
     'settled',
     'receivedAmount',
+    'dealAmount',
     'plate',
     'product',
     'quantity',
+    'lineAmount',
     ...fields
       .filter(
         (f) =>
@@ -175,7 +181,13 @@ export function exportCsv(records: LedgerRecord[], fields: FieldDef[]) {
     const lineRows =
       lines.length > 0
         ? lines
-        : [{ product: pid ? r.values[pid] ?? '' : '', quantity: qid ? r.values[qid] ?? '' : '' }]
+        : [
+            {
+              product: pid ? r.values[pid] ?? '' : '',
+              quantity: qid ? r.values[qid] ?? '' : '',
+              lineAmountStr: '',
+            },
+          ]
 
     for (const line of lineRows) {
       const cells = [
@@ -188,9 +200,15 @@ export function exportCsv(records: LedgerRecord[], fields: FieldDef[]) {
             ? String(r.receivedAmount)
             : '',
         ),
+        escapeCsv(
+          r.dealAmount !== undefined && !Number.isNaN(r.dealAmount)
+            ? String(r.dealAmount)
+            : '',
+        ),
         escapeCsv(plate),
         escapeCsv(line.product),
         escapeCsv(line.quantity),
+        escapeCsv(line.lineAmountStr),
         ...extraIds.map((id) => escapeCsv(r.values[id] ?? '')),
       ]
       rows.push(cells)

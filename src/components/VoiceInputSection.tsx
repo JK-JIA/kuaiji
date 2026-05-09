@@ -1,22 +1,23 @@
-import { useCallback, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import type { DoubaoParseResult } from '../utils/doubaoParser'
 import { isDoubaoConfigured, parseWithDoubao } from '../utils/doubaoParser'
-import {
-  clearAsrDiag,
-  getAsrDiagSnapshot,
-  subscribeAsrDiag,
-} from '../utils/asrDiagLog'
 import { startVolcAsrSession } from '../utils/volcAsrClient'
 import type { FieldDef } from '../types'
+
+/** 按住超过此时长后开始录音，避免误触 */
+const LONG_PRESS_MS = 320
 
 type Props = {
   fields: FieldDef[]
   onApplyParsed: (
     data: Record<string, string>,
-    productLines?: { product: string; quantity: string }[],
+    productLines?: {
+      product: string
+      quantity: string
+      lineAmount?: string
+    }[],
   ) => void
-  /** 写入首行商品/数量（无豆包时） */
   onFillFirstLine: (product: string, quantity: string) => void
 }
 
@@ -36,19 +37,16 @@ export function VoiceInputSection({
     ReturnType<typeof startVolcAsrSession>
   > | null>(null)
 
-  const diagText = useSyncExternalStore(
-    subscribeAsrDiag,
-    getAsrDiagSnapshot,
-    getAsrDiagSnapshot,
-  )
+  const pressDownRef = useRef(false)
+  const holdArmedRef = useRef(false)
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pointerIdRef = useRef<number | null>(null)
+  const micBtnRef = useRef<HTMLButtonElement>(null)
 
-  const copyDiag = useCallback(async () => {
-    const t = getAsrDiagSnapshot()
-    try {
-      await navigator.clipboard.writeText(t)
-      setHint('诊断日志已复制到剪贴板')
-    } catch {
-      setHint('复制失败：请长按下方日志手动全选复制')
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current)
+      longPressTimerRef.current = null
     }
   }, [])
 
@@ -58,9 +56,26 @@ export function VoiceInputSection({
     setRecording(false)
   }, [])
 
+  const endHoldGesture = useCallback(() => {
+    clearLongPressTimer()
+    const wasArmed = holdArmedRef.current
+    holdArmedRef.current = false
+    pressDownRef.current = false
+    const el = micBtnRef.current
+    const pid = pointerIdRef.current
+    if (el && pid != null) {
+      try {
+        if (el.hasPointerCapture(pid)) el.releasePointerCapture(pid)
+      } catch {
+        /* ignore */
+      }
+    }
+    pointerIdRef.current = null
+    if (wasArmed) stopRecording()
+  }, [clearLongPressTimer, stopRecording])
+
   const startRecording = useCallback(async () => {
     if (!apiBase || !token) return
-    clearAsrDiag()
     setHint(null)
     setTranscript('')
     setRecording(true)
@@ -68,8 +83,8 @@ export function VoiceInputSection({
       const session = await startVolcAsrSession(apiBase, token, {
         onText: (text) => setTranscript(text),
         onError: (msg) => {
-          setHint(msg)
           stopRecording()
+          setHint(msg)
         },
       })
       sessionRef.current = session
@@ -79,6 +94,53 @@ export function VoiceInputSection({
     }
   }, [apiBase, token, stopRecording])
 
+  useEffect(() => {
+    return () => {
+      clearLongPressTimer()
+      sessionRef.current?.stop()
+    }
+  }, [clearLongPressTimer])
+
+  const handleMicPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    if (recording) return
+
+    if (!canUseVoice) {
+      setHint(
+        !apiBase
+          ? '未配置 VITE_API_URL，无法使用语音'
+          : '请先登录后再使用语音',
+      )
+      return
+    }
+
+    pointerIdRef.current = e.pointerId
+    pressDownRef.current = true
+    clearLongPressTimer()
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null
+      if (!pressDownRef.current) return
+      holdArmedRef.current = true
+      const btn = micBtnRef.current
+      const pid = pointerIdRef.current
+      if (btn && pid != null) {
+        try {
+          btn.setPointerCapture(pid)
+        } catch {
+          /* ignore */
+        }
+      }
+      void startRecording()
+    }, LONG_PRESS_MS)
+  }
+
+  const handleMicPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (pointerIdRef.current !== null && e.pointerId !== pointerIdRef.current) {
+      return
+    }
+    endHoldGesture()
+  }
+
   const handleParse = useCallback(async () => {
     const text = transcript.trim()
     if (!text) {
@@ -87,7 +149,7 @@ export function VoiceInputSection({
     }
     if (!isDoubaoConfigured()) {
       onFillFirstLine(text, '')
-      setHint('已填入首行商品，其余请手改或更新带「智能填入」的安装包。')
+      setHint(null)
       return
     }
     setBusy(true)
@@ -104,104 +166,92 @@ export function VoiceInputSection({
     }
   }, [transcript, fields, onApplyParsed, onFillFirstLine])
 
-  if (!canUseVoice) {
-    return (
-      <div className="mb-4 rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 px-3 py-3 text-left text-xs text-stone-500">
-        语音输入需已配置云端地址并登录账号；服务端需设置火山语音识别环境变量（见部署说明）。
-      </div>
-    )
-  }
+  const micIdle = !recording
+  const micEnabled = canUseVoice
 
   return (
-    <div className="mb-4 rounded-2xl border border-stone-200 bg-stone-50/80 px-3 py-3 text-left">
-      <p className="text-sm font-medium text-stone-800">语音记账</p>
-      <p className="mt-0.5 text-xs text-stone-500">
-        直接说车牌、商品、数量、金额等；停止录音后
-        {isDoubaoConfigured()
-          ? '点「智能填入表单」可自动拆到各栏。'
-          : '可先「填入首行商品」，其余在下方手改。'}
-      </p>
-
-      <div className="mt-2 flex flex-wrap gap-2">
-        {!recording ? (
-          <button
-            type="button"
-            onClick={() => void startRecording()}
-            className="rounded-xl bg-stone-900 px-4 py-2 text-sm font-medium text-white"
-          >
-            开始录音
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={stopRecording}
-            className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-800"
-          >
-            停止
-          </button>
-        )}
+    <div className="rounded-2xl border border-stone-200/90 bg-white p-4 text-left shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="text-sm font-medium text-[#666666]">语音</span>
+          {!micIdle && (
+            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-medium text-rose-700">
+              录音中
+            </span>
+          )}
+        </div>
         <button
           type="button"
           disabled={busy || !transcript.trim()}
           onClick={() => void handleParse()}
-          className="rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-800 disabled:opacity-50"
+          className="shrink-0 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-[#1a7f4c] disabled:opacity-45"
         >
           {isDoubaoConfigured()
             ? busy
               ? '填入中…'
-              : '智能填入表单'
-            : '填入首行商品'}
+              : '智能填入'
+            : '填入首行'}
         </button>
       </div>
 
-      <label className="mt-2 block text-xs text-stone-600">
-        识别文字
+      <div className="mt-3 flex gap-3">
         <textarea
           value={transcript}
           onChange={(e) => setTranscript(e.target.value)}
           rows={3}
-          className="mt-1 w-full resize-y rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900"
-          placeholder="说话内容会显示在这里，也可手动改"
+          className="min-h-[4.25rem] max-h-32 min-w-0 flex-1 resize-y rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm leading-relaxed text-neutral-900 placeholder:text-[#999999]"
+          placeholder="识别文字"
+          aria-label="识别文字"
         />
-      </label>
+        <div className="flex shrink-0 flex-col justify-end self-stretch pb-0.5">
+          <button
+            ref={micBtnRef}
+            type="button"
+            style={{ touchAction: 'none' }}
+            onPointerDown={handleMicPointerDown}
+            onPointerUp={handleMicPointerUp}
+            onPointerCancel={handleMicPointerUp}
+            onLostPointerCapture={() => endHoldGesture()}
+            className={
+              micIdle
+                ? micEnabled
+                  ? 'flex h-14 w-14 select-none items-center justify-center rounded-full bg-[#1a7f4c] text-white shadow-md active:scale-95 active:bg-[#166b3c]'
+                  : 'flex h-14 w-14 select-none items-center justify-center rounded-full bg-stone-200 text-stone-500'
+                : 'flex h-14 w-14 select-none items-center justify-center rounded-full bg-rose-600 text-white shadow-md ring-[3px] ring-rose-200/70'
+            }
+            title={micIdle ? '长按开始，松手结束' : undefined}
+            aria-label={micIdle ? '长按麦克风说话，松手结束' : '录音中，松手结束'}
+          >
+            <MicIcon className="h-7 w-7" />
+          </button>
+        </div>
+      </div>
 
       {hint && (
-        <p className="mt-2 text-xs text-amber-800" role="status">
+        <p className="mt-2 text-[11px] leading-snug text-amber-800" role="status">
           {hint}
         </p>
       )}
-
-      <details className="mt-3 rounded-xl border border-stone-200 bg-white px-3 py-2 text-left">
-        <summary className="cursor-pointer text-xs font-medium text-stone-700">
-          语音连接诊断日志（出错时展开，复制发给开发者）
-        </summary>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void copyDiag()}
-            className="rounded-lg bg-stone-800 px-3 py-1.5 text-xs font-medium text-white"
-          >
-            复制全部日志
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              clearAsrDiag()
-              setHint('已清空诊断日志')
-            }}
-            className="rounded-lg border border-stone-200 px-3 py-1.5 text-xs text-stone-700"
-          >
-            清空
-          </button>
-        </div>
-        <textarea
-          readOnly
-          value={diagText || '（点「开始录音」后此处会有日志）'}
-          rows={8}
-          className="mt-2 w-full resize-y font-mono text-[11px] leading-snug text-stone-800"
-          spellCheck={false}
-        />
-      </details>
     </div>
+  )
+}
+
+function MicIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <line x1="12" y1="19" x2="12" y2="23" />
+      <line x1="8" y1="23" x2="16" y2="23" />
+    </svg>
   )
 }

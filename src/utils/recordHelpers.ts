@@ -27,6 +27,14 @@ export function parseMoney(s: string): number {
   return Number.isNaN(n) ? 0 : Math.round(n * 100) / 100
 }
 
+/** 数量、金额等：仅保留数字与最多一个小数点，过滤中文与其它字符 */
+export function sanitizeUnsignedDecimalInput(raw: string): string {
+  const t = String(raw).replace(/[^\d.]/g, '')
+  const dot = t.indexOf('.')
+  if (dot === -1) return t
+  return t.slice(0, dot + 1) + t.slice(dot + 1).replace(/\./g, '')
+}
+
 /**
  * 金额列 id：优先带 `key: 'amount'` 的默认列，否则匹配名称「金额」
  * （旧数据或手加字段可能无 key，避免核账弹窗误认为无应收、不显示输入框）
@@ -116,25 +124,35 @@ export function getPlateValue(record: LedgerRecord, fields: FieldDef[]): string 
   return pid ? (record.values[pid] || '').trim() : ''
 }
 
-/** 展开为若干 (商品, 数量) 行；兼容无 lineItems 的旧数据 */
+export type ExpandedProductLine = {
+  product: string
+  quantity: string
+  /** 该行小计（元），来自 lineItem.values[金额列] */
+  lineAmountStr: string
+}
+
+/** 展开为若干 (商品, 数量, 行金额) 行；兼容无 lineItems 的旧数据 */
 export function expandProductLines(
   record: LedgerRecord,
   fields: FieldDef[],
-): { product: string; quantity: string }[] {
+): ExpandedProductLine[] {
   const pid = fields.find((f) => f.key === 'product')?.id
   const qid = fields.find((f) => f.key === 'quantity')?.id
+  const aid = getAmountFieldId(fields)
   if (!pid || !qid) return []
 
   if (record.lineItems && record.lineItems.length > 0) {
     return record.lineItems.map((li) => ({
       product: (li.values[pid] || '').trim(),
       quantity: (li.values[qid] || '').trim(),
+      lineAmountStr: aid ? (li.values[aid] || '').trim() : '',
     }))
   }
   return [
     {
       product: (record.values[pid] || '').trim(),
       quantity: (record.values[qid] || '').trim(),
+      lineAmountStr: '',
     },
   ]
 }

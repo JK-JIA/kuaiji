@@ -10,6 +10,10 @@ type Props = {
   onChangeValue: (next: string) => void
   onConfirm: () => void
   recordDates?: Set<string>
+  /** 主按钮文案，默认「确定」 */
+  confirmLabel?: string
+  /** 嵌套在其它全屏层之上时使用，如 z-[100] */
+  overlayZClass?: string
 }
 
 export function CalendarPickerModal({
@@ -19,6 +23,8 @@ export function CalendarPickerModal({
   onChangeValue,
   onConfirm,
   recordDates,
+  confirmLabel = '确定',
+  overlayZClass = 'z-50',
 }: Props) {
   const todayStr = format(new Date(), 'yyyy-MM-dd')
 
@@ -31,7 +37,9 @@ export function CalendarPickerModal({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/35 p-0 backdrop-blur-[3px] sm:items-center sm:p-4">
+    <div
+      className={`fixed inset-0 flex items-end justify-center bg-stone-900/35 p-0 backdrop-blur-[3px] sm:items-center sm:p-4 ${overlayZClass}`}
+    >
       <div className="absolute inset-0" aria-hidden onClick={onClose} />
       <div className="relative z-10 w-full max-w-[360px] overflow-hidden rounded-t-[1.75rem] border border-stone-200 bg-white shadow-2xl sm:rounded-3xl">
         <div className="border-b border-stone-100 px-5 pb-2 pt-5">
@@ -73,7 +81,7 @@ export function CalendarPickerModal({
               }}
               className="rounded-full bg-stone-900 px-6 py-2 text-sm font-medium text-white hover:bg-stone-800"
             >
-              跳转
+              {confirmLabel}
             </button>
           </div>
         </div>

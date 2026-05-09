@@ -1,3 +1,4 @@
+import { useCallback, useRef, useState } from 'react'
 import type { FieldDef, LedgerRecord } from '../types'
 import {
   expandProductLines,
@@ -5,16 +6,22 @@ import {
   getAmountFieldId,
   getExpectedAmount,
   getOutstanding,
+  getPlateValue,
   getReceivedAmount,
   isRecordFullyPaid,
+  parseMoney,
 } from '../utils/recordHelpers'
+
+const DELETE_STRIP_W = 72
+/** 商品行与底部总价行共用，保证「数量 / 金额 / 总价」列对齐 */
+const RECORD_LINE_GRID =
+  'grid grid-cols-[minmax(0,1fr)_4.5rem_minmax(6rem,max-content)] items-center gap-x-4'
 
 type Props = {
   record: LedgerRecord
   fields: FieldDef[]
   onEdit?: (record: LedgerRecord) => void
   onDelete?: (id: string) => void
-  /** 首页右侧核账，弹出收款录入 */
   onReconcile?: (record: LedgerRecord) => void
 }
 
@@ -34,137 +41,479 @@ export function RecordCard({
   const ordered = [...fields].sort((a, b) => a.order - b.order)
   const lines = expandProductLines(record, fields)
   const amountResolvedId = amountId
+  const plateField = ordered.find((f) => f.key === 'plate')
+  const plateDisplay = getPlateValue(record, fields)
+
   const extraFields = ordered.filter(
     (f) =>
       f.key !== 'product' &&
       f.key !== 'quantity' &&
+      f.key !== 'plate' &&
       f.key !== 'amount' &&
       f.id !== amountResolvedId,
   )
 
-  return (
-    <div
-      className={`rounded-lg border text-left ${
-        fullyPaid
-          ? 'border-stone-200 bg-stone-100/95 opacity-[0.72]'
-          : 'border-stone-200 bg-white'
-      }`}
-    >
-      <div className="flex items-start gap-2 px-2 py-1.5 sm:px-2.5">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] leading-tight text-stone-500">
-            <span className="tabular-nums">
-              {new Date(record.createdAt).toLocaleTimeString('zh-CN', {
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
-            </span>
-            {fullyPaid && (
-              <span className="rounded bg-stone-300/80 px-1.5 py-px text-[10px] text-stone-700">
-                已结清
-              </span>
-            )}
-            {!fullyPaid && exp > 0 && out > 0 && (
-              <span className="rounded bg-amber-100 px-1.5 py-px text-[10px] font-medium text-amber-900">
-                未收 ¥{fmt(out)}
-              </span>
-            )}
-            {!fullyPaid && exp <= 0 && record.settled !== true && (
-              <span className="rounded bg-stone-200/90 px-1.5 py-px text-[10px] text-stone-600">
-                待核账
-              </span>
-            )}
-          </div>
-          <div className="mt-1 space-y-1">
-            {lines.map((line, i) => (
-              <div
-                key={`${record.id}-ln-${i}`}
-                className="flex flex-wrap items-baseline gap-x-4 gap-y-0 text-[13px] leading-snug"
-              >
-                <span className="font-medium text-stone-900">
-                  {line.product || '—'}
-                </span>
-                <span className="tabular-nums text-stone-700">
-                  {formatQuantityWithJin(line.quantity)}
-                </span>
-              </div>
-            ))}
-          </div>
+  const hasDeal =
+    record.dealAmount !== undefined &&
+    !Number.isNaN(record.dealAmount) &&
+    record.dealAmount >= 0
 
-          {amountId && exp > 0 && (
-            <div className="mt-1 flex flex-wrap gap-x-3 text-[11px] tabular-nums text-stone-600">
-              <span>
-                <span className="text-stone-400">应收</span>¥{fmt(exp)}
-              </span>
-              <span>
-                <span className="text-stone-400">已收</span>
-                <span className="text-emerald-700">¥{fmt(rec)}</span>
-              </span>
-              {out > 0 && (
-                <span className="font-medium text-amber-800">
-                  <span className="font-normal text-stone-400">未收</span>¥
-                  {fmt(out)}
-                </span>
-              )}
+  const displayTotal = hasDeal ? record.dealAmount! : exp
+
+  const savedVsReceivable =
+    exp > displayTotal + 0.005
+      ? Math.round((exp - displayTotal) * 100) / 100
+      : 0
+
+  const showMoney = Boolean(amountId)
+
+  const [slide, setSlide] = useState(0)
+  const [dragActive, setDragActive] = useState(false)
+  const panRef = useRef({ startX: 0, startY: 0, startSlide: 0 })
+  const activePointer = useRef<number | null>(null)
+  const dragging = useRef(false)
+  const suppressClickRef = useRef(false)
+  const surfaceRef = useRef<HTMLDivElement | null>(null)
+
+  const clampSlide = useCallback((v: number) => {
+    if (!onDelete) return 0
+    return Math.max(-DELETE_STRIP_W, Math.min(0, v))
+  }, [onDelete])
+
+  const snapSlide = useCallback(
+    (v: number) => {
+      if (!onDelete) return 0
+      return v < -DELETE_STRIP_W / 2 ? -DELETE_STRIP_W : 0
+    },
+    [onDelete],
+  )
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!onDelete || e.button !== 0) return
+    suppressClickRef.current = false
+    activePointer.current = e.pointerId
+    dragging.current = false
+    panRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startSlide: slide,
+    }
+  }
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!onDelete || activePointer.current !== e.pointerId) return
+    const dx = e.clientX - panRef.current.startX
+    const dy = e.clientY - panRef.current.startY
+    if (!dragging.current) {
+      if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) + 8) {
+        dragging.current = true
+        setDragActive(true)
+        try {
+          surfaceRef.current?.setPointerCapture(e.pointerId)
+        } catch {
+          /* ignore */
+        }
+      } else {
+        return
+      }
+    }
+    const next = clampSlide(panRef.current.startSlide + dx)
+    setSlide(next)
+  }
+
+  const endPointer = (e: React.PointerEvent) => {
+    if (activePointer.current !== e.pointerId) return
+    const wasDragging = dragging.current
+    const el = surfaceRef.current
+    if (el?.hasPointerCapture(e.pointerId)) {
+      try {
+        el.releasePointerCapture(e.pointerId)
+      } catch {
+        /* ignore */
+      }
+    }
+    activePointer.current = null
+    setDragActive(false)
+    if (wasDragging) {
+      suppressClickRef.current = true
+    }
+    if (dragging.current) {
+      setSlide((s) => snapSlide(s))
+    }
+    dragging.current = false
+  }
+
+  const handleDelete = () => {
+    onDelete?.(record.id)
+    setSlide(0)
+  }
+
+  const openReconcile = (e: React.SyntheticEvent) => {
+    e.stopPropagation()
+    setSlide(0)
+    onReconcile?.(record)
+  }
+
+  const handleCardActivate = () => {
+    if (!onEdit) return
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false
+      return
+    }
+    if (slide < -8) {
+      setSlide(0)
+      return
+    }
+    setSlide(0)
+    onEdit(record)
+  }
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl">
+      {onDelete && (
+        <div
+          className="absolute inset-y-0 right-0 z-0 flex"
+          style={{ width: DELETE_STRIP_W }}
+        >
+          <button
+            type="button"
+            onClick={(ev) => {
+              ev.stopPropagation()
+              handleDelete()
+            }}
+            className="flex w-full items-center justify-center bg-rose-600 text-xs font-semibold text-white active:bg-rose-700"
+          >
+            删除
+          </button>
+        </div>
+      )}
+
+      <div
+        ref={surfaceRef}
+        className={`relative z-10 rounded-2xl border text-left ${
+          dragActive ? '' : 'transition-[transform] duration-200 ease-out'
+        } ${
+          fullyPaid
+            ? 'border-stone-200 bg-stone-100'
+            : 'border-stone-200 bg-white'
+        } ${
+          onEdit
+            ? 'cursor-pointer'
+            : onDelete
+              ? 'cursor-grab active:cursor-grabbing'
+              : ''
+        } shadow-sm`}
+        style={{
+          transform: onDelete ? `translateX(${slide}px)` : undefined,
+          touchAction: onDelete ? 'pan-y' : undefined,
+        }}
+        tabIndex={onEdit ? 0 : undefined}
+        aria-label={onEdit ? '编辑此账单' : undefined}
+        onClick={onEdit ? handleCardActivate : undefined}
+        onKeyDown={
+          onEdit
+            ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  handleCardActivate()
+                }
+              }
+            : undefined
+        }
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endPointer}
+        onPointerCancel={endPointer}
+      >
+        <div className="px-4 py-3">
+          {showMoney && (
+            <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3">
+              <RecordCardIcon />
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-medium tabular-nums text-neutral-900">
+                    {new Date(record.createdAt).toLocaleTimeString('zh-CN', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                  <CardStatusBadges
+                    fullyPaid={fullyPaid}
+                    exp={exp}
+                    out={out}
+                    settled={record.settled === true}
+                  />
+                </div>
+                <div className="mt-2 min-w-0 space-y-2">
+                  <div className="min-w-0 w-full">
+                    <div className="min-w-0">
+                      <div className={RECORD_LINE_GRID}>
+                        <span className="min-w-0 border-b border-stone-100 pb-2 pr-1 text-[11px] font-medium text-[#666666]">
+                          商品
+                        </span>
+                        <span className="border-b border-stone-100 pb-2 text-right text-[11px] font-medium tabular-nums text-[#666666]">
+                          数量
+                        </span>
+                        <span className="border-b border-stone-100 pb-2 text-right text-[11px] font-medium tabular-nums text-[#666666]">
+                          金额
+                        </span>
+                        {lines.flatMap((line, i) => {
+                          const lineAmt = parseMoney(line.lineAmountStr)
+                          const k = `${record.id}-ln-${i}`
+                          return [
+                            <span
+                              key={`${k}-p`}
+                              className="min-w-0 truncate py-2 text-[12px] font-medium leading-snug text-neutral-900"
+                            >
+                              {line.product || '—'}
+                            </span>,
+                            <span
+                              key={`${k}-q`}
+                              className="whitespace-nowrap py-2 text-right text-[12px] tabular-nums leading-snug text-[#444444]"
+                            >
+                              {formatQuantityWithJin(line.quantity)}
+                            </span>,
+                            <span
+                              key={`${k}-a`}
+                              className="whitespace-nowrap py-2 text-right text-[12px] font-semibold tabular-nums leading-snug text-neutral-900"
+                            >
+                              {lineAmt > 0 ? `¥${fmt(lineAmt)}` : '—'}
+                            </span>,
+                          ]
+                        })}
+                      </div>
+                    </div>
+                    <div className="mt-2">
+                      <ExtraFieldsPlateLine
+                        extraFields={extraFields}
+                        values={record.values}
+                      />
+                    </div>
+                  </div>
+
+                  {(plateField ||
+                    displayTotal > 0 ||
+                    savedVsReceivable > 0 ||
+                    onReconcile) && (
+                    <div className="border-t border-stone-100/80 pt-2">
+                      <div className={RECORD_LINE_GRID}>
+                        <div className="min-w-0 text-[11px] leading-snug text-[#666666]">
+                          {plateField ? (
+                            <span className="break-all">
+                              <span className="text-[#999999]">
+                                {plateField.name}
+                              </span>
+                              {plateDisplay || '—'}
+                            </span>
+                          ) : (
+                            <span className="text-[#999999]">—</span>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          {displayTotal > 0 ? (
+                            <span className="text-[11px] font-medium tabular-nums text-[#666666]">
+                              总价
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                          {displayTotal > 0 ? (
+                            <span className="text-sm font-semibold tabular-nums text-neutral-900">
+                              ¥{fmt(displayTotal)}
+                            </span>
+                          ) : null}
+                          {onReconcile ? (
+                            <button
+                              type="button"
+                              onClick={openReconcile}
+                              onPointerDown={(e) => e.stopPropagation()}
+                              className="shrink-0 whitespace-nowrap rounded-lg bg-[#2ecc71] px-3 py-1 text-[11px] font-semibold leading-none text-white shadow-sm hover:bg-[#27ae60] active:bg-[#22a85a]"
+                            >
+                              {fullyPaid ? '改核账' : '核账'}
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                      {savedVsReceivable > 0 && (
+                        <div className="mt-1.5 border-t border-stone-50 pt-1.5">
+                          <span className="text-[10px] font-medium tabular-nums text-[#2ecc71]">
+                            已优惠 ¥{fmt(savedVsReceivable)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
-          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-stone-600">
-            {extraFields.map((f) => {
-              const v = record.values[f.id]
-              if (v === undefined || v === '') return null
-              return (
-                <span key={f.id}>
-                  <span className="text-stone-400">{f.name}</span>
-                  {v}
-                </span>
-              )
-            })}
-          </div>
-        </div>
-
-        <div className="flex w-[4.25rem] shrink-0 flex-col items-stretch gap-1.5">
-          <div className="flex justify-end gap-0.5">
-            {onEdit && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onEdit(record)
-                }}
-                className="rounded px-1.5 py-0.5 text-[11px] text-stone-600 hover:bg-stone-100"
-              >
-                编辑
-              </button>
-            )}
-            {onDelete && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onDelete(record.id)
-                }}
-                className="rounded px-1.5 py-0.5 text-[11px] text-stone-400 hover:bg-stone-100 hover:text-stone-600"
-              >
-                删除
-              </button>
-            )}
-          </div>
-          {onReconcile && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                onReconcile(record)
-              }}
-              className="rounded-md bg-emerald-600 px-2 py-1.5 text-center text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700 active:bg-emerald-800"
-            >
-              {fullyPaid ? '改核账' : '核账'}
-            </button>
+          {!showMoney && (
+            <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3">
+              <RecordCardIcon />
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-medium tabular-nums text-neutral-900">
+                    {new Date(record.createdAt).toLocaleTimeString('zh-CN', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                  <CardStatusBadges
+                    fullyPaid={fullyPaid}
+                    exp={exp}
+                    out={out}
+                    settled={record.settled === true}
+                  />
+                </div>
+                <div className="mt-2 min-w-0 space-y-2">
+                  <div className="space-y-2 text-[12px] leading-snug text-neutral-900">
+                    {lines.map((line, i) => (
+                      <div key={`${record.id}-ln-${i}`} className="min-w-0 truncate">
+                        <span className="font-medium">{line.product || '—'}</span>
+                        <span className="ml-2 tabular-nums text-[#666666]">
+                          {formatQuantityWithJin(line.quantity)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div>
+                    <ExtraFieldsPlateLine
+                      extraFields={extraFields}
+                      values={record.values}
+                    />
+                  </div>
+                  {plateField && (
+                    <div className="border-t border-stone-100/80 pt-2">
+                      <div className="flex min-w-0 items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1 text-[11px] leading-snug text-[#666666]">
+                          <span className="break-all">
+                            <span className="text-[#999999]">{plateField.name}</span>
+                            {plateDisplay || '—'}
+                          </span>
+                        </div>
+                        {onReconcile ? (
+                          <button
+                            type="button"
+                            onClick={openReconcile}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            className="shrink-0 whitespace-nowrap rounded-lg bg-[#2ecc71] px-3 py-1 text-[11px] font-semibold leading-none text-white shadow-sm hover:bg-[#27ae60] active:bg-[#22a85a]"
+                          >
+                            {fullyPaid ? '改核账' : '核账'}
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  )}
+                  {!plateField && onReconcile && (
+                    <div className="flex justify-end border-t border-stone-100/80 pt-2">
+                      <button
+                        type="button"
+                        onClick={openReconcile}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        className="shrink-0 whitespace-nowrap rounded-lg bg-[#2ecc71] px-3 py-1 text-[11px] font-semibold leading-none text-white shadow-sm hover:bg-[#27ae60] active:bg-[#22a85a]"
+                      >
+                        {fullyPaid ? '改核账' : '核账'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>
     </div>
+  )
+}
+
+function LedgerBoxIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8z" />
+      <path d="M3.27 6.96 12 12.01l8.73-5.05" />
+      <path d="M12 22.08V12" />
+    </svg>
+  )
+}
+
+function RecordCardIcon() {
+  return (
+    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-200/90 bg-emerald-50 text-[#2ecc71]">
+      <LedgerBoxIcon className="h-5 w-5" />
+    </div>
+  )
+}
+
+function ExtraFieldsPlateLine({
+  extraFields,
+  values,
+}: {
+  extraFields: FieldDef[]
+  values: Record<string, string>
+}) {
+  const pairs = extraFields.flatMap((f) => {
+    const v = values[f.id]
+    if (v === undefined || v === '') return []
+    return [{ id: f.id, name: f.name, value: v }]
+  })
+
+  if (pairs.length === 0) return null
+
+  return (
+    <div className="border-t border-stone-100/90 pt-3">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-[11px] leading-snug">
+        {pairs.flatMap(({ id, name, value }) => [
+          <span key={`${id}-n`} className="shrink-0 text-[#999999]">
+            {name}
+          </span>,
+          <span key={`${id}-v`} className="min-w-0 break-words text-[#444444]">
+            {value}
+          </span>,
+        ])}
+      </div>
+    </div>
+  )
+}
+
+function CardStatusBadges({
+  fullyPaid,
+  exp,
+  out,
+  settled,
+}: {
+  fullyPaid: boolean
+  exp: number
+  out: number
+  settled: boolean
+}) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      {fullyPaid && (
+        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium leading-none text-emerald-700">
+          已结清
+        </span>
+      )}
+      {!fullyPaid && exp > 0 && out > 0.005 && (
+        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium leading-none text-amber-900">
+          未结清
+        </span>
+      )}
+      {!fullyPaid && exp <= 0 && !settled && (
+        <span className="rounded-full bg-stone-200/90 px-2 py-0.5 text-[10px] font-medium leading-none text-stone-700">
+          待核账
+        </span>
+      )}
+    </span>
   )
 }
 
