@@ -48,8 +48,8 @@ function createClient(): DypnsSmsClient {
   return new DypnsCtor(config)
 }
 
-/** 与控制台「快速测试」默认一致，可用环境变量覆盖 */
-const DEFAULT_SIGN = '阿里云短信测试'
+/** 号码认证-短信认证：赠送签名「云渚科技验证服务」+ 登录/注册模板 100001；可用环境变量覆盖 */
+const DEFAULT_SIGN = '云渚科技验证服务'
 const DEFAULT_TEMPLATE = '100001'
 
 export async function sendAliyunSmsVerifyCode(phone11: string): Promise<void> {
@@ -84,7 +84,10 @@ export async function sendAliyunSmsVerifyCode(phone11: string): Promise<void> {
 
   const body = resp.body
   if (!body?.success || body.code !== 'OK') {
-    throw new Error(body?.message || body?.code || '短信发送失败')
+    const apiMsg = [body?.code, body?.message].filter(Boolean).join(' — ')
+    const hint =
+      '请到阿里云控制台「号码认证 → 短信认证」查看当前账号可用的签名与模板编号，并在环境变量中设置 ALIYUN_SMS_SIGN_NAME、ALIYUN_SMS_TEMPLATE_CODE（需与控制台一致）；仅配置 AccessKey 不够。'
+    throw new Error(apiMsg ? `${apiMsg}。${hint}` : hint)
   }
 }
 
