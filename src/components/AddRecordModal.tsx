@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FieldDef, LedgerRecord, LineItemRow } from '../types'
 import { useLedger } from '../context/LedgerContext'
 import {
+  computedLineAmountFromUnitAndQty,
+  deriveUnitPriceFromAmountAndQty,
   getAmountFieldId,
   parseMoney,
   parseNonNegativeMoney,
@@ -11,7 +13,13 @@ import {
 import { CalendarPickerModal } from './CalendarPickerModal'
 import { VoiceInputSection } from './VoiceInputSection'
 
-type LineForm = { id: string; product: string; quantity: string; lineAmount: string }
+type LineForm = {
+  id: string
+  product: string
+  unitPrice: string
+  quantity: string
+  lineAmount: string
+}
 
 function formatMoneyInput(n: number): string {
   const r = Math.round(n * 100) / 100
@@ -48,8 +56,10 @@ export function AddRecordModal({
 
   const prodField = sortedFields.find((f) => f.key === 'product')
   const qtyField = sortedFields.find((f) => f.key === 'quantity')
+  const unitPriceField = sortedFields.find((f) => f.key === 'unitPrice')
   const prodId = prodField?.id
   const qtyId = qtyField?.id
+  const unitPriceId = unitPriceField?.id
 
   const { records } = useLedger()
 
@@ -61,7 +71,12 @@ export function AddRecordModal({
   const rootFieldIds = useMemo(
     () =>
       sortedFields
-        .filter((f) => f.key !== 'product' && f.key !== 'quantity')
+        .filter(
+          (f) =>
+            f.key !== 'product' &&
+            f.key !== 'quantity' &&
+            f.key !== 'unitPrice',
+        )
         .filter((f) => {
           if (!canonicalAmountId) return true
           if (f.id === canonicalAmountId) return true
@@ -78,7 +93,7 @@ export function AddRecordModal({
   )
 
   const showDetailAmounts = Boolean(
-    prodField && qtyField && canonicalAmountId,
+    prodField && qtyField && canonicalAmountId && unitPriceId,
   )
 
   const rootFieldIdsForRender = useMemo(() => {
@@ -93,7 +108,13 @@ export function AddRecordModal({
     emptyFields(sortedFields),
   )
   const [lines, setLines] = useState<LineForm[]>([
-    { id: crypto.randomUUID(), product: '', quantity: '', lineAmount: '' },
+    {
+      id: crypto.randomUUID(),
+      product: '',
+      unitPrice: '',
+      quantity: '',
+      lineAmount: '',
+    },
   ])
   const [dealInput, setDealInput] = useState('')
   const [saving, setSaving] = useState(false)
@@ -170,21 +191,37 @@ export function AddRecordModal({
       )
       if (recordToEdit.lineItems && recordToEdit.lineItems.length > 0) {
         setLines(
-          recordToEdit.lineItems.map((li) => ({
-            id: li.id,
-            product: li.values[prodId] ?? '',
-            quantity: li.values[qtyId] ?? '',
-            lineAmount:
-              canonicalAmountId && li.values[canonicalAmountId] !== undefined
-                ? String(li.values[canonicalAmountId])
-                : '',
-          })),
+          recordToEdit.lineItems.map((li) => {
+            const storedAmt =
+              canonicalAmountId &&
+              li.values[canonicalAmountId] !== undefined
+                ? String(li.values[canonicalAmountId]).trim()
+                : ''
+            const qStr = String(li.values[qtyId] ?? '')
+            const upStored =
+              unitPriceId && li.values[unitPriceId]?.toString().trim()
+                ? String(li.values[unitPriceId]).trim()
+                : ''
+            const unitPrice =
+              upStored ||
+              deriveUnitPriceFromAmountAndQty(storedAmt, qStr)
+            const computed = computedLineAmountFromUnitAndQty(unitPrice, qStr)
+            const lineAmount = computed || storedAmt
+            return {
+              id: li.id,
+              product: li.values[prodId] ?? '',
+              unitPrice,
+              quantity: qStr,
+              lineAmount,
+            }
+          }),
         )
       } else {
         setLines([
           {
             id: crypto.randomUUID(),
             product: recordToEdit.values[prodId] ?? '',
+            unitPrice: '',
             quantity: recordToEdit.values[qtyId] ?? '',
             lineAmount: '',
           },
@@ -195,17 +232,32 @@ export function AddRecordModal({
       setValues(emptyFields(sortedFields))
       setDealInput('')
       setLines([
-        { id: crypto.randomUUID(), product: '', quantity: '', lineAmount: '' },
+        {
+          id: crypto.randomUUID(),
+          product: '',
+          unitPrice: '',
+          quantity: '',
+          lineAmount: '',
+        },
       ])
     }
-  }, [open, sortedFields, recordToEdit?.id, prodId, qtyId, canonicalAmountId])
+  }, [
+    open,
+    sortedFields,
+    recordToEdit?.id,
+    prodId,
+    qtyId,
+    unitPriceId,
+    canonicalAmountId,
+  ])
 
   const validate = (): string | null => {
     const merged = buildMergedValues(values, lines, prodId, qtyId)
     if (!prodId || !qtyId) return '缺少商品或数量字段配置'
 
     for (const f of sortedFields) {
-      if (f.key === 'product' || f.key === 'quantity') continue
+      if (f.key === 'product' || f.key === 'quantity' || f.key === 'unitPrice')
+        continue
       if (
         canonicalAmountId &&
         f.id !== canonicalAmountId &&
@@ -235,6 +287,12 @@ export function AddRecordModal({
       if (qtyField?.required && !q) {
         return `第 ${i + 1} 行：请填写「${qtyField.name}」`
       }
+      if (showDetailAmounts && p && q && !lines[i].unitPrice.trim()) {
+        return `第 ${i + 1} 行：已填写商品与斤数，请填写「${unitPriceField?.name ?? '单价'}」以计算金额`
+      }
+      if (showDetailAmounts && lines[i].unitPrice.trim() && !q) {
+        return `第 ${i + 1} 行：已填单价，请填写「${qtyField?.name ?? '斤数'}」`
+      }
     }
 
     const spaceIssues: string[] = []
@@ -251,6 +309,7 @@ export function AddRecordModal({
       const rowUsed =
         line.product.trim() ||
         line.quantity.trim() ||
+        line.unitPrice.trim() ||
         line.lineAmount.trim()
       if (!rowUsed) continue
       if (hasWhitespace(line.product)) {
@@ -261,6 +320,11 @@ export function AddRecordModal({
       if (hasWhitespace(line.quantity)) {
         spaceIssues.push(
           `第 ${i + 1} 行「${qtyField?.name ?? '数量'}」中含空格或空白，请删去后再保存`,
+        )
+      }
+      if (showDetailAmounts && line.unitPrice && hasWhitespace(line.unitPrice)) {
+        spaceIssues.push(
+          `第 ${i + 1} 行「${unitPriceField?.name ?? '单价'}」中含空格或空白，请删去后再保存`,
         )
       }
       if (
@@ -307,7 +371,10 @@ export function AddRecordModal({
         lines.length > 1 ||
         Boolean(
           canonicalAmountId &&
-            lines.some((l) => l.lineAmount.trim() !== ''),
+            lines.some(
+              (l) =>
+                l.lineAmount.trim() !== '' || l.unitPrice.trim() !== '',
+            ),
         )
 
       let lineItems: LineItemRow[] | undefined
@@ -317,6 +384,9 @@ export function AddRecordModal({
           values: {
             [prodId]: l.product.trim(),
             [qtyId]: l.quantity.trim(),
+            ...(unitPriceId
+              ? { [unitPriceId]: l.unitPrice.trim() }
+              : {}),
             ...(canonicalAmountId
               ? { [canonicalAmountId]: l.lineAmount.trim() }
               : {}),
@@ -352,7 +422,13 @@ export function AddRecordModal({
   const addLine = () => {
     setLines((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), product: '', quantity: '', lineAmount: '' },
+      {
+        id: crypto.randomUUID(),
+        product: '',
+        unitPrice: '',
+        quantity: '',
+        lineAmount: '',
+      },
     ])
   }
 
@@ -446,14 +522,23 @@ export function AddRecordModal({
               })
               if (productLines?.length && prodId && qtyId) {
                 setLines(
-                  productLines.map((l) => ({
-                    id: crypto.randomUUID(),
-                    product: l.product,
-                    quantity: sanitizeUnsignedDecimalInput(l.quantity),
-                    lineAmount: sanitizeUnsignedDecimalInput(
+                  productLines.map((l) => {
+                    const q = sanitizeUnsignedDecimalInput(l.quantity)
+                    const u = sanitizeUnsignedDecimalInput(
+                      (l.unitPrice ?? '').trim(),
+                    )
+                    const fromAi = sanitizeUnsignedDecimalInput(
                       l.lineAmount?.trim() ?? '',
-                    ),
-                  })),
+                    )
+                    const computed = computedLineAmountFromUnitAndQty(u, q)
+                    return {
+                      id: crypto.randomUUID(),
+                      product: l.product,
+                      unitPrice: u,
+                      quantity: q,
+                      lineAmount: computed || fromAi,
+                    }
+                  }),
                 )
               }
             }}
@@ -550,9 +635,12 @@ export function AddRecordModal({
               <div className="rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm">
                 {showDetailAmounts && canonicalAmountId && (
                   <div
-                    className="grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem_2.5rem] gap-x-2 border-b border-stone-100 pb-2 text-[11px] font-medium text-[#666666]"
+                    className="grid grid-cols-[minmax(0,1fr)_3.25rem_3.25rem_4rem_2.25rem] gap-x-2 border-b border-stone-100 pb-2 text-[11px] font-medium text-[#666666]"
                   >
                     <span className="truncate">{prodField.name}</span>
+                    <span className="text-center">
+                      {unitPriceField?.name ?? '单价'}
+                    </span>
                     <span className="text-center">{qtyField.name}</span>
                     <span className="text-right">金额</span>
                     <span aria-hidden className="w-2" />
@@ -631,7 +719,7 @@ export function AddRecordModal({
                     {lines.map((line, idx) => (
                       <div
                         key={line.id}
-                        className="grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem_2.5rem] items-center gap-x-2 py-2.5 first:pt-0"
+                        className="grid grid-cols-[minmax(0,1fr)_3.25rem_3.25rem_4rem_2.25rem] items-center gap-x-2 py-2.5 first:pt-0"
                       >
                         <input
                           value={line.product}
@@ -651,6 +739,36 @@ export function AddRecordModal({
                         <input
                           type="text"
                           inputMode="decimal"
+                          value={line.unitPrice}
+                          onChange={(e) => {
+                            const u = sanitizeUnsignedDecimalInput(
+                              e.target.value,
+                            )
+                            setLines((prev) =>
+                              prev.map((row, i) =>
+                                i === idx
+                                  ? {
+                                      ...row,
+                                      unitPrice: u,
+                                      lineAmount:
+                                        computedLineAmountFromUnitAndQty(
+                                          u,
+                                          row.quantity,
+                                        ),
+                                    }
+                                  : row,
+                              ),
+                            )
+                          }}
+                          className="rounded-xl border border-stone-200 bg-[#fafafa] px-1.5 py-2 text-center text-sm tabular-nums text-neutral-900 placeholder:text-[#999999]"
+                          placeholder="元/斤"
+                          aria-label={unitPriceField?.name ?? '单价'}
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                        <input
+                          type="text"
+                          inputMode="decimal"
                           value={line.quantity}
                           onChange={(e) => {
                             const q = sanitizeUnsignedDecimalInput(
@@ -658,7 +776,17 @@ export function AddRecordModal({
                             )
                             setLines((prev) =>
                               prev.map((row, i) =>
-                                i === idx ? { ...row, quantity: q } : row,
+                                i === idx
+                                  ? {
+                                      ...row,
+                                      quantity: q,
+                                      lineAmount:
+                                        computedLineAmountFromUnitAndQty(
+                                          row.unitPrice,
+                                          q,
+                                        ),
+                                    }
+                                  : row,
                               ),
                             )
                           }}
@@ -668,26 +796,13 @@ export function AddRecordModal({
                           autoComplete="off"
                           spellCheck={false}
                         />
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={line.lineAmount}
-                          onChange={(e) => {
-                            const a = sanitizeUnsignedDecimalInput(
-                              e.target.value,
-                            )
-                            setLines((prev) =>
-                              prev.map((row, i) =>
-                                i === idx ? { ...row, lineAmount: a } : row,
-                              ),
-                            )
-                          }}
-                          className="rounded-xl border border-stone-200 bg-[#fafafa] px-1.5 py-2 text-right text-sm font-semibold tabular-nums text-amber-900 placeholder:text-amber-900/50"
-                          placeholder="0"
-                          autoComplete="off"
+                        <div
+                          className="rounded-xl border border-dashed border-stone-200 bg-stone-50 px-1.5 py-2 text-right text-sm font-semibold tabular-nums text-amber-900"
                           aria-label="金额"
-                          spellCheck={false}
-                        />
+                          title="由单价×斤数自动计算"
+                        >
+                          {line.lineAmount || '—'}
+                        </div>
                         <div className="flex justify-end">
                           {lines.length > 1 ? (
                             <button
@@ -721,7 +836,7 @@ export function AddRecordModal({
                         </span>
                       </div>
                       <p className="mt-1 text-[10px] leading-tight text-[#999999]">
-                        由各行金额自动合计
+                        各行金额 = 单价 × 斤数，自动合计为应收
                       </p>
                     </div>
                     <div className="mt-4 rounded-xl border border-stone-100 bg-[#f8f9fa] p-3">
@@ -887,7 +1002,8 @@ function rootValuesFromRecord(
 ): Record<string, string> {
   const o = emptyFields(fields)
   for (const f of fields) {
-    if (f.key === 'product' || f.key === 'quantity') continue
+    if (f.key === 'product' || f.key === 'quantity' || f.key === 'unitPrice')
+      continue
     if (raw[f.id] !== undefined) o[f.id] = raw[f.id]
   }
   return o

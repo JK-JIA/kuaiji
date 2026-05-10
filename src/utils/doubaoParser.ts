@@ -5,6 +5,8 @@
  * 模型：Doubao-Seed-2.0-mini (多模态模型，支持图片识别)
  */
 
+import { computedLineAmountFromUnitAndQty } from './recordHelpers'
+
 /** 在 .env 中配置 VITE_DOUBAO_API_KEY，勿提交密钥 */
 const DOUBAO_API_KEY =
   typeof import.meta.env.VITE_DOUBAO_API_KEY === 'string'
@@ -23,6 +25,8 @@ const DOUBAO_CONFIG = {
 export type DoubaoProductLine = {
   product: string
   quantity: string
+  /** 单价（元/斤），可选；与数量齐全时可由系统算行金额 */
+  unitPrice?: string
   /** 该行金额（元），可选 */
   lineAmount?: string
 }
@@ -129,6 +133,19 @@ function supplementFromUserText(
     }
   }
 
+  if (pl?.length) {
+    pl = pl.map((row) => {
+      const comp = computedLineAmountFromUnitAndQty(
+        row.unitPrice ?? '',
+        row.quantity ?? '',
+      )
+      if (comp && !(row.lineAmount ?? '').trim()) {
+        return { ...row, lineAmount: comp }
+      }
+      return row
+    })
+  }
+
   return { mapped: next, lines: pl }
 }
 
@@ -168,7 +185,12 @@ export async function parseWithDoubao(
   try {
     // 构建字段说明
     const fieldDescriptions = fields
-      .filter((f) => f.key !== 'product' && f.key !== 'quantity')
+      .filter(
+        (f) =>
+          f.key !== 'product' &&
+          f.key !== 'quantity' &&
+          f.key !== 'unitPrice',
+      )
       .map((f) => f.name)
       .join('、')
 
@@ -186,8 +208,9 @@ export async function parseWithDoubao(
 须提取的字段名必须与系统一致（含自定义列）：${fieldDescriptions || '车牌号等'}；其中**金额类字段名固定为「${amountLabel}」**（不要用收款、价钱等别的键名）。
 
 【商品与数量】
-- 多种商品：必须用「商品明细」数组，每项一条：{ "商品":"名称", "数量":"数字+单位" }；若用户说了**该行货款**，再加 "金额":"数字"（该行小计，元）。
+- 多种商品：必须用「商品明细」数组，每项一条：{ "商品":"名称", "数量":"数字+单位（如斤）", "单价":"数字（元/斤，可选）" }；若用户说了**该行货款**或**小计**，再加 "金额":"数字"（该行小计，元）。若同时有「单价」和可换算的斤数，可省略 "金额"。
 - **数量一律写成数字+单位**，例如：5斤、100斤、12.5公斤、3包；禁止只写「100」不写单位（除非原文完全没有单位则用「斤」）。
+- **单价**：用户说「每斤3块」「单价2.5」等，写成阿拉伯数字的 "单价" 字段（元/斤）。
 - 用户说「五斤」「一百斤」分别写成「5斤」「100斤」。
 - 多种商品禁止把名称堆在一个字段里用顿号拼接；每种一行。
 
@@ -203,18 +226,18 @@ export async function parseWithDoubao(
 多商品示例：
 {
   "商品明细": [
-    { "商品": "红薯", "数量": "30斤", "金额": "50" },
-    { "商品": "白薯", "数量": "15斤", "金额": "30" }
+    { "商品": "红薯", "数量": "30斤", "单价": "2", "金额": "60" },
+    { "商品": "白薯", "数量": "15斤", "单价": "2" }
   ],
   "车牌号": "京A8899",
-  "${amountLabel}": "3150"
+  "${amountLabel}": "90"
 }
 
 单商品示例：
 {
-  "商品明细": [ { "商品": "苹果", "数量": "5斤" } ],
+  "商品明细": [ { "商品": "苹果", "数量": "5斤", "单价": "6" } ],
   "车牌号": "川A12345",
-  "${amountLabel}": "50"
+  "${amountLabel}": "30"
 }`
 
     console.log('调用豆包 API，模型:', DOUBAO_CONFIG.MODEL)
@@ -330,14 +353,27 @@ export async function parseWithDoubao(
               rowAmt !== undefined && rowAmt !== null
                 ? String(rowAmt).trim()
                 : ''
+            const upRaw =
+              o['单价'] ?? o['单价每斤'] ?? o['每斤'] ?? o['元每斤']
+            const unitPriceRaw =
+              upRaw !== undefined && upRaw !== null
+                ? normalizeMoneyDigits(String(upRaw).trim())
+                : ''
+            const qtyStr = String(
+              o['数量'] ?? o['斤'] ?? o['重量'] ?? '',
+            ).trim()
+            const computed = unitPriceRaw
+              ? computedLineAmountFromUnitAndQty(unitPriceRaw, qtyStr)
+              : ''
+            const lineAmountFinal =
+              lineAmountRaw && normalizeMoneyDigits(lineAmountRaw)
+                ? normalizeMoneyDigits(lineAmountRaw)
+                : computed || undefined
             return {
               product: String(o['商品'] ?? o['名称'] ?? '').trim(),
-              quantity: String(
-                o['数量'] ?? o['斤'] ?? o['重量'] ?? '',
-              ).trim(),
-              lineAmount: lineAmountRaw
-                ? normalizeMoneyDigits(lineAmountRaw)
-                : undefined,
+              quantity: qtyStr,
+              unitPrice: unitPriceRaw || undefined,
+              lineAmount: lineAmountFinal,
             }
           }
           return { product: '', quantity: '' }
@@ -361,7 +397,12 @@ export async function parseWithDoubao(
     const mappedData: Record<string, string> = {}
 
     for (const field of fields) {
-      if (field.key === 'product' || field.key === 'quantity') continue
+      if (
+        field.key === 'product' ||
+        field.key === 'quantity' ||
+        field.key === 'unitPrice'
+      )
+        continue
       const v = parsed[field.name]
       if (v !== undefined && v !== null && String(v).trim()) {
         mappedData[field.id] = String(v).trim()

@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie'
 import { getDefaultFieldDefs } from '../constants/defaultLedgerFields'
+import { mergeMissingDefaultFields } from '../constants/mergeBuiltinFields'
 import type { FieldDef, LedgerRecord } from '../types'
 import { DEFAULT_FIELD_KEYS } from '../types'
 
@@ -26,6 +27,18 @@ export class LedgerDatabase extends Dexie {
         if (f.key === 'quantity' && f.type === 'text') {
           await tx.table('fields').put({ ...f, type: 'number' })
         }
+      })
+    this.version(3)
+      .stores({
+        fields: '&id, order',
+        records: '&id, date, createdAt',
+      })
+      .upgrade(async (tx) => {
+        const all = (await tx.table('fields').toArray()) as FieldDef[]
+        if (all.some((f) => f.key === 'unitPrice')) return
+        const merged = mergeMissingDefaultFields(all)
+        await tx.table('fields').clear()
+        await tx.table('fields').bulkPut(merged)
       })
   }
 }

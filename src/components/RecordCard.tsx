@@ -9,14 +9,18 @@ import {
   getOutstanding,
   getPlateValue,
   getReceivedAmount,
+  getUnitPriceFieldId,
   isRecordFullyPaid,
   parseMoney,
 } from '../utils/recordHelpers'
 
 const DELETE_STRIP_W = 72
-/** 商品行与底部总价行共用，保证「数量 / 金额 / 总价」列对齐 */
-const RECORD_LINE_GRID =
+/** 无单价列：商品 / 数量 / 金额 */
+const RECORD_LINE_GRID_3 =
   'grid grid-cols-[minmax(0,1fr)_4.5rem_minmax(6rem,max-content)] items-center gap-x-4'
+/** 含单价：商品 / 单价 / 斤数 / 金额 */
+const RECORD_LINE_GRID_4 =
+  'grid grid-cols-[minmax(0,1fr)_2.75rem_3rem_minmax(5.5rem,max-content)] items-center gap-x-4'
 
 type Props = {
   record: LedgerRecord
@@ -42,12 +46,20 @@ export function RecordCard({
   const ordered = [...fields].sort((a, b) => a.order - b.order)
   const lines = expandProductLines(record, fields)
   const amountResolvedId = amountId
+  const unitPriceFieldId = getUnitPriceFieldId(fields)
+  const lineGrid =
+    unitPriceFieldId && amountId ? RECORD_LINE_GRID_4 : RECORD_LINE_GRID_3
   const plateField = ordered.find((f) => f.key === 'plate')
+  const unitPriceColLabel =
+    ordered.find((f) => f.key === 'unitPrice')?.name ?? '单价'
+  const quantityColLabel =
+    ordered.find((f) => f.key === 'quantity')?.name ?? '数量'
   const plateDisplay = getPlateValue(record, fields)
 
   const extraFields = ordered.filter(
     (f) =>
       f.key !== 'product' &&
+      f.key !== 'unitPrice' &&
       f.key !== 'quantity' &&
       f.key !== 'plate' &&
       f.key !== 'amount' &&
@@ -268,18 +280,24 @@ export function RecordCard({
                 <div className="mt-2 min-w-0 space-y-2">
                   <div className="min-w-0 w-full">
                     <div className="min-w-0">
-                      <div className={RECORD_LINE_GRID}>
+                      <div className={lineGrid}>
                         <span className="min-w-0 border-b border-stone-100 pb-2 pr-1 text-[11px] font-medium text-[#666666]">
                           商品
                         </span>
+                        {unitPriceFieldId ? (
+                          <span className="border-b border-stone-100 pb-2 text-center text-[11px] font-medium tabular-nums text-[#666666]">
+                            {unitPriceColLabel}
+                          </span>
+                        ) : null}
                         <span className="border-b border-stone-100 pb-2 text-right text-[11px] font-medium tabular-nums text-[#666666]">
-                          数量
+                          {quantityColLabel}
                         </span>
                         <span className="border-b border-stone-100 pb-2 text-right text-[11px] font-medium tabular-nums text-[#666666]">
                           金额
                         </span>
                         {lines.flatMap((line, i) => {
                           const lineAmt = parseMoney(line.lineAmountStr)
+                          const up = parseMoney(line.unitPriceStr)
                           const k = `${record.id}-ln-${i}`
                           return [
                             <span
@@ -288,6 +306,16 @@ export function RecordCard({
                             >
                               {line.product || '—'}
                             </span>,
+                            ...(unitPriceFieldId
+                              ? [
+                                  <span
+                                    key={`${k}-u`}
+                                    className="whitespace-nowrap py-2 text-center text-[12px] tabular-nums leading-snug text-[#444444]"
+                                  >
+                                    {up > 0 ? `¥${fmt(up)}` : '—'}
+                                  </span>,
+                                ]
+                              : []),
                             <span
                               key={`${k}-q`}
                               className="whitespace-nowrap py-2 text-right text-[12px] tabular-nums leading-snug text-[#444444]"
@@ -317,8 +345,18 @@ export function RecordCard({
                     savedVsReceivable > 0 ||
                     onReconcile) && (
                     <div className="border-t border-stone-100/80 pt-2">
-                      <div className={RECORD_LINE_GRID}>
-                        <div className="min-w-0 text-[11px] leading-snug text-[#666666]">
+                      <div
+                        className={
+                          unitPriceFieldId
+                            ? 'grid grid-cols-4 items-center gap-x-4'
+                            : lineGrid
+                        }
+                      >
+                        <div
+                          className={`min-w-0 text-[11px] leading-snug text-[#666666] ${
+                            unitPriceFieldId ? 'col-span-2' : ''
+                          }`}
+                        >
                           {plateField ? (
                             <span className="break-all">
                               <span className="text-[#999999]">

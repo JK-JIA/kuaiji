@@ -12,6 +12,7 @@ import {
   getExpectedAmount,
   getPlateValue,
   getReceivedAmount,
+  getUnitPriceFieldId,
   parseMoney,
 } from '../utils/recordHelpers'
 
@@ -36,6 +37,7 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
   const [pendingSave, setPendingSave] = useState(false)
 
   const amountId = getAmountFieldId(fields)
+  const unitPriceId = getUnitPriceFieldId(fields)
   const lines = expandProductLines(record, fields)
   const plate = getPlateValue(record, fields) || '—'
   const exp = getExpectedAmount(record, amountId)
@@ -176,12 +178,14 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
           <div className="my-2 border-t border-dashed border-stone-200" />
           {lines.map((line, i) => {
             const amt = parseMoney(line.lineAmountStr)
+            const up = parseMoney(line.unitPriceStr)
             return (
               <div key={`ln-${i}`} className="mb-1.5">
                 <p className="font-semibold">{line.product || '—'}</p>
                 <p className="text-[10px] text-[#666666]">
-                  数量 {line.quantity || '—'}
-                  {amt > 0 ? ` · ¥${fmtMoney(amt)}` : ''}
+                  {unitPriceId && up > 0 ? `单价 ¥${fmtMoney(up)} · ` : ''}
+                  斤数 {line.quantity || '—'}
+                  {amt > 0 ? ` · 小计 ¥${fmtMoney(amt)}` : ''}
                 </p>
               </div>
             )

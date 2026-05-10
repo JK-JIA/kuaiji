@@ -12,25 +12,32 @@ export function getDefaultFieldDefs(): FieldDef[] {
       order: 0,
     },
     {
+      id: DEFAULT_FIELD_KEYS.unitPrice,
+      name: '单价',
+      type: 'number',
+      key: 'unitPrice',
+      order: 1,
+    },
+    {
       id: DEFAULT_FIELD_KEYS.quantity,
-      name: '数量（斤）',
+      name: '斤数',
       type: 'number',
       key: 'quantity',
-      order: 1,
+      order: 2,
     },
     {
       id: DEFAULT_FIELD_KEYS.plate,
       name: '车牌号',
       type: 'text',
       key: 'plate',
-      order: 2,
+      order: 3,
     },
     {
       id: DEFAULT_FIELD_KEYS.amount,
       name: '金额',
       type: 'number',
       key: 'amount',
-      order: 3,
+      order: 4,
     },
   ]
 }

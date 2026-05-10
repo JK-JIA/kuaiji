@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
-import type { DoubaoParseResult } from '../utils/doubaoParser'
+import type { DoubaoParseResult, DoubaoProductLine } from '../utils/doubaoParser'
 import { isDoubaoConfigured, parseWithDoubao } from '../utils/doubaoParser'
 import { startVolcAsrSession } from '../utils/volcAsrClient'
 import type { FieldDef } from '../types'
@@ -12,11 +12,7 @@ type Props = {
   fields: FieldDef[]
   onApplyParsed: (
     data: Record<string, string>,
-    productLines?: {
-      product: string
-      quantity: string
-      lineAmount?: string
-    }[],
+    productLines?: DoubaoProductLine[],
   ) => void
   onFillFirstLine: (product: string, quantity: string) => void
 }

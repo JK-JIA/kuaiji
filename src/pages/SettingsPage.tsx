@@ -68,7 +68,7 @@ export function SettingsPage() {
   const removeField = async (id: string) => {
     const target = sorted.find((f) => f.id === id)
     if (target?.key) {
-      alert('默认字段（商品 / 数量 / 车牌号 / 金额）不能删除，可改名。')
+      alert('默认字段（商品 / 单价 / 斤数 / 车牌号 / 金额）不能删除，可改名。')
       return
     }
     setBusy(true)
@@ -410,7 +410,7 @@ export function SettingsPage() {
       <header className="mb-3 px-4">
         <h2 className="text-sm font-semibold text-neutral-900">自定义字段</h2>
         <p className="mt-1 text-[11px] leading-relaxed text-[#666666]">
-          默认含商品、数量、车牌号、金额（数字）；可新增备注等自定义字段。可为字段勾选「必填」，记账时将标红星并校验。
+          默认含商品、单价、斤数、车牌号、金额（数字）；明细行金额为单价×斤数自动计算。可新增备注等自定义字段。可为字段勾选「必填」，记账时将标红星并校验。
         </p>
       </header>
 

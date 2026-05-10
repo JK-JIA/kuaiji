@@ -5,7 +5,7 @@ export interface FieldDef {
   name: string
   type: FieldType
   /** stable keys for built-ins */
-  key?: 'product' | 'quantity' | 'plate' | 'amount'
+  key?: 'product' | 'unitPrice' | 'quantity' | 'plate' | 'amount'
   order: number
   /** 记账/编辑时必填；缺省 false */
   required?: boolean
@@ -38,6 +38,7 @@ export interface LedgerRecord {
 
 export const DEFAULT_FIELD_KEYS = {
   product: 'field_product',
+  unitPrice: 'field_unit_price',
   quantity: 'field_quantity',
   plate: 'field_plate',
   amount: 'field_amount',

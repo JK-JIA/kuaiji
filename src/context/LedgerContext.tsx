@@ -12,6 +12,7 @@ import {
   putLedger,
 } from '../api/ledgerClient'
 import { getDefaultFieldDefs } from '../constants/defaultLedgerFields'
+import { mergeMissingDefaultFields } from '../constants/mergeBuiltinFields'
 import type { FieldDef, LedgerRecord, ReconcilePayload } from '../types'
 import {
   addRecord,
@@ -55,6 +56,12 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       let recordsNext = sortRecordsDesc(data.records as LedgerRecord[])
       if (fieldsNext.length === 0) {
         fieldsNext = getDefaultFieldDefs()
+        await putLedger(apiBase, token, {
+          fields: fieldsNext,
+          records: recordsNext,
+        })
+      } else if (!fieldsNext.some((f) => f.key === 'unitPrice')) {
+        fieldsNext = mergeMissingDefaultFields(fieldsNext)
         await putLedger(apiBase, token, {
           fields: fieldsNext,
           records: recordsNext,

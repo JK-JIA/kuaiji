@@ -46,6 +46,36 @@ export function getAmountFieldId(fields: FieldDef[]): string | undefined {
   )
 }
 
+export function getUnitPriceFieldId(fields: FieldDef[]): string | undefined {
+  return fields.find((f) => f.key === 'unitPrice')?.id
+}
+
+/** 单价×斤数 → 行金额字符串（元，最多两位小数）；任一侧无效或≤0 则空串 */
+export function computedLineAmountFromUnitAndQty(
+  unitPriceStr: string,
+  quantityStr: string,
+): string {
+  const u = parseFloat(sanitizeUnsignedDecimalInput(unitPriceStr))
+  const q = parseFloat(sanitizeUnsignedDecimalInput(quantityStr))
+  if (!Number.isFinite(u) || !Number.isFinite(q) || u <= 0 || q <= 0)
+    return ''
+  const cents = Math.round(u * q * 100)
+  const v = cents / 100
+  return Number.isInteger(v) ? String(v) : v.toFixed(2)
+}
+
+/** 编辑旧数据：仅有行金额与斤数时反推单价展示 */
+export function deriveUnitPriceFromAmountAndQty(
+  lineAmountStr: string,
+  quantityStr: string,
+): string {
+  const a = parseMoney(lineAmountStr)
+  const q = parseFloat(sanitizeUnsignedDecimalInput(quantityStr))
+  if (a <= 0 || !Number.isFinite(q) || q <= 0) return ''
+  const u = Math.round((a / q) * 10000) / 10000
+  return String(u)
+}
+
 export function getExpectedAmount(
   record: LedgerRecord,
   amountId: string | undefined,
@@ -126,6 +156,8 @@ export function getPlateValue(record: LedgerRecord, fields: FieldDef[]): string 
 
 export type ExpandedProductLine = {
   product: string
+  /** 单价（元/斤），无列或未填则为空 */
+  unitPriceStr: string
   quantity: string
   /** 该行小计（元），来自 lineItem.values[金额列] */
   lineAmountStr: string
@@ -138,12 +170,14 @@ export function expandProductLines(
 ): ExpandedProductLine[] {
   const pid = fields.find((f) => f.key === 'product')?.id
   const qid = fields.find((f) => f.key === 'quantity')?.id
+  const uid = getUnitPriceFieldId(fields)
   const aid = getAmountFieldId(fields)
   if (!pid || !qid) return []
 
   if (record.lineItems && record.lineItems.length > 0) {
     return record.lineItems.map((li) => ({
       product: (li.values[pid] || '').trim(),
+      unitPriceStr: uid ? (li.values[uid] || '').trim() : '',
       quantity: (li.values[qid] || '').trim(),
       lineAmountStr: aid ? (li.values[aid] || '').trim() : '',
     }))
@@ -151,6 +185,7 @@ export function expandProductLines(
   return [
     {
       product: (record.values[pid] || '').trim(),
+      unitPriceStr: uid ? (record.values[uid] || '').trim() : '',
       quantity: (record.values[qid] || '').trim(),
       lineAmountStr: '',
     },
