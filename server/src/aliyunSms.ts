@@ -16,7 +16,13 @@ type DypnsSmsClient = {
   sendSmsVerifyCode(
     req: SendSmsVerifyCodeRequest,
   ): Promise<{
-    body?: { success?: boolean; code?: string; message?: string }
+    body?: {
+      success?: boolean
+      code?: string
+      message?: string
+      requestId?: string
+      model?: Record<string, unknown>
+    }
   }>
   checkSmsVerifyCode(
     req: CheckSmsVerifyCodeRequest,
@@ -52,6 +58,11 @@ function createClient(): DypnsSmsClient {
 const DEFAULT_SIGN = '云渚科技验证服务'
 const DEFAULT_TEMPLATE = '100001'
 
+function maskPhone11(phone: string): string {
+  if (phone.length !== 11) return '***'
+  return `${phone.slice(0, 3)}****${phone.slice(-4)}`
+}
+
 export async function sendAliyunSmsVerifyCode(phone11: string): Promise<void> {
   const client = createClient()
   const signName =
@@ -85,10 +96,29 @@ export async function sendAliyunSmsVerifyCode(phone11: string): Promise<void> {
   const body = resp.body
   if (!body?.success || body.code !== 'OK') {
     const apiMsg = [body?.code, body?.message].filter(Boolean).join(' — ')
+    console.error('[sms:aliyun] API business error', {
+      phone: maskPhone11(phone11),
+      signName,
+      templateCode,
+      requestId: body?.requestId,
+      code: body?.code,
+      message: body?.message,
+    })
     const hint =
       '请到阿里云控制台「号码认证 → 短信认证」查看当前账号可用的签名与模板编号，并在环境变量中设置 ALIYUN_SMS_SIGN_NAME、ALIYUN_SMS_TEMPLATE_CODE（需与控制台一致）；仅配置 AccessKey 不够。'
     throw new Error(apiMsg ? `${apiMsg}。${hint}` : hint)
   }
+
+  console.log(
+    '[sms:aliyun] SendSmsVerifyCode OK',
+    JSON.stringify({
+      phone: maskPhone11(phone11),
+      signName,
+      templateCode,
+      requestId: body.requestId,
+      model: body.model,
+    }),
+  )
 }
 
 export async function verifyAliyunSmsCode(

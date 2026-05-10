@@ -70,6 +70,12 @@ function normalizeCnPhone(raw: string): string | null {
   return null
 }
 
+/** 日志脱敏：138****8000 */
+function maskPhone11(phone: string): string {
+  if (phone.length !== 11) return '***'
+  return `${phone.slice(0, 3)}****${phone.slice(-4)}`
+}
+
 function smsEmailForPhone(phone: string): string {
   return `${phone}@sms.kuaiji.local`
 }
@@ -184,6 +190,7 @@ app.post('/auth/sms/send', async (req, res) => {
   const now = Date.now()
   const prev = lastSmsSend.get(phone) ?? 0
   if (now - prev < 55_000) {
+    console.warn('[sms] rate_limited', maskPhone11(phone))
     res.status(429).json({ error: '发送过于频繁，请稍后再试' })
     return
   }
@@ -191,16 +198,19 @@ app.post('/auth/sms/send', async (req, res) => {
 
   try {
     if (!aliyunSmsConfigured()) {
+      console.warn('[sms] skip send: Aliyun AK not configured')
       res.status(503).json({
         error:
           '未配置 ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET，无法发送短信',
       })
       return
     }
+    console.log('[sms] send start', maskPhone11(phone))
     await sendAliyunSmsVerifyCode(phone)
+    console.log('[sms] send http ok', maskPhone11(phone))
   } catch (e) {
     const msg = e instanceof Error ? e.message : '短信发送失败'
-    console.error('[sms]', e)
+    console.error('[sms] send failed', maskPhone11(phone), msg)
     res.status(502).json({ error: msg })
     return
   }
