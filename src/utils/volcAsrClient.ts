@@ -269,6 +269,7 @@ export function startVolcAsrSession(
           }
           if (msg.type === 'result' && typeof msg.text === 'string') {
             asrDiagLog(`result 文本长度=${msg.text.length}`)
+            if (msg.text.length === 0) return
             handlers.onText(msg.text)
             return
           }

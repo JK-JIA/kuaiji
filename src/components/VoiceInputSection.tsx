@@ -41,6 +41,12 @@ export function VoiceInputSection({
   const holdArmedRef = useRef(false)
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pointerIdRef = useRef<number | null>(null)
+  const pointerTypeRef = useRef<string>('touch')
+  /** 递增以作废尚未 resolve 的 startRecording（松手或打断长按） */
+  const holdEpochRef = useRef(0)
+  const globalPointerEndHandlerRef = useRef<((e: PointerEvent) => void) | null>(
+    null,
+  )
   const micBtnRef = useRef<HTMLButtonElement>(null)
 
   const clearLongPressTimer = useCallback(() => {
@@ -50,6 +56,14 @@ export function VoiceInputSection({
     }
   }, [])
 
+  const detachGlobalPointerEnd = useCallback(() => {
+    const fn = globalPointerEndHandlerRef.current
+    if (!fn) return
+    window.removeEventListener('pointerup', fn, true)
+    window.removeEventListener('pointercancel', fn, true)
+    globalPointerEndHandlerRef.current = null
+  }, [])
+
   const stopRecording = useCallback(() => {
     sessionRef.current?.stop()
     sessionRef.current = null
@@ -57,10 +71,14 @@ export function VoiceInputSection({
   }, [])
 
   const endHoldGesture = useCallback(() => {
+    detachGlobalPointerEnd()
     clearLongPressTimer()
     const wasArmed = holdArmedRef.current
     holdArmedRef.current = false
     pressDownRef.current = false
+    if (wasArmed) {
+      holdEpochRef.current += 1
+    }
     const el = micBtnRef.current
     const pid = pointerIdRef.current
     if (el && pid != null) {
@@ -72,34 +90,50 @@ export function VoiceInputSection({
     }
     pointerIdRef.current = null
     if (wasArmed) stopRecording()
-  }, [clearLongPressTimer, stopRecording])
+  }, [clearLongPressTimer, detachGlobalPointerEnd, stopRecording])
 
-  const startRecording = useCallback(async () => {
-    if (!apiBase || !token) return
-    setHint(null)
-    setTranscript('')
-    setRecording(true)
-    try {
-      const session = await startVolcAsrSession(apiBase, token, {
-        onText: (text) => setTranscript(text),
-        onError: (msg) => {
-          stopRecording()
-          setHint(msg)
-        },
-      })
-      sessionRef.current = session
-    } catch (e) {
-      setRecording(false)
-      setHint(e instanceof Error ? e.message : '无法开始录音')
-    }
-  }, [apiBase, token, stopRecording])
+  const endHoldGestureRef = useRef(endHoldGesture)
+  endHoldGestureRef.current = endHoldGesture
+
+  const startRecording = useCallback(
+    async (epochAtStart: number) => {
+      if (!apiBase || !token) return
+      setHint(null)
+      setRecording(true)
+      try {
+        const session = await startVolcAsrSession(apiBase, token, {
+          onText: (text) => setTranscript(text),
+          onError: (msg) => {
+            stopRecording()
+            setHint(msg)
+          },
+        })
+        if (epochAtStart !== holdEpochRef.current) {
+          session.stop()
+          setRecording(false)
+          return
+        }
+        setTranscript('')
+        sessionRef.current = session
+      } catch (e) {
+        if (epochAtStart !== holdEpochRef.current) {
+          setRecording(false)
+          return
+        }
+        setRecording(false)
+        setHint(e instanceof Error ? e.message : '无法开始录音')
+      }
+    },
+    [apiBase, token, stopRecording],
+  )
 
   useEffect(() => {
     return () => {
+      detachGlobalPointerEnd()
       clearLongPressTimer()
       sessionRef.current?.stop()
     }
-  }, [clearLongPressTimer])
+  }, [clearLongPressTimer, detachGlobalPointerEnd])
 
   const handleMicPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return
@@ -115,7 +149,21 @@ export function VoiceInputSection({
     }
 
     pointerIdRef.current = e.pointerId
+    pointerTypeRef.current = e.pointerType
     pressDownRef.current = true
+    detachGlobalPointerEnd()
+    const onWinEnd = (ev: PointerEvent) => {
+      if (
+        pointerIdRef.current !== null &&
+        ev.pointerId !== pointerIdRef.current
+      ) {
+        return
+      }
+      endHoldGestureRef.current()
+    }
+    globalPointerEndHandlerRef.current = onWinEnd
+    window.addEventListener('pointerup', onWinEnd, true)
+    window.addEventListener('pointercancel', onWinEnd, true)
     clearLongPressTimer()
     longPressTimerRef.current = setTimeout(() => {
       longPressTimerRef.current = null
@@ -123,14 +171,19 @@ export function VoiceInputSection({
       holdArmedRef.current = true
       const btn = micBtnRef.current
       const pid = pointerIdRef.current
-      if (btn && pid != null) {
+      if (
+        pointerTypeRef.current === 'mouse' &&
+        btn &&
+        pid != null
+      ) {
         try {
           btn.setPointerCapture(pid)
         } catch {
           /* ignore */
         }
       }
-      void startRecording()
+      const epochAtStart = holdEpochRef.current
+      void startRecording(epochAtStart)
     }, LONG_PRESS_MS)
   }
 
@@ -211,7 +264,6 @@ export function VoiceInputSection({
             onPointerDown={handleMicPointerDown}
             onPointerUp={handleMicPointerUp}
             onPointerCancel={handleMicPointerUp}
-            onLostPointerCapture={() => endHoldGesture()}
             className={
               micIdle
                 ? micEnabled
