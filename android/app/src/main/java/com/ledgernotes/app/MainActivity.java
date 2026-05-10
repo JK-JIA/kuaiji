@@ -6,6 +6,7 @@ import android.os.Build;
 import android.webkit.WebSettings;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import android.os.Bundle;
 import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeActivity;
 
@@ -16,6 +17,12 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
 
     private static final int REQ_RECORD_AUDIO = 0x5243; // 'RC'
+
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(InstallApkPlugin.class);
+        super.onCreate(savedInstanceState);
+    }
 
     private void applyWebViewNetworkPolicy() {
         Bridge bridge = getBridge();

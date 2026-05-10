@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { AppUpdateGate } from './components/AppUpdateGate'
 import { BottomNav } from './components/BottomNav'
 import { AuthProvider } from './context/AuthContext'
 import { LedgerProvider } from './context/LedgerContext'
@@ -11,6 +12,7 @@ export default function App() {
     <AuthProvider>
       <LedgerProvider>
       <BrowserRouter>
+        <AppUpdateGate />
         <div className="mx-auto min-h-dvh max-w-lg">
           <Routes>
             <Route path="/" element={<HomePage />} />

@@ -1,0 +1,209 @@
+import { App } from '@capacitor/app'
+import { Capacitor, type PluginListenerHandle } from '@capacitor/core'
+import { Directory, Filesystem } from '@capacitor/filesystem'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  ANDROID_UPDATE_CACHE_FILENAME,
+  arrayBufferToBase64,
+  downloadApkAsArrayBuffer,
+  fetchAndroidLatest,
+  getSkippedVersionCode,
+  resolveApiBaseForUpdate,
+  setSkippedVersionCode,
+  type AndroidLatestEnabled,
+} from '../utils/appUpdate'
+import { InstallApk } from '../plugins/installApk'
+
+/** 设置页「检查更新」触发：监听后执行与启动时相同的拉取逻辑 */
+export const TRIGGER_ANDROID_UPDATE_CHECK = 'kuaiji-trigger-android-update-check'
+
+export function AppUpdateGate() {
+  const [open, setOpen] = useState(false)
+  const [info, setInfo] = useState<AndroidLatestEnabled | null>(null)
+  const [downloading, setDownloading] = useState(false)
+  const [progress, setProgress] = useState<{ pct: number | null }>({
+    pct: null,
+  })
+  const manualRef = useRef(false)
+  /** 本次运行内点过「稍后」则不再在 resume 时弹窗，避免反复打断 */
+  const sessionDismissedRef = useRef(false)
+
+  const runCheck = useCallback(
+    async (opts: { manual: boolean }) => {
+      if (!opts.manual && sessionDismissedRef.current) return
+      if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
+        if (opts.manual) alert('仅 Android 应用内支持检查更新')
+        return
+      }
+      const base = resolveApiBaseForUpdate()
+      if (!base) {
+        if (opts.manual) alert('未配置云端地址（VITE_API_URL），无法检查更新')
+        return
+      }
+      let latest: Awaited<ReturnType<typeof fetchAndroidLatest>>
+      try {
+        latest = await fetchAndroidLatest(base)
+      } catch (e) {
+        if (opts.manual) {
+          alert(e instanceof Error ? e.message : '检查更新失败')
+        }
+        return
+      }
+      if (!latest.enabled) {
+        if (opts.manual) alert('服务端未开启应用内更新或未配置版本信息')
+        return
+      }
+
+      const appInfo = await App.getInfo()
+      const localVc = parseInt(String(appInfo.build), 10)
+      if (!Number.isFinite(localVc)) {
+        if (opts.manual) alert('无法读取当前应用版本号')
+        return
+      }
+      if (latest.versionCode <= localVc) {
+        if (opts.manual) alert('当前已是最新版本')
+        return
+      }
+      const skip = getSkippedVersionCode()
+      if (!opts.manual && skip === latest.versionCode) return
+
+      manualRef.current = opts.manual
+      setInfo(latest)
+      setOpen(true)
+    },
+    [],
+  )
+
+  useEffect(() => {
+    void runCheck({ manual: false })
+  }, [runCheck])
+
+  useEffect(() => {
+    let handle: PluginListenerHandle | undefined
+    void App.addListener('resume', () => {
+      void runCheck({ manual: false })
+    }).then((h) => {
+      handle = h
+    })
+    return () => {
+      void handle?.remove()
+    }
+  }, [runCheck])
+
+  useEffect(() => {
+    const onTrigger = () => {
+      void runCheck({ manual: true })
+    }
+    window.addEventListener(TRIGGER_ANDROID_UPDATE_CHECK, onTrigger)
+    return () =>
+      window.removeEventListener(TRIGGER_ANDROID_UPDATE_CHECK, onTrigger)
+  }, [runCheck])
+
+  const close = () => {
+    setOpen(false)
+    setInfo(null)
+    setProgress({ pct: null })
+    manualRef.current = false
+  }
+
+  const skipThisVersion = () => {
+    if (info) setSkippedVersionCode(info.versionCode)
+    close()
+  }
+
+  const confirmUpdate = async () => {
+    if (!info) return
+    setDownloading(true)
+    setProgress({ pct: null })
+    try {
+      const buf = await downloadApkAsArrayBuffer(info.apkUrl, (loaded, total) => {
+        if (total != null && total > 0) {
+          setProgress({ pct: Math.min(99, Math.round((100 * loaded) / total)) })
+        } else {
+          setProgress({ pct: null })
+        }
+      })
+      setProgress({ pct: 100 })
+      const base64 = arrayBufferToBase64(buf)
+      await Filesystem.writeFile({
+        path: ANDROID_UPDATE_CACHE_FILENAME,
+        data: base64,
+        directory: Directory.Cache,
+      })
+      await InstallApk.installFromCache({
+        filename: ANDROID_UPDATE_CACHE_FILENAME,
+      })
+      close()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '下载或安装失败')
+    } finally {
+      setDownloading(false)
+      setProgress({ pct: null })
+    }
+  }
+
+  if (!open || !info) return null
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-end justify-center bg-black/45 p-4 sm:items-center"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="app-update-title"
+    >
+      <div className="w-full max-w-sm rounded-2xl border border-stone-200/90 bg-white p-5 shadow-xl">
+        <h2
+          id="app-update-title"
+          className="text-lg font-semibold text-neutral-900"
+        >
+          发现新版本
+        </h2>
+        <p className="mt-2 text-sm text-neutral-700">
+          {info.versionName
+            ? `版本 ${info.versionName}（${info.versionCode}）`
+            : `版本号 ${info.versionCode}`}
+        </p>
+        {info.releaseNotes ? (
+          <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-neutral-600">
+            {info.releaseNotes}
+          </p>
+        ) : null}
+        {downloading ? (
+          <p className="mt-4 text-sm text-neutral-600">
+            {progress.pct != null ? `正在下载… ${progress.pct}%` : '正在下载…'}
+          </p>
+        ) : null}
+        <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+          <button
+            type="button"
+            disabled={downloading}
+            onClick={() => {
+              sessionDismissedRef.current = true
+              if (manualRef.current) alert('可稍后在设置中再次检查更新')
+              close()
+            }}
+            className="min-h-[44px] rounded-xl border border-stone-200 bg-[#fafafa] px-4 py-2.5 text-sm font-medium text-neutral-800 disabled:opacity-50"
+          >
+            稍后
+          </button>
+          <button
+            type="button"
+            disabled={downloading}
+            onClick={skipThisVersion}
+            className="min-h-[44px] rounded-xl border border-stone-200 bg-white px-4 py-2.5 text-sm font-medium text-neutral-700 disabled:opacity-50"
+          >
+            跳过此版本
+          </button>
+          <button
+            type="button"
+            disabled={downloading}
+            onClick={() => void confirmUpdate()}
+            className="min-h-[44px] rounded-xl bg-[#2ecc71] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#27ae60] disabled:opacity-50"
+          >
+            立即更新
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}

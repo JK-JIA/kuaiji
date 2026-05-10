@@ -116,6 +116,28 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true })
 })
 
+/** 私发 APK 应用内更新：公开接口，无需登录；未配置环境变量时返回 enabled: false */
+app.get('/api/app/android-latest', (_req, res) => {
+  const codeRaw = process.env.ANDROID_UPDATE_VERSION_CODE?.trim()
+  const urlRaw = process.env.ANDROID_UPDATE_APK_URL?.trim()
+  if (!codeRaw || !urlRaw) {
+    res.json({ enabled: false as const })
+    return
+  }
+  const versionCode = parseInt(codeRaw, 10)
+  if (!Number.isFinite(versionCode) || versionCode < 1) {
+    res.json({ enabled: false as const })
+    return
+  }
+  res.json({
+    enabled: true as const,
+    versionCode,
+    versionName: process.env.ANDROID_UPDATE_VERSION_NAME?.trim() ?? '',
+    apkUrl: urlRaw,
+    releaseNotes: process.env.ANDROID_UPDATE_NOTES?.trim() ?? '',
+  })
+})
+
 app.get('/api/asr/health', (_req, res) => {
   res.json({
     ok: true,

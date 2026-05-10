@@ -4,6 +4,7 @@ import { getApiBase } from '../api/ledgerClient'
 import { useAuth } from '../context/AuthContext'
 import { useLedger } from '../context/LedgerContext'
 import { exportCsv, exportJson, parseLedgerBackupJson } from '../utils/exportData'
+import { TRIGGER_ANDROID_UPDATE_CHECK } from '../components/AppUpdateGate'
 import { APP_VERSION } from '../version'
 
 export function SettingsPage() {
@@ -555,6 +556,15 @@ export function SettingsPage() {
 
       <footer className="mx-4 mb-10 mt-6 rounded-2xl border border-stone-200/90 bg-white px-4 py-3.5 text-[11px] leading-relaxed text-[#666666] shadow-sm">
         <p className="font-semibold text-neutral-900">应用版本 {APP_VERSION}</p>
+        <button
+          type="button"
+          onClick={() =>
+            window.dispatchEvent(new Event(TRIGGER_ANDROID_UPDATE_CHECK))
+          }
+          className="mt-2 min-h-[40px] w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2 text-sm font-medium text-neutral-800 transition-colors hover:bg-stone-100"
+        >
+          检查更新（Android）
+        </button>
         <p className="mt-1.5">
           本版为<strong className="font-medium text-neutral-800">纯手动录入</strong>
           ：在记账页逐项填写或粘贴；无应用内语音解析。配置{' '}
