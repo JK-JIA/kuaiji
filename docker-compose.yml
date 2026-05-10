@@ -76,8 +76,10 @@ services:
       api:
         condition: service_started
     entrypoint: ['/bin/sh', '-c']
+    # 与 api 相同镜像：启动时再执行 migrate，避免仅用旧 api 起服时库未含新列（如 grantLifetime）
     command:
       - |
+        npx prisma migrate deploy
         while true; do
           node scripts/daily-redeem-code.mjs || true
           sleep 86400
