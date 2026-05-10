@@ -24,7 +24,7 @@ public class InstallApkPlugin extends Plugin {
         }
         File apk = new File(getActivity().getCacheDir(), filename);
         if (!apk.exists() || !apk.isFile()) {
-            call.reject("APK_NOT_FOUND", "APK 文件不存在，请重新下载", null);
+            call.reject("APK_NOT_FOUND", "APK 文件不存在，请重新下载");
             return;
         }
         String authority = getContext().getPackageName() + ".fileprovider";
@@ -39,8 +39,7 @@ public class InstallApkPlugin extends Plugin {
         } catch (Exception e) {
             call.reject(
                     "INSTALL_INTENT_FAILED",
-                    e.getMessage() != null ? e.getMessage() : "无法打开安装界面",
-                    null
+                    e.getMessage() != null ? e.getMessage() : "无法打开安装界面"
             );
         }
     }

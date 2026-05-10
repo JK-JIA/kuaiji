@@ -15,12 +15,12 @@ import {
 } from '../utils/recordHelpers'
 
 const DELETE_STRIP_W = 72
-/** 无单价列：商品 / 数量 / 金额 */
+/** 无单价列：商品 / 数量 / 金额（左侧无图标列，商品列可更宽） */
 const RECORD_LINE_GRID_3 =
-  'grid grid-cols-[minmax(0,1fr)_4.5rem_minmax(6rem,max-content)] items-center gap-x-4'
+  'grid grid-cols-[minmax(0,1fr)_5rem_minmax(7rem,max-content)] items-center gap-x-4'
 /** 含单价：商品 / 单价 / 斤数 / 金额 */
 const RECORD_LINE_GRID_4 =
-  'grid grid-cols-[minmax(0,1fr)_2.75rem_3rem_minmax(5.5rem,max-content)] items-center gap-x-4'
+  'grid grid-cols-[minmax(0,1fr)_3.25rem_3.5rem_minmax(6.5rem,max-content)] items-center gap-x-4'
 
 type Props = {
   record: LedgerRecord
@@ -243,11 +243,9 @@ export function RecordCard({
       >
         <div className="px-4 py-3">
           {showMoney && (
-            <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3">
-              <RecordCardIcon />
-              <div className="min-w-0">
+            <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-medium tabular-nums text-neutral-900">
+                  <span className="text-sm font-medium tabular-nums text-neutral-900">
                     {new Date(record.createdAt).toLocaleTimeString('zh-CN', {
                       hour: '2-digit',
                       minute: '2-digit',
@@ -266,14 +264,14 @@ export function RecordCard({
                       setReceiptOpen(true)
                     }}
                     onPointerDown={(e) => e.stopPropagation()}
-                    className="ml-auto shrink-0 rounded-lg border border-stone-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-[#666666] hover:bg-stone-50"
+                    className="ml-auto shrink-0 rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-semibold text-[#666666] hover:bg-stone-50"
                   >
                     发票
                   </button>
                 </div>
                 {amountResolvedId &&
                   (exp > 0.005 || rec > 0.005 || fullyPaid) && (
-                    <p className="mt-1.5 text-[10px] font-medium tabular-nums leading-snug text-[#666666]">
+                    <p className="mt-1.5 text-xs font-medium tabular-nums leading-snug text-[#666666]">
                       应收 ¥{fmt(exp)} · 已收 ¥{fmt(rec)} · 差额 ¥{fmt(out)}
                     </p>
                   )}
@@ -281,18 +279,18 @@ export function RecordCard({
                   <div className="min-w-0 w-full">
                     <div className="min-w-0">
                       <div className={lineGrid}>
-                        <span className="min-w-0 border-b border-stone-100 pb-2 pr-1 text-[11px] font-medium text-[#666666]">
+                        <span className="min-w-0 border-b border-stone-100 pb-2 pr-1 text-xs font-medium text-[#666666]">
                           商品
                         </span>
                         {unitPriceFieldId ? (
-                          <span className="border-b border-stone-100 pb-2 text-center text-[11px] font-medium tabular-nums text-[#666666]">
+                          <span className="border-b border-stone-100 pb-2 text-center text-xs font-medium tabular-nums text-[#666666]">
                             {unitPriceColLabel}
                           </span>
                         ) : null}
-                        <span className="border-b border-stone-100 pb-2 text-right text-[11px] font-medium tabular-nums text-[#666666]">
+                        <span className="border-b border-stone-100 pb-2 text-right text-xs font-medium tabular-nums text-[#666666]">
                           {quantityColLabel}
                         </span>
-                        <span className="border-b border-stone-100 pb-2 text-right text-[11px] font-medium tabular-nums text-[#666666]">
+                        <span className="border-b border-stone-100 pb-2 text-right text-xs font-medium tabular-nums text-[#666666]">
                           金额
                         </span>
                         {lines.flatMap((line, i) => {
@@ -302,7 +300,7 @@ export function RecordCard({
                           return [
                             <span
                               key={`${k}-p`}
-                              className="min-w-0 truncate py-2 text-[12px] font-medium leading-snug text-neutral-900"
+                              className="min-w-0 break-words py-2 text-sm font-medium leading-snug text-neutral-900"
                             >
                               {line.product || '—'}
                             </span>,
@@ -310,7 +308,7 @@ export function RecordCard({
                               ? [
                                   <span
                                     key={`${k}-u`}
-                                    className="whitespace-nowrap py-2 text-center text-[12px] tabular-nums leading-snug text-[#444444]"
+                                    className="whitespace-nowrap py-2 text-center text-sm tabular-nums leading-snug text-[#444444]"
                                   >
                                     {up > 0 ? `¥${fmt(up)}` : '—'}
                                   </span>,
@@ -318,13 +316,13 @@ export function RecordCard({
                               : []),
                             <span
                               key={`${k}-q`}
-                              className="whitespace-nowrap py-2 text-right text-[12px] tabular-nums leading-snug text-[#444444]"
+                              className="whitespace-nowrap py-2 text-right text-sm tabular-nums leading-snug text-[#444444]"
                             >
                               {formatQuantityWithJin(line.quantity)}
                             </span>,
                             <span
                               key={`${k}-a`}
-                              className="whitespace-nowrap py-2 text-right text-[12px] font-semibold tabular-nums leading-snug text-neutral-900"
+                              className="whitespace-nowrap py-2 text-right text-sm font-semibold tabular-nums leading-snug text-neutral-900"
                             >
                               {lineAmt > 0 ? `¥${fmt(lineAmt)}` : '—'}
                             </span>,
@@ -353,7 +351,7 @@ export function RecordCard({
                         }
                       >
                         <div
-                          className={`min-w-0 text-[11px] leading-snug text-[#666666] ${
+                          className={`min-w-0 text-xs leading-snug text-[#666666] ${
                             unitPriceFieldId ? 'col-span-2' : ''
                           }`}
                         >
@@ -370,7 +368,7 @@ export function RecordCard({
                         </div>
                         <div className="text-right">
                           {displayTotal > 0 ? (
-                            <span className="text-[11px] font-medium tabular-nums text-[#666666]">
+                            <span className="text-xs font-medium tabular-nums text-[#666666]">
                               总价
                             </span>
                           ) : null}
@@ -386,7 +384,7 @@ export function RecordCard({
                               type="button"
                               onClick={openReconcile}
                               onPointerDown={(e) => e.stopPropagation()}
-                              className="shrink-0 whitespace-nowrap rounded-lg bg-[#2ecc71] px-3 py-1 text-[11px] font-semibold leading-none text-white shadow-sm hover:bg-[#27ae60] active:bg-[#22a85a]"
+                              className="shrink-0 whitespace-nowrap rounded-lg bg-[#2ecc71] px-3 py-1.5 text-xs font-semibold leading-none text-white shadow-sm hover:bg-[#27ae60] active:bg-[#22a85a]"
                             >
                               {fullyPaid ? '改核账' : '核账'}
                             </button>
@@ -395,7 +393,7 @@ export function RecordCard({
                       </div>
                       {savedVsReceivable > 0 && (
                         <div className="mt-1.5 border-t border-stone-50 pt-1.5">
-                          <span className="text-[10px] font-medium tabular-nums text-[#2ecc71]">
+                          <span className="text-xs font-medium tabular-nums text-[#2ecc71]">
                             已优惠 ¥{fmt(savedVsReceivable)}
                           </span>
                         </div>
@@ -403,16 +401,13 @@ export function RecordCard({
                     </div>
                   )}
                 </div>
-              </div>
             </div>
           )}
 
           {!showMoney && (
-            <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3">
-              <RecordCardIcon />
-              <div className="min-w-0">
+            <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-medium tabular-nums text-neutral-900">
+                  <span className="text-sm font-medium tabular-nums text-neutral-900">
                     {new Date(record.createdAt).toLocaleTimeString('zh-CN', {
                       hour: '2-digit',
                       minute: '2-digit',
@@ -431,21 +426,21 @@ export function RecordCard({
                       setReceiptOpen(true)
                     }}
                     onPointerDown={(e) => e.stopPropagation()}
-                    className="ml-auto shrink-0 rounded-lg border border-stone-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-[#666666] hover:bg-stone-50"
+                    className="ml-auto shrink-0 rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-semibold text-[#666666] hover:bg-stone-50"
                   >
                     发票
                   </button>
                 </div>
                 {amountResolvedId &&
                   (exp > 0.005 || rec > 0.005 || fullyPaid) && (
-                    <p className="mt-1.5 text-[10px] font-medium tabular-nums leading-snug text-[#666666]">
+                    <p className="mt-1.5 text-xs font-medium tabular-nums leading-snug text-[#666666]">
                       应收 ¥{fmt(exp)} · 已收 ¥{fmt(rec)} · 差额 ¥{fmt(out)}
                     </p>
                   )}
                 <div className="mt-2 min-w-0 space-y-2">
-                  <div className="space-y-2 text-[12px] leading-snug text-neutral-900">
+                  <div className="space-y-2 text-sm leading-snug text-neutral-900">
                     {lines.map((line, i) => (
-                      <div key={`${record.id}-ln-${i}`} className="min-w-0 truncate">
+                      <div key={`${record.id}-ln-${i}`} className="min-w-0 break-words">
                         <span className="font-medium">{line.product || '—'}</span>
                         <span className="ml-2 tabular-nums text-[#666666]">
                           {formatQuantityWithJin(line.quantity)}
@@ -462,7 +457,7 @@ export function RecordCard({
                   {plateField && (
                     <div className="border-t border-stone-100/80 pt-2">
                       <div className="flex min-w-0 items-center justify-between gap-2">
-                        <div className="min-w-0 flex-1 text-[11px] leading-snug text-[#666666]">
+                        <div className="min-w-0 flex-1 text-xs leading-snug text-[#666666]">
                           <span className="break-all">
                             <span className="text-[#999999]">{plateField.name}</span>
                             {plateDisplay || '—'}
@@ -473,7 +468,7 @@ export function RecordCard({
                             type="button"
                             onClick={openReconcile}
                             onPointerDown={(e) => e.stopPropagation()}
-                            className="shrink-0 whitespace-nowrap rounded-lg bg-[#2ecc71] px-3 py-1 text-[11px] font-semibold leading-none text-white shadow-sm hover:bg-[#27ae60] active:bg-[#22a85a]"
+                            className="shrink-0 whitespace-nowrap rounded-lg bg-[#2ecc71] px-3 py-1.5 text-xs font-semibold leading-none text-white shadow-sm hover:bg-[#27ae60] active:bg-[#22a85a]"
                           >
                             {fullyPaid ? '改核账' : '核账'}
                           </button>
@@ -487,14 +482,13 @@ export function RecordCard({
                         type="button"
                         onClick={openReconcile}
                         onPointerDown={(e) => e.stopPropagation()}
-                        className="shrink-0 whitespace-nowrap rounded-lg bg-[#2ecc71] px-3 py-1 text-[11px] font-semibold leading-none text-white shadow-sm hover:bg-[#27ae60] active:bg-[#22a85a]"
+                        className="shrink-0 whitespace-nowrap rounded-lg bg-[#2ecc71] px-3 py-1.5 text-xs font-semibold leading-none text-white shadow-sm hover:bg-[#27ae60] active:bg-[#22a85a]"
                       >
                         {fullyPaid ? '改核账' : '核账'}
                       </button>
                     </div>
                   )}
                 </div>
-              </div>
             </div>
           )}
         </div>
@@ -550,33 +544,6 @@ export function RecordCard({
   )
 }
 
-function LedgerBoxIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8z" />
-      <path d="M3.27 6.96 12 12.01l8.73-5.05" />
-      <path d="M12 22.08V12" />
-    </svg>
-  )
-}
-
-function RecordCardIcon() {
-  return (
-    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-200/90 bg-emerald-50 text-[#2ecc71]">
-      <LedgerBoxIcon className="h-5 w-5" />
-    </div>
-  )
-}
-
 function ExtraFieldsPlateLine({
   extraFields,
   values,
@@ -594,7 +561,7 @@ function ExtraFieldsPlateLine({
 
   return (
     <div className="border-t border-stone-100/90 pt-3">
-      <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-[11px] leading-snug">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs leading-snug">
         {pairs.flatMap(({ id, name, value }) => [
           <span key={`${id}-n`} className="shrink-0 text-[#999999]">
             {name}
@@ -622,17 +589,17 @@ function CardStatusBadges({
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
       {fullyPaid && (
-        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium leading-none text-emerald-700">
+        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium leading-none text-emerald-700">
           已结清
         </span>
       )}
       {!fullyPaid && exp > 0 && out > 0.005 && (
-        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium leading-none text-amber-900">
+        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium leading-none text-amber-900">
           未结清
         </span>
       )}
       {!fullyPaid && exp <= 0 && !settled && (
-        <span className="rounded-full bg-stone-200/90 px-2 py-0.5 text-[10px] font-medium leading-none text-stone-700">
+        <span className="rounded-full bg-stone-200/90 px-2 py-0.5 text-xs font-medium leading-none text-stone-700">
           待核账
         </span>
       )}

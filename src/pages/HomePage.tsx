@@ -158,7 +158,7 @@ export function HomePage() {
           >
             筛选
             {filterActive ? (
-              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#2ecc71] px-1 text-[10px] font-bold text-white">
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#2ecc71] px-1 text-xs font-bold text-white">
                 {countActiveFilters(filterState)}
               </span>
             ) : null}
@@ -289,7 +289,7 @@ export function HomePage() {
                 <div className="space-y-3">
                   {groupRecordsByPlate(list, fields).map(([plate, recs]) => (
                     <div key={`${dateKey}-${plate}`}>
-                      <p className="mb-2 text-[11px] font-semibold tracking-wide text-stone-500">
+                      <p className="mb-2 text-xs font-semibold tracking-wide text-stone-500">
                         {plateGroupHeading(plate, fields)}
                       </p>
                       <ul className="space-y-2.5">

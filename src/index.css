@@ -2,6 +2,8 @@
 
 html {
   -webkit-tap-highlight-color: transparent;
+  /* 与浏览器/系统默认一致；Android WebView 用 fontScale→setTextZoom 放大，避免与固定 px 双重叠加 */
+  font-size: 100%;
 }
 
 body {

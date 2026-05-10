@@ -633,19 +633,6 @@ export function AddRecordModal({
                 </div>
               )}
               <div className="rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm">
-                {showDetailAmounts && canonicalAmountId && (
-                  <div
-                    className="grid grid-cols-[minmax(0,1fr)_3.25rem_3.25rem_4rem_2.25rem] gap-x-2 border-b border-stone-100 pb-2 text-[11px] font-medium text-[#666666]"
-                  >
-                    <span className="truncate">{prodField.name}</span>
-                    <span className="text-center">
-                      {unitPriceField?.name ?? '单价'}
-                    </span>
-                    <span className="text-center">{qtyField.name}</span>
-                    <span className="text-right">金额</span>
-                    <span aria-hidden className="w-2" />
-                  </div>
-                )}
                 {!showDetailAmounts || !canonicalAmountId ? (
                   <div className="space-y-3 pt-2">
                     {lines.map((line, idx) => (
@@ -715,7 +702,22 @@ export function AddRecordModal({
                     ))}
                   </div>
                 ) : (
-                  <div className="divide-y divide-stone-100 pt-2">
+                  <div className="min-w-0 overflow-x-auto overscroll-x-contain pt-2">
+                    <div className="min-w-[17.5rem]">
+                      <div
+                        className="grid grid-cols-[minmax(0,1fr)_3.25rem_3.25rem_4rem_2.25rem] gap-x-2 border-b border-stone-100 pb-2 text-xs font-medium text-[#666666]"
+                      >
+                        <span className="min-w-0 break-words">
+                          {prodField.name}
+                        </span>
+                        <span className="text-center">
+                          {unitPriceField?.name ?? '单价'}
+                        </span>
+                        <span className="text-center">{qtyField.name}</span>
+                        <span className="text-right">金额</span>
+                        <span aria-hidden className="w-2 shrink-0" />
+                      </div>
+                  <div className="divide-y divide-stone-100">
                     {lines.map((line, idx) => (
                       <div
                         key={line.id}
@@ -820,6 +822,8 @@ export function AddRecordModal({
                       </div>
                     ))}
                   </div>
+                    </div>
+                  </div>
                 )}
 
                 {showDetailAmounts && canonicalAmountId && (
@@ -835,7 +839,7 @@ export function AddRecordModal({
                             : '¥0'}
                         </span>
                       </div>
-                      <p className="mt-1 text-[10px] leading-tight text-[#999999]">
+                      <p className="mt-1 text-xs leading-tight text-[#999999]">
                         各行金额 = 单价 × 斤数，自动合计为应收
                       </p>
                     </div>
@@ -853,7 +857,7 @@ export function AddRecordModal({
                               sanitizeUnsignedDecimalInput(e.target.value),
                             )
                           }
-                          className="mt-1.5 block w-full rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-base font-semibold tabular-nums text-neutral-900 placeholder:text-[10px] placeholder:font-normal placeholder:leading-snug placeholder:text-[#a3a3a3]"
+                          className="mt-1.5 block w-full rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-base font-semibold tabular-nums text-neutral-900 placeholder:text-xs placeholder:font-normal placeholder:leading-snug placeholder:text-[#a3a3a3]"
                           placeholder="与应收不同填"
                           autoComplete="off"
                           spellCheck={false}

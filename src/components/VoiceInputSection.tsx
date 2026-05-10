@@ -224,7 +224,7 @@ export function VoiceInputSection({
         <div className="flex min-w-0 items-center gap-2">
           <span className="text-sm font-medium text-[#666666]">语音</span>
           {!micIdle && (
-            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-medium text-rose-700">
+            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
               录音中
             </span>
           )}
@@ -276,7 +276,7 @@ export function VoiceInputSection({
       </div>
 
       {hint && (
-        <p className="mt-2 text-[11px] leading-snug text-amber-800" role="status">
+        <p className="mt-2 text-xs leading-snug text-amber-800" role="status">
           {hint}
         </p>
       )}

@@ -164,10 +164,10 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
 
         <div
           ref={captureRef}
-          className="mx-auto w-[280px] border border-dashed border-stone-300 bg-white px-4 py-5 font-mono text-[11px] leading-relaxed text-neutral-900 shadow-inner"
+          className="mx-auto w-[280px] border border-dashed border-stone-300 bg-white px-4 py-5 font-mono text-xs leading-relaxed text-neutral-900 shadow-inner"
         >
           <p className="text-center text-sm font-bold tracking-[0.2em]">kuaiji</p>
-          <p className="mt-1 text-center text-[10px] text-[#666666]">记账小票</p>
+          <p className="mt-1 text-center text-xs text-[#666666]">记账小票</p>
           <div className="my-3 border-t border-dashed border-stone-300" />
           <p>日期 {record.date}</p>
           <p>
@@ -182,7 +182,7 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
             return (
               <div key={`ln-${i}`} className="mb-1.5">
                 <p className="font-semibold">{line.product || '—'}</p>
-                <p className="text-[10px] text-[#666666]">
+                <p className="text-xs text-[#666666]">
                   {unitPriceId && up > 0 ? `单价 ¥${fmtMoney(up)} · ` : ''}
                   斤数 {line.quantity || '—'}
                   {amt > 0 ? ` · 小计 ¥${fmtMoney(amt)}` : ''}
@@ -197,7 +197,7 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
               <p>已收 ¥{fmtMoney(rec)}</p>
             </>
           ) : null}
-          <p className="mt-2 text-center text-[10px] text-[#999999]">
+          <p className="mt-2 text-center text-xs text-[#999999]">
             由 kuaiji 生成 · 仅供参考
           </p>
         </div>

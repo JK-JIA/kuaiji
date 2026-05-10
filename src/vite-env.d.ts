@@ -2,6 +2,8 @@
 
 interface ImportMetaEnv {
   readonly VITE_API_URL?: string
+  /** 下载站 releases.json 完整 URL；不填时生产包默认 http://8.153.12.131:8080/releases.json */
+  readonly VITE_ANDROID_RELEASES_JSON_URL?: string
   /** 豆包智能识别（火山方舟 API Key），勿提交到仓库 */
   readonly VITE_DOUBAO_API_KEY?: string
   /**

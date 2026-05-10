@@ -1,15 +1,14 @@
 import { App } from '@capacitor/app'
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core'
-import { Directory, Filesystem } from '@capacitor/filesystem'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ANDROID_UPDATE_CACHE_FILENAME,
-  arrayBufferToBase64,
-  downloadApkAsArrayBuffer,
-  fetchAndroidLatest,
-  getSkippedVersionCode,
-  resolveApiBaseForUpdate,
-  setSkippedVersionCode,
+  downloadApkIntoCapacitorCache,
+  fetchLatestFromReleasesManifest,
+  getReleasesManifestUrl,
+  getSkippedTag,
+  isRemoteNewerThanInstalled,
+  setSkippedTag,
   type AndroidLatestEnabled,
 } from '../utils/appUpdate'
 import { InstallApk } from '../plugins/installApk'
@@ -35,14 +34,18 @@ export function AppUpdateGate() {
         if (opts.manual) alert('仅 Android 应用内支持检查更新')
         return
       }
-      const base = resolveApiBaseForUpdate()
-      if (!base) {
-        if (opts.manual) alert('未配置云端地址（VITE_API_URL），无法检查更新')
+      const manifestUrl = getReleasesManifestUrl()
+      if (!manifestUrl) {
+        if (opts.manual) {
+          alert(
+            '未配置版本列表地址。请在 .env 设置 VITE_ANDROID_RELEASES_JSON_URL（例如 http://服务器:8080/releases.json）后重新打包。',
+          )
+        }
         return
       }
-      let latest: Awaited<ReturnType<typeof fetchAndroidLatest>>
+      let latest: Awaited<ReturnType<typeof fetchLatestFromReleasesManifest>>
       try {
-        latest = await fetchAndroidLatest(base)
+        latest = await fetchLatestFromReleasesManifest(manifestUrl)
       } catch (e) {
         if (opts.manual) {
           alert(e instanceof Error ? e.message : '检查更新失败')
@@ -50,22 +53,23 @@ export function AppUpdateGate() {
         return
       }
       if (!latest.enabled) {
-        if (opts.manual) alert('服务端未开启应用内更新或未配置版本信息')
+        if (opts.manual) alert('下载站暂无发布版本（releases.json 为空）')
         return
       }
 
       const appInfo = await App.getInfo()
       const localVc = parseInt(String(appInfo.build), 10)
+      const localVn = String(appInfo.version ?? '').trim()
       if (!Number.isFinite(localVc)) {
         if (opts.manual) alert('无法读取当前应用版本号')
         return
       }
-      if (latest.versionCode <= localVc) {
+      if (!isRemoteNewerThanInstalled(latest, localVc, localVn)) {
         if (opts.manual) alert('当前已是最新版本')
         return
       }
-      const skip = getSkippedVersionCode()
-      if (!opts.manual && skip === latest.versionCode) return
+      const skip = getSkippedTag()
+      if (!opts.manual && skip === latest.skipTag) return
 
       manualRef.current = opts.manual
       setInfo(latest)
@@ -107,7 +111,7 @@ export function AppUpdateGate() {
   }
 
   const skipThisVersion = () => {
-    if (info) setSkippedVersionCode(info.versionCode)
+    if (info) setSkippedTag(info.skipTag)
     close()
   }
 
@@ -116,20 +120,20 @@ export function AppUpdateGate() {
     setDownloading(true)
     setProgress({ pct: null })
     try {
-      const buf = await downloadApkAsArrayBuffer(info.apkUrl, (loaded, total) => {
-        if (total != null && total > 0) {
-          setProgress({ pct: Math.min(99, Math.round((100 * loaded) / total)) })
-        } else {
-          setProgress({ pct: null })
-        }
-      })
+      await downloadApkIntoCapacitorCache(
+        info.apkUrl,
+        ANDROID_UPDATE_CACHE_FILENAME,
+        (loaded, total) => {
+          if (total != null && total > 0) {
+            setProgress({
+              pct: Math.min(99, Math.round((100 * loaded) / total)),
+            })
+          } else {
+            setProgress({ pct: null })
+          }
+        },
+      )
       setProgress({ pct: 100 })
-      const base64 = arrayBufferToBase64(buf)
-      await Filesystem.writeFile({
-        path: ANDROID_UPDATE_CACHE_FILENAME,
-        data: base64,
-        directory: Directory.Cache,
-      })
       await InstallApk.installFromCache({
         filename: ANDROID_UPDATE_CACHE_FILENAME,
       })
@@ -160,8 +164,12 @@ export function AppUpdateGate() {
         </h2>
         <p className="mt-2 text-sm text-neutral-700">
           {info.versionName
-            ? `版本 ${info.versionName}（${info.versionCode}）`
-            : `版本号 ${info.versionCode}`}
+            ? info.versionCode > 0
+              ? `版本 ${info.versionName}（versionCode ${info.versionCode}）`
+              : `版本 ${info.versionName}`
+            : info.versionCode > 0
+              ? `versionCode ${info.versionCode}`
+              : '新版本'}
         </p>
         {info.releaseNotes ? (
           <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-neutral-600">

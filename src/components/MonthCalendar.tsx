@@ -70,16 +70,16 @@ export function MonthCalendar({
     : 'text-lg font-semibold tracking-tight text-stone-900'
 
   const weekCls = compact
-    ? 'py-1.5 text-[10px] font-medium text-stone-400'
-    : 'py-2 text-[11px] font-medium uppercase tracking-wider text-stone-400'
+    ? 'py-1.5 text-xs font-medium text-stone-400'
+    : 'py-2 text-xs font-medium uppercase tracking-wider text-stone-400'
 
   const emptyCls = compact
     ? 'aspect-square min-h-[34px]'
     : 'aspect-square min-h-[40px]'
 
   const dayBtn = compact
-    ? 'relative flex h-9 w-9 flex-col items-center justify-center rounded-full text-[13px] font-medium transition-colors'
-    : 'relative flex h-10 w-10 flex-col items-center justify-center rounded-full text-sm font-medium transition-colors'
+    ? 'relative flex min-h-9 min-w-9 flex-col items-center justify-center rounded-full p-1 text-[13px] font-medium transition-colors'
+    : 'relative flex min-h-10 min-w-10 flex-col items-center justify-center rounded-full p-1 text-sm font-medium transition-colors'
 
   const iconCls = compact ? 'h-4 w-4' : 'h-5 w-5'
 
