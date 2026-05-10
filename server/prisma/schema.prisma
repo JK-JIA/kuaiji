@@ -28,12 +28,13 @@ model Ledger {
 }
 
 model RedeemCode {
-  id          String   @id @default(cuid())
-  code        String   @unique
-  validFrom   DateTime
-  validTo     DateTime
-  maxUses     Int      @default(1000)
-  usedCount   Int      @default(0)
-  grantedDays Int      @default(30)
-  batchId     String?
+  id            String   @id @default(cuid())
+  code          String   @unique
+  validFrom     DateTime
+  validTo       DateTime
+  maxUses       Int      @default(1000)
+  usedCount     Int      @default(0)
+  grantedDays   Int      @default(30)
+  grantLifetime Boolean  @default(false)
+  batchId       String?
 }

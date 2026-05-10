@@ -15,6 +15,9 @@ import { attachAsrWebSocket, volcAsrEnvReady } from './asrStream.js'
 
 const prisma = new PrismaClient()
 
+/** 与 ensureDefaultAdmin、永久兑换码一致 */
+const MEMBERSHIP_FAR_END = new Date('2099-12-31T15:59:59.000Z')
+
 const PORT = Number(process.env.PORT) || 3001
 const JWT_SECRET =
   process.env.JWT_SECRET ?? 'dev-only-change-JWT_SECRET-in-production-min-32-chars'
@@ -333,12 +336,17 @@ app.post('/api/membership/redeem', async (req, res) => {
       })
 
       const u = await tx.user.findUniqueOrThrow({ where: { id: userId } })
-      const base =
-        membershipActive(u.membershipExpiresAt) && u.membershipExpiresAt
-          ? u.membershipExpiresAt
-          : now
-      const addMs = row.grantedDays * 24 * 60 * 60 * 1000
-      const membershipExpiresAt = new Date(base.getTime() + addMs)
+      let membershipExpiresAt: Date
+      if (row.grantLifetime) {
+        membershipExpiresAt = MEMBERSHIP_FAR_END
+      } else {
+        const base =
+          membershipActive(u.membershipExpiresAt) && u.membershipExpiresAt
+            ? u.membershipExpiresAt
+            : now
+        const addMs = row.grantedDays * 24 * 60 * 60 * 1000
+        membershipExpiresAt = new Date(base.getTime() + addMs)
+      }
 
       return tx.user.update({
         where: { id: userId },
@@ -429,13 +437,12 @@ app.put('/api/ledger', async (req, res) => {
 
 async function ensureDefaultAdmin() {
   const seedEmail = 'admin'
-  const far = new Date('2099-12-31T15:59:59.000Z')
   const existing = await prisma.user.findUnique({ where: { email: seedEmail } })
   if (existing) {
     if (!membershipActive(existing.membershipExpiresAt)) {
       await prisma.user.update({
         where: { id: existing.id },
-        data: { membershipExpiresAt: far },
+        data: { membershipExpiresAt: MEMBERSHIP_FAR_END },
       })
     }
     return
@@ -445,7 +452,7 @@ async function ensureDefaultAdmin() {
     data: {
       email: seedEmail,
       passwordHash,
-      membershipExpiresAt: far,
+      membershipExpiresAt: MEMBERSHIP_FAR_END,
       ledger: {
         create: {
           fieldsJson: [],

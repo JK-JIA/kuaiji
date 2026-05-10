@@ -166,12 +166,17 @@ export function SettingsPage() {
                   已登录：<span className="font-medium">{cloudEmail ?? '—'}</span>
                 </p>
                 <p className="text-[11px] leading-relaxed text-amber-900">
-                  当前账号尚未兑换会员，云端账本不会同步。请在下方输入兑换码（Docker
-                  部署时可通过{' '}
+                  当前账号尚未兑换会员，云端账本不会同步。请在下方输入兑换码。Docker
+                  部署时由{' '}
                   <code className="rounded bg-amber-100 px-1 font-mono text-[10px]">
                     redeem-daily
                   </code>{' '}
-                  服务日志获取每日码）。
+                  每日刷新 5
+                  档码（7天/30天/半年/1年/永久），并覆盖写入服务器上的{' '}
+                  <code className="rounded bg-amber-100 px-1 font-mono text-[10px]">
+                    server/data/redeem-codes/redeem-codes.txt
+                  </code>
+                  ，也可查看该服务日志。
                 </p>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <input

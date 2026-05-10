@@ -1,5 +1,6 @@
 # 账本 API + MySQL。对外默认 3001；App 的 VITE_API_URL 填 http://<主机IP>:3001
 # db / Dockerfile 中 Node 镜像使用 DaoCloud 代理加速国内拉取。
+# redeem-daily：每日生成 5 档兑换码（7天/30天/半年/1年/永久），覆盖写入宿主机 ./server/data/redeem-codes/redeem-codes.txt
 services:
   db:
     image: docker.m.daocloud.io/library/mysql:8.0
@@ -59,7 +60,6 @@ services:
       db:
         condition: service_healthy
 
-  # 每日生成会员兑换码；日志与 /tmp/kuaiji-daily-code.txt（需同镜像内查看）
   redeem-daily:
     build:
       context: ./server
@@ -67,6 +67,9 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: mysql://ledger:ledger@db:3306/ledger
+      REDEEM_CODES_OUTPUT_PATH: /data/redeem-codes.txt
+    volumes:
+      - ./server/data/redeem-codes:/data
     depends_on:
       db:
         condition: service_healthy
