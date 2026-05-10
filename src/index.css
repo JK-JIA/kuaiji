@@ -2,7 +2,7 @@
 
 html {
   -webkit-tap-highlight-color: transparent;
-  /* 与浏览器/系统默认一致；Android WebView 用 fontScale→setTextZoom 放大，避免与固定 px 双重叠加 */
+  /* 默认 100%；应用内「设置 → 字体大小」可改写为内联 font-size 百分比；index.html 引导脚本避免首屏闪烁 */
   font-size: 100%;
 }
 

@@ -1,7 +1,6 @@
 package com.ledgernotes.app;
 
 import android.Manifest;
-import android.content.res.Configuration;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.webkit.WebSettings;
@@ -31,7 +30,7 @@ public class MainActivity extends BridgeActivity {
         new Handler(Looper.getMainLooper()).postDelayed(this::applyWebViewSettings, 300);
     }
 
-    /** 混合内容策略 + 跟随系统字体缩放（fontScale），应用内最多按 150% 放大 */
+    /** 混合内容策略；WebView 文本缩放固定 100%，字体大小由应用内「设置」控制（html font-size） */
     private void applyWebViewSettings() {
         applyWebViewNetworkPolicy();
         applyWebViewTextZoom();
@@ -49,15 +48,7 @@ public class MainActivity extends BridgeActivity {
     private void applyWebViewTextZoom() {
         Bridge bridge = getBridge();
         if (bridge == null || bridge.getWebView() == null) return;
-        float scale = getResources().getConfiguration().fontScale;
-        float capped = Math.min(Math.max(scale, 1.0f), 1.5f);
-        bridge.getWebView().getSettings().setTextZoom(Math.round(capped * 100f));
-    }
-
-    @Override
-    public void onConfigurationChanged(Configuration newConfig) {
-        super.onConfigurationChanged(newConfig);
-        applyWebViewSettings();
+        bridge.getWebView().getSettings().setTextZoom(100);
     }
 
     /** 提前申请麦克风，避免 WebView 内 getUserMedia 直接报 Permission denied（仍依赖 Manifest 声明 MODIFY_AUDIO_SETTINGS） */

@@ -4,6 +4,9 @@ import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import { BrowserOnlyNotice } from './components/BrowserOnlyNotice'
 import './index.css'
+import { applyFontSizePercentToHtml, readFontSizePercent } from './utils/appFontSize'
+
+applyFontSizePercentToHtml(readFontSizePercent())
 
 /** 生产构建仅在 Android APK（Capacitor 原生壳）中展示完整应用；浏览器打开 static 仅见提示。开发：npm run dev 仍可调试。 */
 const showFullApp =

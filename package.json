@@ -1,7 +1,7 @@
 {
   "name": "ledger-notes",
   "private": true,
-  "version": "1.0.18",
+  "version": "1.0.24",
   "type": "module",
   "scripts": {
     "dev": "vite",

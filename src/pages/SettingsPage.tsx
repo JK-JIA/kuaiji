@@ -6,6 +6,18 @@ import { useLedger } from '../context/LedgerContext'
 import { exportCsv, exportJson, parseLedgerBackupJson } from '../utils/exportData'
 import { TRIGGER_ANDROID_UPDATE_CHECK } from '../components/AppUpdateGate'
 import { APP_VERSION } from '../version'
+import {
+  FONT_SIZE_DEFAULT,
+  FONT_SIZE_MAX,
+  FONT_SIZE_MIN,
+  FONT_SIZE_STEP,
+  persistFontSizePercent,
+  readFontSizePercent,
+} from '../utils/appFontSize'
+import {
+  persistReceiptExportHd,
+  readReceiptExportHd,
+} from '../utils/receiptExport'
 
 export function SettingsPage() {
   const {
@@ -32,6 +44,10 @@ export function SettingsPage() {
   const [smsCode, setSmsCode] = useState('')
   const [smsWaitSec, setSmsWaitSec] = useState(0)
   const [redeemCode, setRedeemCode] = useState('')
+  const [fontPct, setFontPct] = useState(() => readFontSizePercent())
+  const [receiptExportHd, setReceiptExportHd] = useState(() =>
+    readReceiptExportHd(),
+  )
   const { ready, fields, records, saveFields, restoreFullBackup } =
     useLedger()
   const importInputRef = useRef<HTMLInputElement>(null)
@@ -123,6 +139,90 @@ export function SettingsPage() {
           管理字段、备份与云端账号登录。
         </p>
       </header>
+
+      <section className="mx-4 mb-6 rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm">
+        <p className="mb-1 text-sm font-semibold text-neutral-900">字体大小</p>
+        <p className="mb-3 text-xs leading-relaxed text-[#666666]">
+          仅影响本应用界面，与系统「显示大小」无关；调节后全页立即生效。
+        </p>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <span className="text-xs tabular-nums text-neutral-600">
+            {FONT_SIZE_MIN}%
+          </span>
+          <output
+            className="text-sm font-semibold tabular-nums text-neutral-900"
+            htmlFor="kuaiji-font-slider"
+          >
+            {fontPct}%
+          </output>
+          <span className="text-xs tabular-nums text-neutral-600">
+            {FONT_SIZE_MAX}%
+          </span>
+        </div>
+        <input
+          id="kuaiji-font-slider"
+          type="range"
+          min={FONT_SIZE_MIN}
+          max={FONT_SIZE_MAX}
+          step={FONT_SIZE_STEP}
+          value={fontPct}
+          onChange={(e) => {
+            const n = Number(e.target.value)
+            setFontPct(n)
+            persistFontSizePercent(n)
+          }}
+          className="mb-4 h-2 w-full cursor-pointer accent-[#2ecc71]"
+        />
+        <div className="flex flex-wrap gap-2">
+          {[
+            { label: '较小', v: 90 },
+            { label: '标准', v: FONT_SIZE_DEFAULT },
+            { label: '较大', v: 120 },
+            { label: '最大', v: FONT_SIZE_MAX },
+          ].map(({ label, v }) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => {
+                setFontPct(v)
+                persistFontSizePercent(v)
+              }}
+              className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                fontPct === v
+                  ? 'bg-[#2ecc71] text-white'
+                  : 'border border-stone-200 bg-[#fafafa] text-neutral-800'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="mx-4 mb-6 rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm">
+        <p className="mb-1 text-sm font-semibold text-neutral-900">小票导出</p>
+        <p className="mb-3 text-xs leading-relaxed text-[#666666]">
+          默认以较快清晰度导出 JPEG；开启高清后像素更高、更清晰，保存耗时更长。
+        </p>
+        <label className="flex cursor-pointer items-start gap-3 text-sm text-neutral-900">
+          <input
+            type="checkbox"
+            checked={receiptExportHd}
+            onChange={(e) => {
+              const v = e.target.checked
+              setReceiptExportHd(v)
+              persistReceiptExportHd(v)
+            }}
+            className="mt-0.5 rounded border-stone-300 text-[#2ecc71] focus:ring-[#2ecc71]"
+          />
+          <span>
+            <span className="font-medium">高清导出</span>
+            <span className="mt-0.5 block text-xs font-normal text-[#666666]">
+              关闭时优先速度（约 1 秒内完成更常见）；开启时接近原 2× 清晰度。
+            </span>
+          </span>
+        </label>
+      </section>
 
       <section className="mx-4 mb-6 rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm">
         <p className="mb-3 text-sm font-semibold text-neutral-900">云端同步</p>
