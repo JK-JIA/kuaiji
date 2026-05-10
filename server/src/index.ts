@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import cors from 'cors'
@@ -5,20 +6,24 @@ import express from 'express'
 import http from 'http'
 import jwt from 'jsonwebtoken'
 import { z } from 'zod'
+import {
+  aliyunSmsConfigured,
+  sendAliyunSmsVerifyCode,
+  verifyAliyunSmsCode,
+} from './aliyunSms.js'
 import { attachAsrWebSocket, volcAsrEnvReady } from './asrStream.js'
 
 const prisma = new PrismaClient()
 
 const PORT = Number(process.env.PORT) || 3001
-const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-only-change-JWT_SECRET-in-production-min-32-chars'
+const JWT_SECRET =
+  process.env.JWT_SECRET ?? 'dev-only-change-JWT_SECRET-in-production-min-32-chars'
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? '*'
-
 const RegisterSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6).max(128),
 })
 
-/** 登录：账号存于 `email` 字段，可为默认 `admin` 或任意注册邮箱 */
 const LoginSchema = z.object({
   email: z.string().min(1).max(191),
   password: z.string().min(6).max(128),
@@ -28,6 +33,21 @@ const LedgerPutSchema = z.object({
   fields: z.array(z.unknown()),
   records: z.array(z.unknown()),
 })
+
+const SmsSendSchema = z.object({
+  phone: z.string().min(10).max(20),
+})
+
+const SmsLoginSchema = z.object({
+  phone: z.string().min(10).max(20),
+  code: z.string().min(4).max(12),
+})
+
+const RedeemSchema = z.object({
+  code: z.string().min(4).max(64),
+})
+
+const lastSmsSend = new Map<string, number>()
 
 function authHeader(req: express.Request): string | null {
   const h = req.headers.authorization
@@ -44,6 +64,36 @@ function userIdFromToken(token: string): string | null {
   }
 }
 
+function normalizeCnPhone(raw: string): string | null {
+  const s = raw.replace(/\s+/g, '')
+  if (/^1\d{10}$/.test(s)) return s
+  return null
+}
+
+function smsEmailForPhone(phone: string): string {
+  return `${phone}@sms.kuaiji.local`
+}
+
+function membershipActive(
+  expires: Date | null | undefined,
+): expires is Date {
+  return expires != null && expires.getTime() > Date.now()
+}
+
+function userJson(user: {
+  id: string
+  email: string
+  phone: string | null
+  membershipExpiresAt: Date | null
+}) {
+  return {
+    id: user.id,
+    email: user.email,
+    phone: user.phone,
+    membershipExpiresAt: user.membershipExpiresAt?.toISOString() ?? null,
+  }
+}
+
 const app = express()
 app.use(
   cors({
@@ -57,7 +107,6 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true })
 })
 
-/** 语音诊断：不含密钥，供 App 预检与复制日志排查 */
 app.get('/api/asr/health', (_req, res) => {
   res.json({
     ok: true,
@@ -86,6 +135,7 @@ app.post('/auth/register', async (req, res) => {
     data: {
       email,
       passwordHash,
+      membershipExpiresAt: null,
       ledger: {
         create: {
           fieldsJson: [],
@@ -97,7 +147,7 @@ app.post('/auth/register', async (req, res) => {
   const token = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' })
   res.status(201).json({
     token,
-    user: { id: user.id, email: user.email },
+    user: userJson(user),
   })
 })
 
@@ -116,8 +166,185 @@ app.post('/auth/login', async (req, res) => {
   const token = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' })
   res.json({
     token,
-    user: { id: user.id, email: user.email },
+    user: userJson(user),
   })
+})
+
+app.post('/auth/sms/send', async (req, res) => {
+  const parsed = SmsSendSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: '手机号格式无效' })
+    return
+  }
+  const phone = normalizeCnPhone(parsed.data.phone)
+  if (!phone) {
+    res.status(400).json({ error: '请输入中国大陆 11 位手机号' })
+    return
+  }
+  const now = Date.now()
+  const prev = lastSmsSend.get(phone) ?? 0
+  if (now - prev < 55_000) {
+    res.status(429).json({ error: '发送过于频繁，请稍后再试' })
+    return
+  }
+  lastSmsSend.set(phone, now)
+
+  try {
+    if (!aliyunSmsConfigured()) {
+      res.status(503).json({
+        error:
+          '未配置 ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET，无法发送短信',
+      })
+      return
+    }
+    await sendAliyunSmsVerifyCode(phone)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '短信发送失败'
+    console.error('[sms]', e)
+    res.status(502).json({ error: msg })
+    return
+  }
+
+  res.json({ ok: true })
+})
+
+app.post('/auth/sms/login', async (req, res) => {
+  const parsed = SmsLoginSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: '手机号或验证码无效' })
+    return
+  }
+  const phone = normalizeCnPhone(parsed.data.phone)
+  if (!phone) {
+    res.status(400).json({ error: '手机号格式无效' })
+    return
+  }
+  const { code } = parsed.data
+
+  if (!aliyunSmsConfigured()) {
+    res.status(503).json({ error: '服务端未配置阿里云短信密钥' })
+    return
+  }
+  const ok = await verifyAliyunSmsCode(phone, code)
+  if (!ok) {
+    res.status(401).json({ error: '验证码无效或已过期' })
+    return
+  }
+
+  const email = smsEmailForPhone(phone)
+  let user = await prisma.user.findFirst({
+    where: { OR: [{ phone }, { email }] },
+  })
+
+  if (!user) {
+    const passwordHash = await bcrypt.hash(randomBytes(24).toString('hex'), 10)
+    user = await prisma.user.create({
+      data: {
+        email,
+        phone,
+        phoneVerifiedAt: new Date(),
+        passwordHash,
+        membershipExpiresAt: null,
+        ledger: {
+          create: {
+            fieldsJson: [],
+            recordsJson: [],
+          },
+        },
+      },
+    })
+  } else {
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: { phone, phoneVerifiedAt: new Date() },
+    })
+  }
+
+  const token = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' })
+  res.json({
+    token,
+    user: userJson(user),
+  })
+})
+
+app.get('/api/me', async (req, res) => {
+  const token = authHeader(req)
+  if (!token) {
+    res.status(401).json({ error: '未登录' })
+    return
+  }
+  const userId = userIdFromToken(token)
+  if (!userId) {
+    res.status(401).json({ error: '无效令牌' })
+    return
+  }
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  if (!user) {
+    res.status(404).json({ error: '用户不存在' })
+    return
+  }
+  res.json(userJson(user))
+})
+
+app.post('/api/membership/redeem', async (req, res) => {
+  const token = authHeader(req)
+  if (!token) {
+    res.status(401).json({ error: '未登录' })
+    return
+  }
+  const userId = userIdFromToken(token)
+  if (!userId) {
+    res.status(401).json({ error: '无效令牌' })
+    return
+  }
+  const parsed = RedeemSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: '兑换码格式无效' })
+    return
+  }
+  const raw = parsed.data.code.trim().toUpperCase()
+
+  try {
+    const user = await prisma.$transaction(async (tx) => {
+      const row = await tx.redeemCode.findUnique({ where: { code: raw } })
+      const now = new Date()
+      if (
+        !row ||
+        row.validFrom > now ||
+        row.validTo < now ||
+        row.usedCount >= row.maxUses
+      ) {
+        throw new Error('REDEEM_INVALID')
+      }
+
+      await tx.redeemCode.update({
+        where: { id: row.id },
+        data: { usedCount: { increment: 1 } },
+      })
+
+      const u = await tx.user.findUniqueOrThrow({ where: { id: userId } })
+      const base =
+        membershipActive(u.membershipExpiresAt) && u.membershipExpiresAt
+          ? u.membershipExpiresAt
+          : now
+      const addMs = row.grantedDays * 24 * 60 * 60 * 1000
+      const membershipExpiresAt = new Date(base.getTime() + addMs)
+
+      return tx.user.update({
+        where: { id: userId },
+        data: { membershipExpiresAt },
+      })
+    })
+
+    res.json(userJson(user))
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : ''
+    if (msg === 'REDEEM_INVALID') {
+      res.status(400).json({ error: '兑换码无效或已用尽' })
+      return
+    }
+    throw e
+  }
 })
 
 app.get('/api/ledger', async (req, res) => {
@@ -129,6 +356,14 @@ app.get('/api/ledger', async (req, res) => {
   const userId = userIdFromToken(token)
   if (!userId) {
     res.status(401).json({ error: '无效令牌' })
+    return
+  }
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  if (!user || !membershipActive(user.membershipExpiresAt)) {
+    res.status(403).json({
+      error: '需要有效会员才能使用云端备份，请在设置中兑换会员码',
+      code: 'membership_required',
+    })
     return
   }
   const ledger = await prisma.ledger.findUnique({ where: { userId } })
@@ -154,6 +389,14 @@ app.put('/api/ledger', async (req, res) => {
     res.status(401).json({ error: '无效令牌' })
     return
   }
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  if (!user || !membershipActive(user.membershipExpiresAt)) {
+    res.status(403).json({
+      error: '需要有效会员才能使用云端备份，请在设置中兑换会员码',
+      code: 'membership_required',
+    })
+    return
+  }
   const parsed = LedgerPutSchema.safeParse(req.body)
   if (!parsed.success) {
     res.status(400).json({ error: '请求体须包含 fields、records 数组' })
@@ -176,13 +419,23 @@ app.put('/api/ledger', async (req, res) => {
 
 async function ensureDefaultAdmin() {
   const seedEmail = 'admin'
+  const far = new Date('2099-12-31T15:59:59.000Z')
   const existing = await prisma.user.findUnique({ where: { email: seedEmail } })
-  if (existing) return
+  if (existing) {
+    if (!membershipActive(existing.membershipExpiresAt)) {
+      await prisma.user.update({
+        where: { id: existing.id },
+        data: { membershipExpiresAt: far },
+      })
+    }
+    return
+  }
   const passwordHash = await bcrypt.hash('123456', 10)
   await prisma.user.create({
     data: {
       email: seedEmail,
       passwordHash,
+      membershipExpiresAt: far,
       ledger: {
         create: {
           fieldsJson: [],
@@ -195,6 +448,11 @@ async function ensureDefaultAdmin() {
 }
 
 async function bootstrap() {
+  if (!aliyunSmsConfigured()) {
+    console.warn(
+      '[ledger-api] 未配置阿里云短信密钥：手机号验证码登录不可用，直至设置 ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET',
+    )
+  }
   await ensureDefaultAdmin()
   const httpServer = http.createServer(app)
   attachAsrWebSocket(httpServer, {

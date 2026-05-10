@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import type { FieldDef, LedgerRecord } from '../types'
+import { ReceiptModal } from './ReceiptModal'
 import {
   expandProductLines,
   formatQuantityWithJin,
@@ -68,6 +69,8 @@ export function RecordCard({
   const showMoney = Boolean(amountId)
 
   const [slide, setSlide] = useState(0)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [receiptOpen, setReceiptOpen] = useState(false)
   const [dragActive, setDragActive] = useState(false)
   const panRef = useRef({ startX: 0, startY: 0, startSlide: 0 })
   const activePointer = useRef<number | null>(null)
@@ -143,8 +146,9 @@ export function RecordCard({
     dragging.current = false
   }
 
-  const handleDelete = () => {
+  const confirmDelete = () => {
     onDelete?.(record.id)
+    setDeleteConfirm(false)
     setSlide(0)
   }
 
@@ -179,7 +183,7 @@ export function RecordCard({
             type="button"
             onClick={(ev) => {
               ev.stopPropagation()
-              handleDelete()
+              setDeleteConfirm(true)
             }}
             className="flex w-full items-center justify-center bg-rose-600 text-xs font-semibold text-white active:bg-rose-700"
           >
@@ -243,7 +247,24 @@ export function RecordCard({
                     out={out}
                     settled={record.settled === true}
                   />
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setReceiptOpen(true)
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="ml-auto shrink-0 rounded-lg border border-stone-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-[#666666] hover:bg-stone-50"
+                  >
+                    发票
+                  </button>
                 </div>
+                {amountResolvedId &&
+                  (exp > 0.005 || rec > 0.005 || fullyPaid) && (
+                    <p className="mt-1.5 text-[10px] font-medium tabular-nums leading-snug text-[#666666]">
+                      应收 ¥{fmt(exp)} · 已收 ¥{fmt(rec)} · 差额 ¥{fmt(out)}
+                    </p>
+                  )}
                 <div className="mt-2 min-w-0 space-y-2">
                   <div className="min-w-0 w-full">
                     <div className="min-w-0">
@@ -365,7 +386,24 @@ export function RecordCard({
                     out={out}
                     settled={record.settled === true}
                   />
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setReceiptOpen(true)
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="ml-auto shrink-0 rounded-lg border border-stone-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-[#666666] hover:bg-stone-50"
+                  >
+                    发票
+                  </button>
                 </div>
+                {amountResolvedId &&
+                  (exp > 0.005 || rec > 0.005 || fullyPaid) && (
+                    <p className="mt-1.5 text-[10px] font-medium tabular-nums leading-snug text-[#666666]">
+                      应收 ¥{fmt(exp)} · 已收 ¥{fmt(rec)} · 差额 ¥{fmt(out)}
+                    </p>
+                  )}
                 <div className="mt-2 min-w-0 space-y-2">
                   <div className="space-y-2 text-[12px] leading-snug text-neutral-900">
                     {lines.map((line, i) => (
@@ -423,6 +461,53 @@ export function RecordCard({
           )}
         </div>
       </div>
+
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4">
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"
+            role="dialog"
+            aria-modal
+            aria-labelledby="del-confirm-title"
+          >
+            <p
+              id="del-confirm-title"
+              className="text-base font-bold text-neutral-900"
+            >
+              删除账单？
+            </p>
+            <p className="mt-2 text-sm leading-relaxed text-[#666666]">
+              删除后无法恢复，确定要删除这条记录吗？
+            </p>
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteConfirm(false)
+                  setSlide(0)
+                }}
+                className="flex-1 rounded-xl border border-stone-200 py-2.5 text-sm font-semibold text-[#666666]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => confirmDelete()}
+                className="flex-1 rounded-xl bg-rose-600 py-2.5 text-sm font-semibold text-white"
+              >
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ReceiptModal
+        open={receiptOpen}
+        onClose={() => setReceiptOpen(false)}
+        record={record}
+        fields={fields}
+      />
     </div>
   )
 }

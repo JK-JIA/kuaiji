@@ -8,11 +8,14 @@ generator client {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  createdAt    DateTime @default(now())
-  ledger       Ledger?
+  id                  String    @id @default(cuid())
+  email               String    @unique
+  passwordHash        String
+  phone               String?   @unique
+  phoneVerifiedAt     DateTime?
+  membershipExpiresAt DateTime?
+  createdAt           DateTime  @default(now())
+  ledger              Ledger?
 }
 
 model Ledger {
@@ -22,4 +25,15 @@ model Ledger {
   fieldsJson  Json     @default("[]")
   recordsJson Json     @default("[]")
   updatedAt   DateTime @updatedAt
+}
+
+model RedeemCode {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  validFrom   DateTime
+  validTo     DateTime
+  maxUses     Int      @default(1000)
+  usedCount   Int      @default(0)
+  grantedDays Int      @default(30)
+  batchId     String?
 }

@@ -9,17 +9,28 @@ import { APP_VERSION } from '../version'
 export function SettingsPage() {
   const {
     apiBase,
+    token,
     email: cloudEmail,
+    membershipActive,
     useRemoteLedger,
     login,
     register,
+    smsLogin,
+    sendSms,
+    redeem,
+    refreshProfile,
     logout,
   } = useAuth()
+  const [authMode, setAuthMode] = useState<'password' | 'phone'>('password')
   const [authEmail, setAuthEmail] = useState(() =>
     getApiBase() ? 'admin' : '',
   )
   const [authPw, setAuthPw] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
+  const [phone, setPhone] = useState('')
+  const [smsCode, setSmsCode] = useState('')
+  const [smsWaitSec, setSmsWaitSec] = useState(0)
+  const [redeemCode, setRedeemCode] = useState('')
   const { ready, fields, records, saveFields, restoreFullBackup } =
     useLedger()
   const importInputRef = useRef<HTMLInputElement>(null)
@@ -74,6 +85,12 @@ export function SettingsPage() {
     )
     await saveFields(next)
   }
+
+  useEffect(() => {
+    if (smsWaitSec <= 0) return
+    const id = window.setTimeout(() => setSmsWaitSec((s) => s - 1), 1000)
+    return () => window.clearTimeout(id)
+  }, [smsWaitSec])
 
   const setFieldRequired = async (id: string, required: boolean) => {
     setBusy(true)
@@ -132,7 +149,8 @@ export function SettingsPage() {
             {useRemoteLedger ? (
               <div className="flex flex-col gap-3">
                 <p className="text-sm text-neutral-900">
-                  已登录：<span className="font-medium">{cloudEmail ?? '—'}</span>
+                  已登录且云备份已开通：
+                  <span className="font-medium"> {cloudEmail ?? '—'}</span>
                 </p>
                 <button
                   type="button"
@@ -142,81 +160,242 @@ export function SettingsPage() {
                   退出登录
                 </button>
               </div>
+            ) : token && !membershipActive ? (
+              <div className="space-y-4">
+                <p className="text-sm text-neutral-900">
+                  已登录：<span className="font-medium">{cloudEmail ?? '—'}</span>
+                </p>
+                <p className="text-[11px] leading-relaxed text-amber-900">
+                  当前账号尚未兑换会员，云端账本不会同步。请在下方输入兑换码（Docker
+                  部署时可通过{' '}
+                  <code className="rounded bg-amber-100 px-1 font-mono text-[10px]">
+                    redeem-daily
+                  </code>{' '}
+                  服务日志获取每日码）。
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input
+                    value={redeemCode}
+                    onChange={(e) => setRedeemCode(e.target.value)}
+                    placeholder="兑换码"
+                    className="min-h-[44px] flex-1 rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
+                  />
+                  <button
+                    type="button"
+                    disabled={authBusy || !redeemCode.trim()}
+                    onClick={() => {
+                      void (async () => {
+                        setAuthBusy(true)
+                        try {
+                          await redeem(redeemCode.trim())
+                          setRedeemCode('')
+                          await refreshProfile()
+                          alert('兑换成功，云备份已开通')
+                        } catch (e) {
+                          alert(e instanceof Error ? e.message : '兑换失败')
+                        } finally {
+                          setAuthBusy(false)
+                        }
+                      })()
+                    }}
+                    className="min-h-[44px] shrink-0 rounded-xl bg-[#2ecc71] px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#27ae60] disabled:opacity-50"
+                  >
+                    兑换会员
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => logout()}
+                  className="w-fit rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-[#666666] shadow-sm hover:bg-stone-50"
+                >
+                  退出登录
+                </button>
+              </div>
             ) : (
               <div className="space-y-4">
                 <p className="text-[11px] leading-relaxed text-[#666666]">
-                  尚未登录云端，数据仅保存在本机。登录后账单将同步至服务器。
-                </p>
-                <p className="text-[11px] leading-relaxed text-[#666666]">
-                  默认账号为{' '}
-                  <span className="font-mono text-neutral-800">admin</span>
-                  ，密码{' '}
+                  登录后可兑换会员并开启云端备份。默认账号{' '}
+                  <span className="font-mono text-neutral-800">admin</span> /{' '}
                   <span className="font-mono text-neutral-800">123456</span>
-                  （与 docker-compose 首次启动的服务器配套）。新用户请点「注册」并填写有效邮箱。
+                  （docker 首次启动）。手机号登录由服务端通过阿里云发送短信验证码。
                 </p>
-                <input
-                  type="text"
-                  autoComplete="username"
-                  value={authEmail}
-                  onChange={(e) => setAuthEmail(e.target.value)}
-                  placeholder="账号（默认 admin）或注册邮箱"
-                  className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
-                />
-                <input
-                  type="password"
-                  autoComplete="current-password"
-                  value={authPw}
-                  onChange={(e) => setAuthPw(e.target.value)}
-                  placeholder="密码（至少 6 位）"
-                  className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
-                />
-                <div className="flex flex-wrap gap-2">
+                <div className="flex gap-2">
                   <button
                     type="button"
-                    disabled={authBusy || !authEmail.trim() || authPw.length < 6}
-                    onClick={() => {
-                      void (async () => {
-                        setAuthBusy(true)
-                        try {
-                          await login(authEmail.trim(), authPw)
-                          setAuthPw('')
-                        } catch (e) {
-                          alert(e instanceof Error ? e.message : '登录失败')
-                        } finally {
-                          setAuthBusy(false)
-                        }
-                      })()
-                    }}
-                    className="rounded-xl bg-[#2ecc71] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#27ae60] disabled:opacity-50"
+                    onClick={() => setAuthMode('password')}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                      authMode === 'password'
+                        ? 'bg-[#2ecc71] text-white'
+                        : 'bg-stone-100 text-neutral-700'
+                    }`}
                   >
-                    登录
+                    邮箱 / 账号
                   </button>
                   <button
                     type="button"
-                    disabled={
-                      authBusy ||
-                      !authEmail.trim() ||
-                      authPw.length < 6 ||
-                      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(authEmail.trim())
-                    }
-                    onClick={() => {
-                      void (async () => {
-                        setAuthBusy(true)
-                        try {
-                          await register(authEmail.trim(), authPw)
-                          setAuthPw('')
-                        } catch (e) {
-                          alert(e instanceof Error ? e.message : '注册失败')
-                        } finally {
-                          setAuthBusy(false)
-                        }
-                      })()
-                    }}
-                    className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-neutral-800 shadow-sm transition-colors hover:bg-stone-50 disabled:opacity-50"
+                    onClick={() => setAuthMode('phone')}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                      authMode === 'phone'
+                        ? 'bg-[#2ecc71] text-white'
+                        : 'bg-stone-100 text-neutral-700'
+                    }`}
                   >
-                    注册
+                    手机号
                   </button>
                 </div>
+                {authMode === 'password' ? (
+                  <>
+                    <input
+                      type="text"
+                      autoComplete="username"
+                      value={authEmail}
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                      placeholder="账号（默认 admin）或注册邮箱"
+                      className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
+                    />
+                    <input
+                      type="password"
+                      autoComplete="current-password"
+                      value={authPw}
+                      onChange={(e) => setAuthPw(e.target.value)}
+                      placeholder="密码（至少 6 位）"
+                      className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={
+                          authBusy || !authEmail.trim() || authPw.length < 6
+                        }
+                        onClick={() => {
+                          void (async () => {
+                            setAuthBusy(true)
+                            try {
+                              await login(authEmail.trim(), authPw)
+                              setAuthPw('')
+                              await refreshProfile()
+                            } catch (e) {
+                              alert(
+                                e instanceof Error ? e.message : '登录失败',
+                              )
+                            } finally {
+                              setAuthBusy(false)
+                            }
+                          })()
+                        }}
+                        className="rounded-xl bg-[#2ecc71] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#27ae60] disabled:opacity-50"
+                      >
+                        登录
+                      </button>
+                      <button
+                        type="button"
+                        disabled={
+                          authBusy ||
+                          !authEmail.trim() ||
+                          authPw.length < 6 ||
+                          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+                            authEmail.trim(),
+                          )
+                        }
+                        onClick={() => {
+                          void (async () => {
+                            setAuthBusy(true)
+                            try {
+                              await register(authEmail.trim(), authPw)
+                              setAuthPw('')
+                              await refreshProfile()
+                            } catch (e) {
+                              alert(
+                                e instanceof Error ? e.message : '注册失败',
+                              )
+                            } finally {
+                              setAuthBusy(false)
+                            }
+                          })()
+                        }}
+                        className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-neutral-800 shadow-sm transition-colors hover:bg-stone-50 disabled:opacity-50"
+                      >
+                        注册
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      autoComplete="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="11 位手机号"
+                      className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={
+                          authBusy ||
+                          phone.replace(/\s/g, '').length < 11 ||
+                          smsWaitSec > 0
+                        }
+                        onClick={() => {
+                          void (async () => {
+                            setAuthBusy(true)
+                            try {
+                              await sendSms(phone)
+                              setSmsWaitSec(60)
+                              alert('验证码已发送，请查收短信')
+                            } catch (e) {
+                              alert(
+                                e instanceof Error ? e.message : '发送失败',
+                              )
+                            } finally {
+                              setAuthBusy(false)
+                            }
+                          })()
+                        }}
+                        className="shrink-0 rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-neutral-800 disabled:opacity-50"
+                      >
+                        {smsWaitSec > 0 ? `${smsWaitSec}s` : '获取验证码'}
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={smsCode}
+                      onChange={(e) => setSmsCode(e.target.value)}
+                      placeholder="短信验证码"
+                      className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
+                    />
+                    <button
+                      type="button"
+                      disabled={
+                        authBusy ||
+                        phone.replace(/\s/g, '').length < 11 ||
+                        smsCode.trim().length < 4
+                      }
+                      onClick={() => {
+                        void (async () => {
+                          setAuthBusy(true)
+                          try {
+                            await smsLogin(phone, smsCode.trim())
+                            setSmsCode('')
+                            await refreshProfile()
+                          } catch (e) {
+                            alert(
+                              e instanceof Error ? e.message : '登录失败',
+                            )
+                          } finally {
+                            setAuthBusy(false)
+                          }
+                        })()
+                      }}
+                      className="rounded-xl bg-[#2ecc71] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#27ae60] disabled:opacity-50"
+                    >
+                      手机号登录
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </>
@@ -236,8 +415,10 @@ export function SettingsPage() {
         </p>
         <p className="mb-3 text-[11px] leading-relaxed text-[#666666]">
           {useRemoteLedger
-            ? '当前已登录云端，账单保存在服务器。仍可导出 JSON 作离线存档或多副本备份；从 JSON 恢复会写入云端当前账号。'
-            : '未登录云端时，数据保存在本机（IndexedDB）。卸载 App、清理浏览器数据或换设备会清空本地库，请定期导出 JSON。'}
+            ? '当前已开通云备份，账单保存在服务器。仍可导出 JSON 作离线存档；从 JSON 恢复会写入云端当前账号。'
+            : token && apiBase && !membershipActive
+              ? '已登录但未开通云备份，数据仍仅存本机；兑换会员后才会同步到服务器。请定期导出 JSON。'
+              : '数据保存在本机（IndexedDB）。卸载 App、清理数据或换设备会清空本地库，请定期导出 JSON。'}
           CSV 仅方便用表格查看，不能完整恢复字段与多商品结构。
         </p>
         <div className="flex flex-wrap gap-2">
@@ -375,7 +556,7 @@ export function SettingsPage() {
           <code className="rounded-md bg-[#f8f9fa] px-1.5 py-0.5 font-mono text-[11px] text-neutral-800">
             VITE_API_URL
           </code>{' '}
-          后，可在上方「云端同步」使用账号密码，数据同步至自建后端。
+          后，可在「云端同步」使用邮箱或手机号登录，兑换会员后数据同步至自建后端。
         </p>
       </footer>
     </div>

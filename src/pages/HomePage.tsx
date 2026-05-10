@@ -1,20 +1,35 @@
 import { format, parseISO, subDays } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AddRecordModal } from '../components/AddRecordModal'
 import { CalendarPickerModal } from '../components/CalendarPickerModal'
+import { HomeFilterSheet } from '../components/HomeFilterSheet'
 import { ReconcileModal } from '../components/ReconcileModal'
 import { RecordCard } from '../components/RecordCard'
+import { useAuth } from '../context/AuthContext'
 import {
   getAmountFieldId,
   getPlateValue,
   plateGroupHeading,
 } from '../utils/recordHelpers'
+import {
+  countActiveFilters,
+  defaultHomeFilter,
+  recordMatchesHomeFilters,
+  type HomeFilterState,
+} from '../utils/homeFilters'
 import { findFieldIdByName, sumAmount } from '../utils/stats'
 import type { FieldDef, LedgerRecord } from '../types'
 import { useLedger } from '../context/LedgerContext'
 
 export function HomePage() {
+  const {
+    apiBase,
+    useRemoteLedger,
+    token,
+    membershipActive,
+  } = useAuth()
   const { ready, fields, records, saveRecord, removeRecord, setRecordPayment } =
     useLedger()
   const [modalOpen, setModalOpen] = useState(false)
@@ -24,16 +39,30 @@ export function HomePage() {
   const [jumpDate, setJumpDate] = useState(() =>
     format(new Date(), 'yyyy-MM-dd'),
   )
-  /** 日历跳转过的日期（可能没有账单也要占位以便滚动） */
   const [pinnedDates, setPinnedDates] = useState<string[]>([])
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [filterState, setFilterState] = useState<HomeFilterState>(
+    defaultHomeFilter,
+  )
+  const [showTopBtn, setShowTopBtn] = useState(false)
 
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
 
   const todayStr = format(new Date(), 'yyyy-MM-dd')
 
+  const filteredRecords = useMemo(
+    () =>
+      records.filter((r) =>
+        recordMatchesHomeFilters(r, fields, filterState),
+      ),
+    [records, fields, filterState],
+  )
+
+  const filterActive = countActiveFilters(filterState) > 0
+
   const grouped = useMemo(() => {
     const map = new Map<string, typeof records>()
-    for (const r of records) {
+    for (const r of filteredRecords) {
       const arr = map.get(r.date) || []
       arr.push(r)
       map.set(r.date, arr)
@@ -43,25 +72,21 @@ export function HomePage() {
     }
     const dates = [...map.keys()].sort((a, b) => b.localeCompare(a))
     return { map, dates }
-  }, [records])
+  }, [filteredRecords])
 
-  /**
-   * 仅展示有账单的日期；中间无账单的日子不占位。
-   * 日历「跳转」钉选的日期即使没有账单也会显示（方便看到「当日暂无账单」并滚动到位）。
-   */
   const visibleTimelineDates = useMemo(() => {
     const s = new Set<string>(grouped.dates)
     for (const p of pinnedDates) s.add(p)
     return [...s].sort((a, b) => b.localeCompare(a))
   }, [grouped.dates, pinnedDates])
 
-  const todayRecords = grouped.map.get(todayStr) || []
+  const todayRecords = filteredRecords.filter((r) => r.date === todayStr)
   const amountId = getAmountFieldId(fields) ?? findFieldIdByName(fields, '金额')
   const todaySum = sumAmount(todayRecords, amountId)
 
   const recordDateSet = useMemo(
-    () => new Set(grouped.dates),
-    [grouped.dates],
+    () => new Set(records.map((r) => r.date)),
+    [records],
   )
 
   const reconcileRecord = useMemo(
@@ -74,6 +99,19 @@ export function HomePage() {
     const el = sectionRefs.current[dateKey]
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [])
+
+  useEffect(() => {
+    const onScroll = () => {
+      setShowTopBtn(window.scrollY > 280)
+    }
+    onScroll()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
+  const scrollTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
 
   const headerDayLabel = (dateKey: string) => {
     const d = parseISO(dateKey + 'T12:00:00')
@@ -94,15 +132,37 @@ export function HomePage() {
   return (
     <div className="min-h-dvh bg-[#f8f9fa] pb-24 pt-12">
       <header className="mb-4 flex flex-wrap items-center justify-between gap-2 px-4">
-        <div>
-          <h1 className="text-[22px] font-bold tracking-tight text-neutral-900">
-            批发记账
+        <div className="min-w-0">
+          <h1
+            className="font-light italic tracking-[0.12em] text-transparent"
+            style={{
+              fontSize: '1.75rem',
+              lineHeight: 1.15,
+              background: 'linear-gradient(120deg, #1a7f4c 0%, #2ecc71 45%, #27ae60 100%)',
+              WebkitBackgroundClip: 'text',
+              backgroundClip: 'text',
+            }}
+            aria-label="kuaiji 记账"
+          >
+            kuaiji
           </h1>
-          <p className="mt-0.5 text-xs leading-relaxed text-[#666666]">
-            本地保存 · 支持金额与核账 · 可封装 APK
+          <p className="mt-1 text-xs leading-relaxed text-[#666666]">
+            按日账单 · 车牌分组 · 核账与统计，批发场景随身记。
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setFilterOpen(true)}
+            className="relative inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-800 shadow-sm hover:bg-stone-50"
+          >
+            筛选
+            {filterActive ? (
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#2ecc71] px-1 text-[10px] font-bold text-white">
+                {countActiveFilters(filterState)}
+              </span>
+            ) : null}
+          </button>
           <button
             type="button"
             onClick={() => setJumpOpen(true)}
@@ -144,18 +204,63 @@ export function HomePage() {
         )}
       </section>
 
-      <div className="mx-4 mb-3 flex items-start gap-2.5 rounded-2xl border border-emerald-100/70 bg-[#f3fcf7] px-3.5 py-3">
-        <HintBulbGlyph className="mt-0.5 h-[15px] w-[15px] shrink-0 text-[#2ecc71]" />
-        <p className="text-left text-xs leading-relaxed">
-          <span className="font-semibold text-[#1a7f4c]">提示：</span>
-          <span className="font-normal text-[#2d6a4f]">
-            点击账单进入编辑，向左滑可删除；登录账号开启云存储功能
-          </span>
-        </p>
-      </div>
+      {useRemoteLedger && (
+        <div className="mx-4 mb-3 flex items-center gap-2.5 rounded-2xl border border-sky-100 bg-sky-50/90 px-3.5 py-3">
+          <CloudOkGlyph className="h-5 w-5 shrink-0 text-sky-600" />
+          <p className="text-left text-xs leading-relaxed text-sky-950">
+            <span className="font-semibold text-sky-800">云端已同步</span>
+            <span className="font-normal text-sky-900/90">
+              {' '}
+              账单数据已上云，换机登录同一账号可恢复。点击账单可编辑，左滑删除需确认。
+            </span>
+          </p>
+        </div>
+      )}
+
+      {apiBase && token && !membershipActive && (
+        <div className="mx-4 mb-3 flex items-start gap-2.5 rounded-2xl border border-amber-200/90 bg-amber-50/90 px-3.5 py-3">
+          <HintBulbGlyph className="mt-0.5 h-[15px] w-[15px] shrink-0 text-amber-700" />
+          <p className="text-left text-xs leading-relaxed text-amber-950">
+            <span className="font-semibold text-amber-900">未开通云备份会员</span>
+            <span className="text-amber-900/90">
+              {' '}
+              已登录但需兑换会员码后才会同步账本至服务器。请打开{' '}
+            </span>
+            <Link
+              to="/settings"
+              className="font-semibold text-amber-800 underline-offset-2 hover:underline"
+            >
+              设置
+            </Link>
+            兑换。
+          </p>
+        </div>
+      )}
+
+      {!useRemoteLedger && (
+        <div className="mx-4 mb-3 flex items-start gap-2.5 rounded-2xl border border-emerald-100/70 bg-[#f3fcf7] px-3.5 py-3">
+          <HintBulbGlyph className="mt-0.5 h-[15px] w-[15px] shrink-0 text-[#2ecc71]" />
+          <div className="text-left text-xs leading-relaxed">
+            <span className="font-semibold text-[#1a7f4c]">提示：</span>
+            <span className="font-normal text-[#2d6a4f]">
+              {apiBase
+                ? '数据仅保存在本机，卸载或清理存储会丢失；请定期在设置导出 JSON 备份。更推荐登录并兑换会员开启云端同步。'
+                : '当前为离线使用，数据仅存本机。点击账单可编辑，向左滑删除前会二次确认。'}
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="px-4">
-        {visibleTimelineDates.length === 0 && (
+        {records.length > 0 &&
+          filterActive &&
+          filteredRecords.length === 0 && (
+            <p className="mb-4 rounded-2xl border border-dashed border-stone-300 bg-white py-10 text-center text-sm text-[#666666]">
+              无匹配账单，请调整筛选条件。
+            </p>
+          )}
+
+        {visibleTimelineDates.length === 0 && records.length === 0 && (
           <p className="rounded-2xl border border-dashed border-stone-200 bg-white py-12 text-center text-stone-400">
             暂无记录，点击下方记一笔。
           </p>
@@ -214,6 +319,17 @@ export function HomePage() {
         })}
       </div>
 
+      {showTopBtn && (
+        <button
+          type="button"
+          onClick={scrollTop}
+          className="fixed bottom-36 right-4 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-700 shadow-md backdrop-blur hover:bg-stone-50"
+          aria-label="回到顶部"
+        >
+          <ChevronUpGlyph className="h-5 w-5" />
+        </button>
+      )}
+
       <button
         type="button"
         onClick={() => {
@@ -225,6 +341,13 @@ export function HomePage() {
       >
         记一笔
       </button>
+
+      <HomeFilterSheet
+        open={filterOpen}
+        onClose={() => setFilterOpen(false)}
+        value={filterState}
+        onChange={setFilterState}
+      />
 
       <AddRecordModal
         open={modalOpen}
@@ -369,3 +492,43 @@ function HintBulbGlyph({ className }: { className?: string }) {
   )
 }
 
+function CloudOkGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={1.5}
+      stroke="currentColor"
+      className={className}
+      aria-hidden
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M2.25 15a4.5 4.5 0 004.5 4.5h7.692a4.5 4.5 0 001.305-8.772 5.25 5.25 0 00-10.233 2.102A3.75 3.75 0 002.25 15z"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 12.75l1.5 1.5 3-3"
+      />
+    </svg>
+  )
+}
+
+function ChevronUpGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={2}
+      stroke="currentColor"
+      className={className}
+      aria-hidden
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+    </svg>
+  )
+}
