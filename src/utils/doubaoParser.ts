@@ -1,8 +1,9 @@
 ﻿/**
  * 豆包大模型智能解析
  * 官网：https://www.volcengine.com/product/doubao
- * 文档：https://www.volcengine.com/docs/82379/1494384
- * 模型：Doubao-Seed-2.0-mini (多模态模型，支持图片识别)
+ * 对话(Chat) API（本文件调用 chat/completions）：https://www.volcengine.com/docs/82379/1298454
+ * 模型：VITE_DOUBAO_MODEL 与 Chat 请求体 model 一致——可为接入点 ID（ep-xxxx），
+ * 或文档/控制台给出的模型端点 ID（如 doubao-1-5-lite-32k-250115），须与 curl 示例逐字相同
  */
 
 import { computedLineAmountFromUnitAndQty } from './recordHelpers'
@@ -13,12 +14,19 @@ const DOUBAO_API_KEY =
     ? import.meta.env.VITE_DOUBAO_API_KEY.trim()
     : ''
 
+/**
+ * 方舟 Chat Completions 的 `model`：控制台「推理接入点」的 ep-xxxx，
+ * 或官方给出的模型端点字符串（见文档 curl 的 model 字段）；勿手写错字符（如 1.5 与 1-5）。
+ */
+const DOUBAO_MODEL =
+  typeof import.meta.env.VITE_DOUBAO_MODEL === 'string'
+    ? import.meta.env.VITE_DOUBAO_MODEL.trim()
+    : ''
+
 const DOUBAO_CONFIG = {
   API_KEY: DOUBAO_API_KEY || 'your_api_key_here',
-  // 模型名称
-  MODEL: 'doubao-seed-2-0-mini-260215',
-  // API 端点 (多模态 API)
-  ENDPOINT: 'https://ark.cn-beijing.volces.com/api/v3/responses',
+  MODEL: DOUBAO_MODEL,
+  ENDPOINT: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
 }
 
 /** 智能识别得到的多行商品（每行对应表单一行） */
@@ -178,7 +186,15 @@ export async function parseWithDoubao(
   if (!isDoubaoConfigured()) {
     return {
       success: false,
-      error: '请先配置豆包 API Key',
+      error: '请先配置豆包 API Key：在 .env 中设置 VITE_DOUBAO_API_KEY，改后需重启 dev 或重新 build。',
+    }
+  }
+
+  if (!DOUBAO_CONFIG.MODEL) {
+    return {
+      success: false,
+      error:
+        '已配置 API Key，但未设置模型标识：请在 .env 中增加 VITE_DOUBAO_MODEL，与方舟 Chat 接口里 model 一致（可为 ep-xxxx 接入点 ID，或文档 curl 中的模型端点 ID，须逐字一致），重启 dev 或重新 build。',
     }
   }
 
@@ -243,8 +259,8 @@ export async function parseWithDoubao(
 }`
 
     console.log('调用豆包 API，模型:', DOUBAO_CONFIG.MODEL)
-    
-    // 调用豆包 API (多模态格式)
+
+    // Chat Completions：messages + 纯文本 content（与 /responses 的 input 多模态块不同）
     const response = await fetch(DOUBAO_CONFIG.ENDPOINT, {
       method: 'POST',
       headers: {
@@ -253,17 +269,7 @@ export async function parseWithDoubao(
       },
       body: JSON.stringify({
         model: DOUBAO_CONFIG.MODEL,
-        input: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'input_text',
-                text: prompt,
-              },
-            ],
-          },
-        ],
+        messages: [{ role: 'user', content: prompt }],
       }),
     })
 
@@ -280,7 +286,16 @@ export async function parseWithDoubao(
       if (response.status === 401) {
         return { success: false, error: 'API Key 无效，请检查配置' }
       } else if (response.status === 404) {
-        return { success: false, error: '推理接入点不存在或未激活，请检查配置' }
+        const detail =
+          (typeof errorData?.message === 'string' && errorData.message) ||
+          (typeof errorData?.error?.message === 'string' &&
+            errorData.error.message) ||
+          ''
+        const suffix = detail ? `（${detail}）` : ''
+        return {
+          success: false,
+          error: `模型或接入点不可用${suffix}。请核对 VITE_DOUBAO_MODEL 是否与控制台/文档 curl 中的 model 完全一致（ep-xxxx 或如 doubao-1-5-lite-32k-250115），接入点已开通，且地域与 URL 一致（本请求为 cn-beijing）。`,
+        }
       } else if (response.status === 429) {
         return { success: false, error: '请求过于频繁，请稍后再试' }
       } else {
@@ -290,34 +305,19 @@ export async function parseWithDoubao(
 
     const result = await response.json()
     console.log('豆包 API 响应:', result)
-    
-    // 多模态 API 的响应格式：result.output 是一个数组
-    // 需要找到 type 为 'message' 的项，然后从 content 中提取文本
+
+    // Chat Completions：choices[0].message.content 为助手回复文本
     let content = ''
-    if (result.output && Array.isArray(result.output)) {
-      // 找到 type 为 'message' 的项
-      const messageOutput = result.output.find((item: any) => item.type === 'message')
-      console.log('找到的 messageOutput:', messageOutput)
-      
-      // 从 message 的 content 数组中提取文本
-      if (messageOutput && messageOutput.content && Array.isArray(messageOutput.content)) {
-        console.log('content 数组:', messageOutput.content)
-        messageOutput.content.forEach((c: any, index: number) => {
-          console.log('content[' + index + ']:', c)
-        })
-        
-        /** Responses API 多为 output_text；旧版可能是 text */
-        const textBlock = messageOutput.content.find(
-          (c: any) => c.type === 'text' || c.type === 'output_text',
-        )
-        console.log('找到的文本块:', textBlock)
-        content =
-          (typeof textBlock?.text === 'string' ? textBlock.text : '') ||
-          (typeof textBlock?.textContent === 'string'
-            ? textBlock.textContent
-            : '') ||
-          ''
-      }
+    const choice0 = result?.choices?.[0]
+    const msg = choice0?.message
+    if (typeof msg?.content === 'string') {
+      content = msg.content
+    } else if (Array.isArray(msg?.content)) {
+      const parts = msg.content as Array<{ type?: string; text?: string }>
+      content = parts
+        .filter((p) => p && (p.type === 'text' || p.text != null))
+        .map((p) => (typeof p.text === 'string' ? p.text : ''))
+        .join('')
     }
 
     if (!content) {
@@ -450,7 +450,7 @@ export async function parseWithDoubao(
 }
 
 /**
- * 检查是否配置了豆包 API Key
+ * 是否启用「智能填入」：仅看 API Key（接入点 ID 单独校验，缺失时在请求前提示，避免只配了 Key 却显示「填入首行」）
  */
 export function isDoubaoConfigured(): boolean {
   return (
