@@ -45,12 +45,12 @@ export function HomeFilterSheet({ open, onClose, value, onChange }: Props) {
 
         <label className="mb-3 block">
           <span className="mb-1.5 block text-xs font-medium text-[#666666]">
-            车牌（包含匹配）
+            购买方（包含匹配）
           </span>
           <input
             value={value.plate}
             onChange={(e) => onChange({ ...value, plate: e.target.value })}
-            placeholder="例如 粤A"
+            placeholder="姓名、手机尾号、简称等"
             className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
           />
         </label>

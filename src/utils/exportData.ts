@@ -1,125 +1,5 @@
 import type { FieldDef, LedgerRecord } from '../types'
-import { expandProductLines } from './recordHelpers'
-
-/** 与 exportJson 写入格式一致，便于校验与恢复 */
-export type LedgerBackupPayload = {
-  exportedAt?: string
-  version: number
-  fields: FieldDef[]
-  records: LedgerRecord[]
-}
-
-export function parseLedgerBackupJson(text: string):
-  | { ok: true; data: LedgerBackupPayload }
-  | { ok: false; error: string } {
-  let raw: unknown
-  try {
-    raw = JSON.parse(text)
-  } catch {
-    return { ok: false, error: '不是合法的 JSON 文件' }
-  }
-  if (!raw || typeof raw !== 'object') {
-    return { ok: false, error: '备份格式无效' }
-  }
-  const o = raw as Record<string, unknown>
-  const ver = typeof o.version === 'number' ? o.version : 1
-  if (ver !== 1) {
-    return { ok: false, error: `不支持的备份版本：${ver}` }
-  }
-  if (!Array.isArray(o.fields) || !Array.isArray(o.records)) {
-    return { ok: false, error: '备份中缺少 fields 或 records 数组' }
-  }
-
-  const fields: FieldDef[] = []
-  for (const item of o.fields) {
-    if (!item || typeof item !== 'object') continue
-    const f = item as Record<string, unknown>
-    const id = String(f.id ?? '')
-    const name = String(f.name ?? '')
-    const type = f.type === 'number' ? 'number' : 'text'
-    const order = Number(f.order)
-    if (!id || !name || !Number.isFinite(order)) continue
-    const row: FieldDef = { id, name, type, order }
-    if (typeof f.key === 'string') {
-      const k = f.key as FieldDef['key']
-      if (
-        k === 'product' ||
-        k === 'quantity' ||
-        k === 'plate' ||
-        k === 'amount'
-      ) {
-        row.key = k
-      }
-    }
-    if (f.required === true) row.required = true
-    fields.push(row)
-  }
-
-  const records: LedgerRecord[] = []
-  for (const item of o.records) {
-    if (!item || typeof item !== 'object') continue
-    const r = item as Record<string, unknown>
-    const id = String(r.id ?? '')
-    const date = String(r.date ?? '')
-    const createdAt = Number(r.createdAt)
-    const values = r.values
-    if (!id || !date || !Number.isFinite(createdAt)) continue
-    if (!values || typeof values !== 'object' || Array.isArray(values)) continue
-
-    const rec: LedgerRecord = {
-      id,
-      date,
-      createdAt,
-      values: { ...(values as Record<string, string>) },
-    }
-    if (Array.isArray(r.lineItems)) {
-      const lis: LedgerRecord['lineItems'] = []
-      for (const li of r.lineItems) {
-        if (!li || typeof li !== 'object') continue
-        const x = li as Record<string, unknown>
-        const lid = String(x.id ?? '')
-        const lv = x.values
-        if (
-          !lid ||
-          !lv ||
-          typeof lv !== 'object' ||
-          Array.isArray(lv)
-        )
-          continue
-        lis.push({
-          id: lid,
-          values: { ...(lv as Record<string, string>) },
-        })
-      }
-      if (lis.length > 0) rec.lineItems = lis
-    }
-    if (r.settled === true) rec.settled = true
-    const ra = r.receivedAmount
-    if (typeof ra === 'number' && !Number.isNaN(ra)) {
-      rec.receivedAmount = ra
-    }
-    const da = r.dealAmount
-    if (typeof da === 'number' && !Number.isNaN(da)) {
-      rec.dealAmount = da
-    }
-    records.push(rec)
-  }
-
-  if (fields.length === 0) {
-    return { ok: false, error: '备份中没有有效的字段定义' }
-  }
-
-  return {
-    ok: true,
-    data: {
-      exportedAt:
-        typeof o.exportedAt === 'string' ? o.exportedAt : undefined,
-      version: 1,
-      fields,
-      records,
-    },
-  }
-}
+import { expandProductLines, getAmountFieldId } from './recordHelpers'
 
 function downloadBlob(filename: string, blob: Blob) {
   const a = document.createElement('a')
@@ -129,33 +9,315 @@ function downloadBlob(filename: string, blob: Blob) {
   URL.revokeObjectURL(a.href)
 }
 
-export function exportJson(records: LedgerRecord[], fields: FieldDef[]) {
-  const payload = {
-    exportedAt: new Date().toISOString(),
-    version: 1,
-    fields,
-    records,
+/** 解析含引号与逗号的 CSV 全文为二维数组 */
+export function parseCsvRows(content: string): string[][] {
+  const t = content.replace(/^\ufeff/, '')
+  const rows: string[][] = []
+  let row: string[] = []
+  let field = ''
+  let inQuotes = false
+  const pushField = () => {
+    row.push(field)
+    field = ''
   }
-  const blob = new Blob([JSON.stringify(payload, null, 2)], {
-    type: 'application/json;charset=utf-8',
-  })
-  downloadBlob(`ledger-export-${formatTs()}.json`, blob)
+  const pushRow = () => {
+    if (row.length > 1 || row.some((cell) => cell !== '')) {
+      rows.push(row)
+    }
+    row = []
+  }
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i]
+    if (inQuotes) {
+      if (c === '"') {
+        if (t[i + 1] === '"') {
+          field += '"'
+          i++
+        } else {
+          inQuotes = false
+        }
+      } else {
+        field += c
+      }
+    } else if (c === '"') {
+      inQuotes = true
+    } else if (c === ',') {
+      pushField()
+    } else if (c === '\r' || c === '\n') {
+      pushField()
+      pushRow()
+      if (c === '\r' && t[i + 1] === '\n') i++
+    } else {
+      field += c
+    }
+  }
+  pushField()
+  if (row.length > 1 || row.some((cell) => cell !== '')) {
+    rows.push(row)
+  }
+  return rows
 }
 
-/** CSV：每条商品一行；多商品订单拆多行 */
+/** 固定列：导出用首项为中文表头；数组含旧版英文以便导入兼容 */
+function csvMetaHeaders(fields: FieldDef[]) {
+  const plateName = fields.find((f) => f.key === 'plate')?.name.trim() || '购买方'
+  const productName =
+    fields.find((f) => f.key === 'product')?.name.trim() || '商品'
+  const quantityName =
+    fields.find((f) => f.key === 'quantity')?.name.trim() || '斤数'
+  const amountId = getAmountFieldId(fields)
+  const amountName = amountId
+    ? fields.find((f) => f.id === amountId)?.name.trim() || '金额'
+    : '金额'
+  const lineAmountHeader = amountId ? `${amountName}（行）` : '行金额'
+  const recordTotalHeader = amountId ? `${amountName}（整单）` : '整单金额'
+
+  return {
+    recordId: ['账单ID', 'recordId'],
+    date: ['日期', 'date'],
+    createdAt: ['创建时间戳', 'createdAt'],
+    settled: ['已结清', 'settled'],
+    receivedAmount: ['累计实收', 'receivedAmount'],
+    dealAmount: ['成交价', 'dealAmount'],
+    plate: [plateName, 'plate'],
+    product: [productName, 'product'],
+    quantity: [quantityName, 'quantity'],
+    lineAmount: [lineAmountHeader, 'lineAmount'],
+    recordTotalAmount: [recordTotalHeader, 'recordTotalAmount'],
+  } as const
+}
+
+function colByAliases(headers: string[], aliases: readonly string[]): number {
+  const norm = headers.map((h) => h.trim())
+  for (const a of aliases) {
+    const i = norm.indexOf(a)
+    if (i >= 0) return i
+  }
+  return -1
+}
+
+function allFixedHeaderStrings(meta: ReturnType<typeof csvMetaHeaders>): Set<string> {
+  const s = new Set<string>()
+  for (const arr of Object.values(meta)) {
+    for (const h of arr) s.add(h)
+  }
+  return s
+}
+
+function parseNumLoose(s: string): number | undefined {
+  const x = String(s).trim().replace(/,/g, '')
+  if (x === '') return undefined
+  const n = parseFloat(x)
+  return Number.isFinite(n) ? Math.round(n * 100) / 100 : undefined
+}
+
+function newLineItemId(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID()
+  }
+  return `li_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
+}
+
+/**
+ * 从本应用导出的 CSV 还原账单（字段定义以当前 settings 为准，表头需与导出一致）。
+ */
+export function parseLedgerImportCsv(
+  text: string,
+  fields: FieldDef[],
+): { ok: true; records: LedgerRecord[] } | { ok: false; error: string } {
+  const rows = parseCsvRows(text)
+  if (rows.length < 2) {
+    return { ok: false, error: 'CSV 无有效数据（至少需表头与一行数据）' }
+  }
+  const headers = rows[0].map((h) => h.trim())
+  const meta = csvMetaHeaders(fields)
+  const fixedSet = allFixedHeaderStrings(meta)
+
+  const iRecordId = colByAliases(headers, meta.recordId)
+  const iDate = colByAliases(headers, meta.date)
+  const iCreatedAt = colByAliases(headers, meta.createdAt)
+  if (iRecordId < 0 || iDate < 0 || iCreatedAt < 0) {
+    const miss: string[] = []
+    if (iRecordId < 0) miss.push(meta.recordId[0])
+    if (iDate < 0) miss.push(meta.date[0])
+    if (iCreatedAt < 0) miss.push(meta.createdAt[0])
+    return {
+      ok: false,
+      error: `CSV 缺少必需列：${miss.join('、')}（可与旧版英文表头混用）`,
+    }
+  }
+
+  const amountId = getAmountFieldId(fields)
+  const plateId = fields.find((f) => f.key === 'plate')?.id
+  const productId = fields.find((f) => f.key === 'product')?.id
+  const quantityId = fields.find((f) => f.key === 'quantity')?.id
+
+  const extraFieldByCol: { col: number; id: string }[] = []
+  headers.forEach((h, i) => {
+    const t = h.trim()
+    if (!t || fixedSet.has(t)) return
+    const f = fields.find((x) => x.name.trim() === t)
+    if (f) extraFieldByCol.push({ col: i, id: f.id })
+  })
+
+  const iSettled = colByAliases(headers, meta.settled)
+  const iReceived = colByAliases(headers, meta.receivedAmount)
+  const iDeal = colByAliases(headers, meta.dealAmount)
+  const iPlate = colByAliases(headers, meta.plate)
+  const iProduct = colByAliases(headers, meta.product)
+  const iQuantity = colByAliases(headers, meta.quantity)
+  const iLineAmt = colByAliases(headers, meta.lineAmount)
+  const iRecTotal = colByAliases(headers, meta.recordTotalAmount)
+
+  const groups = new Map<string, string[][]>()
+  for (let r = 1; r < rows.length; r++) {
+    const line = rows[r]
+    if (line.every((c) => String(c).trim() === '')) continue
+    const rid = String(line[iRecordId] ?? '').trim()
+    if (!rid) {
+      return { ok: false, error: `第 ${r + 1} 行：账单ID 为空` }
+    }
+    const g = groups.get(rid) ?? []
+    g.push(line)
+    groups.set(rid, g)
+  }
+
+  if (groups.size === 0) {
+    return { ok: false, error: 'CSV 没有可导入的数据行' }
+  }
+
+  const records: LedgerRecord[] = []
+
+  for (const [recordId, lines] of groups) {
+    const first = lines[0]
+    const date = String(first[iDate] ?? '').trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return {
+        ok: false,
+        error: `订单 ${recordId}：日期格式应为 YYYY-MM-DD，当前为「${date}」`,
+      }
+    }
+    const createdAt = parseNumLoose(String(first[iCreatedAt] ?? ''))
+    if (createdAt === undefined || !Number.isFinite(createdAt)) {
+      return {
+        ok: false,
+        error: `订单 ${recordId}：创建时间戳无效`,
+      }
+    }
+    const createdAtInt = Math.round(createdAt)
+
+    const settledStr =
+      iSettled >= 0 ? String(first[iSettled] ?? '').trim() : '0'
+    const settled = settledStr === '1' || settledStr.toLowerCase() === 'true'
+
+    const received =
+      iReceived >= 0 ? parseNumLoose(String(first[iReceived] ?? '')) : undefined
+    const deal =
+      iDeal >= 0 ? parseNumLoose(String(first[iDeal] ?? '')) : undefined
+
+    const values: Record<string, string> = {}
+    if (plateId && iPlate >= 0) {
+      values[plateId] = String(first[iPlate] ?? '').trim()
+    }
+    if (amountId && iRecTotal >= 0) {
+      const tot = String(first[iRecTotal] ?? '').trim()
+      if (tot) values[amountId] = tot
+    }
+
+    for (const { col: ci, id: fid } of extraFieldByCol) {
+      values[fid] = String(first[ci] ?? '').trim()
+    }
+
+    const rec: LedgerRecord = {
+      id: recordId,
+      date,
+      createdAt: createdAtInt,
+      values: { ...values },
+    }
+    if (settled) rec.settled = true
+    if (received !== undefined && !Number.isNaN(received)) {
+      rec.receivedAmount = received
+    }
+    if (deal !== undefined && !Number.isNaN(deal)) {
+      rec.dealAmount = deal
+    }
+
+    const hasLineCols =
+      iProduct >= 0 &&
+      iQuantity >= 0 &&
+      iLineAmt >= 0 &&
+      productId &&
+      quantityId
+
+    const lineItems: NonNullable<LedgerRecord['lineItems']> = []
+    if (hasLineCols) {
+      for (const ln of lines) {
+        const prod = String(ln[iProduct] ?? '').trim()
+        const qty = String(ln[iQuantity] ?? '').trim()
+        const lam = String(ln[iLineAmt] ?? '').trim()
+        if (!prod && !qty && !lam) continue
+        const lineVals: Record<string, string> = {
+          [productId]: prod,
+          [quantityId]: qty,
+        }
+        if (amountId) lineVals[amountId] = lam
+        lineItems.push({
+          id: newLineItemId(),
+          values: lineVals,
+        })
+      }
+    }
+
+    if (lineItems.length > 0) {
+      rec.lineItems = lineItems
+    } else if (productId && quantityId) {
+      const prod = String(first[iProduct] ?? '').trim()
+      const qty = String(first[iQuantity] ?? '').trim()
+      if (prod || qty) {
+        rec.values[productId] = prod
+        rec.values[quantityId] = qty
+      }
+    }
+
+    for (let li = 1; li < lines.length; li++) {
+      const ln = lines[li]
+      if (String(ln[iDate] ?? '').trim() !== date) {
+        return {
+          ok: false,
+          error: `订单 ${recordId}：多行日期不一致`,
+        }
+      }
+      if (String(ln[iCreatedAt] ?? '').trim() !== String(first[iCreatedAt] ?? '').trim()) {
+        return {
+          ok: false,
+          error: `订单 ${recordId}：多行「创建时间戳」不一致`,
+        }
+      }
+    }
+
+    records.push(rec)
+  }
+
+  records.sort((a, b) => b.createdAt - a.createdAt)
+  return { ok: true, records }
+}
+
 export function exportCsv(records: LedgerRecord[], fields: FieldDef[]) {
   const plateId = fields.find((f) => f.key === 'plate')?.id
+  const amountId = getAmountFieldId(fields)
+  const meta = csvMetaHeaders(fields)
   const headers = [
-    'recordId',
-    'date',
-    'createdAt',
-    'settled',
-    'receivedAmount',
-    'dealAmount',
-    'plate',
-    'product',
-    'quantity',
-    'lineAmount',
+    meta.recordId[0],
+    meta.date[0],
+    meta.createdAt[0],
+    meta.settled[0],
+    meta.receivedAmount[0],
+    meta.dealAmount[0],
+    meta.plate[0],
+    meta.product[0],
+    meta.quantity[0],
+    meta.lineAmount[0],
+    meta.recordTotalAmount[0],
     ...fields
       .filter(
         (f) =>
@@ -175,6 +337,10 @@ export function exportCsv(records: LedgerRecord[], fields: FieldDef[]) {
 
   for (const r of records) {
     const plate = plateId ? (r.values[plateId] ?? '') : ''
+    const recordTotal =
+      amountId && r.values[amountId] !== undefined
+        ? String(r.values[amountId] ?? '')
+        : ''
     const lines = expandProductLines(r, fields)
     const pid = fields.find((f) => f.key === 'product')?.id
     const qid = fields.find((f) => f.key === 'quantity')?.id
@@ -209,6 +375,7 @@ export function exportCsv(records: LedgerRecord[], fields: FieldDef[]) {
         escapeCsv(line.product),
         escapeCsv(line.quantity),
         escapeCsv(line.lineAmountStr),
+        escapeCsv(recordTotal),
         ...extraIds.map((id) => escapeCsv(r.values[id] ?? '')),
       ]
       rows.push(cells)

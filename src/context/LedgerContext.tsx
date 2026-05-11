@@ -12,7 +12,7 @@ import {
   putLedger,
 } from '../api/ledgerClient'
 import { getDefaultFieldDefs } from '../constants/defaultLedgerFields'
-import { mergeMissingDefaultFields } from '../constants/mergeBuiltinFields'
+import { mergeMissingDefaultFields, normalizeBuiltinFieldLabels } from '../constants/mergeBuiltinFields'
 import type { FieldDef, LedgerRecord, ReconcilePayload } from '../types'
 import {
   addRecord,
@@ -67,14 +67,33 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           records: recordsNext,
         })
       }
-      setFields(fieldsNext)
+      const normalized = normalizeBuiltinFieldLabels(fieldsNext)
+      const needsPersist = normalized.some((nf) => {
+        const of = fieldsNext.find((x) => x.id === nf.id)
+        return of && of.name !== nf.name
+      })
+      if (needsPersist && normalized.length > 0) {
+        await putLedger(apiBase, token, {
+          fields: normalized,
+          records: recordsNext,
+        })
+      }
+      setFields(normalized)
       setRecords(recordsNext)
       setReady(true)
       return
     }
 
     const f = await ensureDefaultFields()
-    setFields(f)
+    const merged = mergeMissingDefaultFields(f)
+    const needsLocalPersist = merged.some((nf) => {
+      const of = f.find((x) => x.id === nf.id)
+      return of && of.name !== nf.name
+    })
+    if (needsLocalPersist) {
+      await updateFields(merged)
+    }
+    setFields(merged)
     const r = await db.records.orderBy('createdAt').reverse().toArray()
     setRecords(r)
     setReady(true)

@@ -12,6 +12,8 @@ import {
   getAmountFieldId,
   getPlateValue,
   plateGroupHeading,
+  buyerBucketKey,
+  isEmptyBuyerBucketKey,
 } from '../utils/recordHelpers'
 import {
   countActiveFilters,
@@ -147,7 +149,7 @@ export function HomePage() {
             kuaiji
           </h1>
           <p className="mt-1 text-xs leading-relaxed text-[#666666]">
-            按日账单 · 车牌分组 · 核账与统计，批发场景随身记。
+            按日账单 · 购买方分组 · 核账与统计，批发场景随身记。
           </p>
         </div>
         <div className="flex flex-wrap justify-end gap-2">
@@ -244,7 +246,7 @@ export function HomePage() {
             <span className="font-semibold text-[#1a7f4c]">提示：</span>
             <span className="font-normal text-[#2d6a4f]">
               {apiBase
-                ? '数据仅保存在本机，卸载或清理存储会丢失；请定期在设置导出 JSON 备份。更推荐登录并兑换会员开启云端同步。'
+                ? '数据仅保存在本机，卸载或清理存储会丢失；请定期在设置导出 CSV 备份。更推荐登录并兑换会员开启云端同步。'
                 : '当前为离线使用，数据仅存本机。点击账单可编辑，向左滑删除前会二次确认。'}
             </span>
           </div>
@@ -394,7 +396,7 @@ function groupRecordsByPlate(
   const m = new Map<string, LedgerRecord[]>()
   const order: string[] = []
   for (const r of list) {
-    const p = getPlateValue(r, fields) || '（未填车牌）'
+    const p = buyerBucketKey(getPlateValue(r, fields), fields)
     if (!m.has(p)) {
       m.set(p, [])
       order.push(p)
@@ -405,8 +407,10 @@ function groupRecordsByPlate(
     arr.sort((a, b) => b.createdAt - a.createdAt)
   }
   order.sort((a, b) => {
-    if (a === '（未填车牌）') return 1
-    if (b === '（未填车牌）') return -1
+    const aEmpty = isEmptyBuyerBucketKey(a, fields)
+    const bEmpty = isEmptyBuyerBucketKey(b, fields)
+    if (aEmpty && !bEmpty) return 1
+    if (bEmpty && !aEmpty) return -1
     return a.localeCompare(b, 'zh-CN')
   })
   return order.map((p) => [p, m.get(p)!])

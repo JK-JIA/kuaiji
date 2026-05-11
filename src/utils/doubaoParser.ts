@@ -200,12 +200,14 @@ export async function parseWithDoubao(
     // 构建提示词
     const amountLabel =
       fields.find((f) => f.key === 'amount')?.name?.trim() || '金额'
+    const buyerLabel =
+      fields.find((f) => f.key === 'plate')?.name?.trim() || '购买方'
 
     const prompt = `你是一个批发记账助手，从用户口语中提取结构化信息，输出严格 JSON。
 
 用户原话：${text}
 
-须提取的字段名必须与系统一致（含自定义列）：${fieldDescriptions || '车牌号等'}；其中**金额类字段名固定为「${amountLabel}」**（不要用收款、价钱等别的键名）。
+须提取的字段名必须与系统一致（含自定义列）：${fieldDescriptions || `${buyerLabel}等`}；其中**金额类字段名固定为「${amountLabel}」**（不要用收款、价钱等别的键名）。
 
 【商品与数量】
 - 多种商品：必须用「商品明细」数组，每项一条：{ "商品":"名称", "数量":"数字+单位（如斤）", "单价":"数字（元/斤，可选）" }；若用户说了**该行货款**或**小计**，再加 "金额":"数字"（该行小计，元）。若同时有「单价」和可换算的斤数，可省略 "金额"。
@@ -219,7 +221,7 @@ export async function parseWithDoubao(
 - **关键词**：收了、货款、一共、合计、总共、实收、给了、转账、元、块、块钱、￥ —— 后面出现的数字即金额。
 - 若只说「50」且上下文明确是钱（如收了50），也要写入「${amountLabel}」。
 
-【车牌】完整车牌、尾号、简称均可。
+【${buyerLabel}】可填车牌号、姓名、手机尾号等购买方标识。
 
 【输出】只输出一个 JSON 对象，不要 markdown、不要解释。
 
@@ -229,14 +231,14 @@ export async function parseWithDoubao(
     { "商品": "红薯", "数量": "30斤", "单价": "2", "金额": "60" },
     { "商品": "白薯", "数量": "15斤", "单价": "2" }
   ],
-  "车牌号": "京A8899",
+  "${buyerLabel}": "京A8899",
   "${amountLabel}": "90"
 }
 
 单商品示例：
 {
   "商品明细": [ { "商品": "苹果", "数量": "5斤", "单价": "6" } ],
-  "车牌号": "川A12345",
+  "${buyerLabel}": "川A12345",
   "${amountLabel}": "30"
 }`
 

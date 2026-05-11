@@ -53,25 +53,22 @@ AI 会自动识别并填入对应字段！
 
 ### 5. 配置到项目
 
-打开文件：`src/utils/doubaoParser.ts`
+在 **`kuaiji` 目录**下复制环境模板并填写 Key（`.env` 已被 git 忽略，勿提交密钥）：
 
-找到第 7-15 行：
-```typescript
-const DOUBAO_CONFIG = {
-  API_KEY: 'your_api_key_here',
-  MODEL: 'ep-20241211185157-xqxfh',
-  ENDPOINT: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
-}
+```bash
+# macOS / Linux
+cp .env.example .env
+# Windows（PowerShell / CMD）
+copy .env.example .env
 ```
 
-替换为你的真实信息：
-```typescript
-const DOUBAO_CONFIG = {
-  API_KEY: 'your-actual-api-key-here',  // 替换为你的 API Key
-  MODEL: 'ep-20241211185157-xqxfh',     // 替换为你的接入点 ID
-  ENDPOINT: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
-}
+在 `.env` 或 `.env.local` 中增加一行（将值换成控制台「查看 API Key」里的真实 Key）：
+
 ```
+VITE_DOUBAO_API_KEY=你的火山引擎豆包_API_Key
+```
+
+说明：模型与请求地址写在 [`src/utils/doubaoParser.ts`](src/utils/doubaoParser.ts) 的 `DOUBAO_CONFIG` 中；应用通过 `import.meta.env.VITE_DOUBAO_API_KEY` 在**构建时**注入。开发改 `.env` 后需**重启 `npm run dev`**；打 APK 前须带该变量执行 `npm run build`，否则安装包里仍会显示「填入首行」。
 
 ## 📦 重新构建 APK
 
@@ -94,16 +91,16 @@ APK 位置：`android\app\build\outputs\apk\debug\app-debug.apk`
 ## 🎤 使用方法
 
 ### 方式 1：输入法语音输入（推荐）
-1. 点击"记一笔"
-2. 在"智能快速录入"输入框中，**点击输入法的语音按钮**
+1. 点击「记一笔」
+2. 在语音区域的文本框中，**使用输入法的语音按钮**输入
 3. 说话，例如："今天卖了5斤苹果给川A12345，收了50块"
 4. 输入法会转成文字
-5. 点击"智能识别并填入"
-6. AI 自动解析并填入下方字段
+5. 点击 **「智能填入」**（已配置 `VITE_DOUBAO_API_KEY` 时）或 **「填入首行」**（未配置时，仅把整段文字放进第一行商品）
+6. 配置正确时，豆包会解析并填入下方字段与多行商品
 
 ### 方式 2：手动输入
-1. 直接在输入框输入文字
-2. 点击"智能识别并填入"
+1. 直接在语音区域文本框输入文字
+2. 点击「智能填入」或「填入首行」（含义同上）
 
 ### 方式 3：传统方式
 如果不想用 AI，也可以直接在下方字段逐个填写。
@@ -139,8 +136,11 @@ APK 位置：`android\app\build\outputs\apk\debug\app-debug.apk`
 
 ## ❓ 常见问题
 
-**Q: 提示"请先配置豆包 API Key"**  
-A: 检查 `src/utils/doubaoParser.ts` 中的配置是否已替换
+**Q: 提示「请先配置豆包 API Key」，或按钮一直是「填入首行」**  
+A: 在 `kuaiji/.env`（或 `.env.local`）中设置 `VITE_DOUBAO_API_KEY`，重启开发服务器或重新执行 `npm run build`（含打 APK 的构建流程）。占位符或未参与构建的变量会导致降级为首行填入。
+
+**Q: 以前能「智能填入」，现在变成「填入首行」**  
+A: 同上：Key 丢失、换机未拷贝 `.env`、或发布构建未注入该环境变量时，前端会走降级逻辑，属预期行为。
 
 **Q: 提示"API Key 无效"**  
 A: 检查 API Key 是否正确，是否有多余的空格

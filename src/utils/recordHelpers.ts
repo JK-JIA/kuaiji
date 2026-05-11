@@ -1,4 +1,4 @@
-import type { FieldDef, LedgerRecord } from '../types'
+import type { FieldDef, LedgerRecord, LineItemRow } from '../types'
 
 const MONEY_RE = /(\d+(?:\.\d+)?)/
 
@@ -13,9 +13,32 @@ export function formatQuantityWithJin(raw: string): string {
   return `${s}斤`
 }
 
+/** 购买方（内置 key plate）列为空时的分组键；随字段改名，如「（未填客户）」 */
+export function emptyBuyerBucketLabel(fields: FieldDef[]): string {
+  const name = fields.find((f) => f.key === 'plate')?.name?.trim() || '购买方'
+  return `（未填${name}）`
+}
+
+/** 归一化分组键：空值与历史「（未填车牌）」合并为当前空占位 */
+export function buyerBucketKey(raw: string | undefined, fields: FieldDef[]): string {
+  const t = String(raw ?? '').trim()
+  if (!t || t === '（未填车牌）') return emptyBuyerBucketLabel(fields)
+  return t
+}
+
+export function isEmptyBuyerBucketKey(key: string, fields: FieldDef[]): boolean {
+  return key === emptyBuyerBucketLabel(fields) || key === '（未填车牌）'
+}
+
 export function plateGroupHeading(plateRaw: string, fields: FieldDef[]): string {
-  if (plateRaw === '（未填车牌）') return plateRaw
-  const label = fields.find((f) => f.key === 'plate')?.name ?? '车牌'
+  const label = fields.find((f) => f.key === 'plate')?.name ?? '购买方'
+  if (
+    !plateRaw.trim() ||
+    plateRaw === emptyBuyerBucketLabel(fields) ||
+    plateRaw === '（未填车牌）'
+  ) {
+    return `${label}未填`
+  }
   return `${label}${plateRaw}`
 }
 
@@ -74,6 +97,162 @@ export function deriveUnitPriceFromAmountAndQty(
   if (a <= 0 || !Number.isFinite(q) || q <= 0) return ''
   const u = Math.round((a / q) * 10000) / 10000
   return String(u)
+}
+
+/** 行金额÷单价 → 数量（与 deriveUnitPriceFromAmountAndQty 对称） */
+export function deriveQuantityFromAmountAndUnit(
+  lineAmountStr: string,
+  unitPriceStr: string,
+): string {
+  const a = parseMoney(lineAmountStr)
+  const u = parseFloat(sanitizeUnsignedDecimalInput(unitPriceStr))
+  if (a <= 0 || !Number.isFinite(u) || u <= 0) return ''
+  const q = Math.round((a / u) * 10000) / 10000
+  return String(q)
+}
+
+export type LineTripleLastEdited = 'unitPrice' | 'quantity' | 'lineAmount' | null
+
+/** 用户是否曾手动输入过非空值（清空后视为未锚定） */
+export type LineTripleTouched = {
+  unitPrice: boolean
+  quantity: boolean
+  lineAmount: boolean
+}
+
+export function emptyLineTripleTouched(): LineTripleTouched {
+  return { unitPrice: false, quantity: false, lineAmount: false }
+}
+
+/** 单价 / 数量 / 行金额 中有几项为有效正数 */
+export function lineTripleFilledCount(row: {
+  unitPrice: string
+  quantity: string
+  lineAmount: string
+}): number {
+  const u = sanitizeUnsignedDecimalInput(row.unitPrice)
+  const q = sanitizeUnsignedDecimalInput(row.quantity)
+  const aRaw = sanitizeUnsignedDecimalInput(row.lineAmount)
+  const nu = parseFloat(u)
+  const nq = parseFloat(q)
+  const na = parseMoney(aRaw)
+  const uOk = Number.isFinite(nu) && nu > 0
+  const qOk = Number.isFinite(nq) && nq > 0
+  const aOk = na > 0
+  return (uOk ? 1 : 0) + (qOk ? 1 : 0) + (aOk ? 1 : 0)
+}
+
+/**
+ * 单价、数量、行金额：按 lastEdited 推导第三维；结合 touched 避免覆盖用户已锚定的字段
+ *（如先单价后金额不再被 a÷q 改单价；先金额后数量不再被 u×q 改金额）。
+ * lastEdited 为 null 且金额已清空时，直接清空行金额；
+ * 为 null 且金额非空时，仅在「恰缺一维」时补缺，三项皆满时不改写。
+ */
+export function reconcileLineTripleByLastEdited(row: {
+  unitPrice: string
+  quantity: string
+  lineAmount: string
+  lastEdited: LineTripleLastEdited
+  touched?: LineTripleTouched
+}): {
+  unitPrice: string
+  quantity: string
+  lineAmount: string
+  lastEdited: LineTripleLastEdited
+  touched: LineTripleTouched
+} {
+  const touched: LineTripleTouched = {
+    unitPrice: row.touched?.unitPrice ?? false,
+    quantity: row.touched?.quantity ?? false,
+    lineAmount: row.touched?.lineAmount ?? false,
+  }
+
+  const u = sanitizeUnsignedDecimalInput(row.unitPrice)
+  const q = sanitizeUnsignedDecimalInput(row.quantity)
+  const aRaw = sanitizeUnsignedDecimalInput(row.lineAmount)
+
+  const nu = parseFloat(u)
+  const nq = parseFloat(q)
+  const na = parseMoney(aRaw)
+
+  const uOk = Number.isFinite(nu) && nu > 0
+  const qOk = Number.isFinite(nq) && nq > 0
+  const aOk = na > 0
+
+  let unitPrice = u
+  let quantity = q
+  let lineAmount = aRaw
+  const lastEdited = row.lastEdited
+
+  if (lastEdited === null && !aRaw.trim()) {
+    return {
+      unitPrice,
+      quantity,
+      lineAmount: '',
+      lastEdited: null,
+      touched,
+    }
+  }
+
+  if (lastEdited === 'unitPrice') {
+    if (uOk && qOk && aOk && touched.lineAmount) {
+      const qd = deriveQuantityFromAmountAndUnit(aRaw, u)
+      if (qd) quantity = sanitizeUnsignedDecimalInput(qd)
+    } else if (uOk && qOk) {
+      const c = computedLineAmountFromUnitAndQty(u, q)
+      if (c) lineAmount = c
+    } else if (uOk && aOk) {
+      const qd = deriveQuantityFromAmountAndUnit(aRaw, u)
+      if (qd) quantity = sanitizeUnsignedDecimalInput(qd)
+    }
+  } else if (lastEdited === 'quantity') {
+    if (uOk && qOk && aOk && touched.lineAmount) {
+      const ud = deriveUnitPriceFromAmountAndQty(aRaw, q)
+      if (ud) unitPrice = sanitizeUnsignedDecimalInput(ud)
+    } else if (uOk && qOk) {
+      const c = computedLineAmountFromUnitAndQty(u, q)
+      if (c) lineAmount = c
+    } else if (qOk && aOk && !uOk) {
+      const ud = deriveUnitPriceFromAmountAndQty(aRaw, q)
+      if (ud) unitPrice = sanitizeUnsignedDecimalInput(ud)
+    }
+  } else if (lastEdited === 'lineAmount') {
+    if (!aRaw.trim()) {
+      return {
+        unitPrice,
+        quantity,
+        lineAmount: '',
+        lastEdited: null,
+        touched,
+      }
+    }
+    if (uOk && aOk && touched.unitPrice) {
+      const qd = deriveQuantityFromAmountAndUnit(aRaw, u)
+      if (qd) quantity = sanitizeUnsignedDecimalInput(qd)
+    } else if (qOk && aOk && touched.quantity) {
+      const ud = deriveUnitPriceFromAmountAndQty(aRaw, q)
+      if (ud) unitPrice = sanitizeUnsignedDecimalInput(ud)
+    } else if (qOk && aOk) {
+      const ud = deriveUnitPriceFromAmountAndQty(aRaw, q)
+      if (ud) unitPrice = sanitizeUnsignedDecimalInput(ud)
+    } else if (uOk && aOk) {
+      const qd = deriveQuantityFromAmountAndUnit(aRaw, u)
+      if (qd) quantity = sanitizeUnsignedDecimalInput(qd)
+    }
+  } else {
+    if (uOk && qOk && !aOk) {
+      const c = computedLineAmountFromUnitAndQty(u, q)
+      if (c) lineAmount = c
+    } else if (uOk && aOk && !qOk) {
+      const qd = deriveQuantityFromAmountAndUnit(aRaw, u)
+      if (qd) quantity = sanitizeUnsignedDecimalInput(qd)
+    } else if (qOk && aOk && !uOk) {
+      const ud = deriveUnitPriceFromAmountAndQty(aRaw, q)
+      if (ud) unitPrice = sanitizeUnsignedDecimalInput(ud)
+    }
+  }
+
+  return { unitPrice, quantity, lineAmount, lastEdited, touched }
 }
 
 export function getExpectedAmount(
@@ -163,11 +342,20 @@ export type ExpandedProductLine = {
   lineAmountStr: string
 }
 
-/** 展开为若干 (商品, 数量, 行金额) 行；兼容无 lineItems 的旧数据 */
-export function expandProductLines(
+/** 与 expandProductLines 一致，并保留行号与 lineItem 供统计按行读数字段 */
+export type ProductLineContext = {
+  product: string
+  unitPriceStr: string
+  quantity: string
+  lineAmountStr: string
+  lineIndex: number
+  lineItem: LineItemRow | null
+}
+
+export function expandProductLineContexts(
   record: LedgerRecord,
   fields: FieldDef[],
-): ExpandedProductLine[] {
+): ProductLineContext[] {
   const pid = fields.find((f) => f.key === 'product')?.id
   const qid = fields.find((f) => f.key === 'quantity')?.id
   const uid = getUnitPriceFieldId(fields)
@@ -175,11 +363,13 @@ export function expandProductLines(
   if (!pid || !qid) return []
 
   if (record.lineItems && record.lineItems.length > 0) {
-    return record.lineItems.map((li) => ({
+    return record.lineItems.map((li, lineIndex) => ({
       product: (li.values[pid] || '').trim(),
       unitPriceStr: uid ? (li.values[uid] || '').trim() : '',
       quantity: (li.values[qid] || '').trim(),
       lineAmountStr: aid ? (li.values[aid] || '').trim() : '',
+      lineIndex,
+      lineItem: li,
     }))
   }
   return [
@@ -188,6 +378,23 @@ export function expandProductLines(
       unitPriceStr: uid ? (record.values[uid] || '').trim() : '',
       quantity: (record.values[qid] || '').trim(),
       lineAmountStr: '',
+      lineIndex: 0,
+      lineItem: null,
     },
   ]
+}
+
+/** 展开为若干 (商品, 数量, 行金额) 行；兼容无 lineItems 的旧数据 */
+export function expandProductLines(
+  record: LedgerRecord,
+  fields: FieldDef[],
+): ExpandedProductLine[] {
+  return expandProductLineContexts(record, fields).map(
+    ({ product, unitPriceStr, quantity, lineAmountStr }) => ({
+      product,
+      unitPriceStr,
+      quantity,
+      lineAmountStr,
+    }),
+  )
 }

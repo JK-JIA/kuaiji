@@ -69,6 +69,7 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
   const unitPriceId = getUnitPriceFieldId(fields)
   const lines = expandProductLines(record, fields)
   const plate = getPlateValue(record, fields) || '—'
+  const buyerLabel = fields.find((f) => f.key === 'plate')?.name ?? '购买方'
   const exp = getExpectedAmount(record, amountId)
   const rec = getReceivedAmount(record, exp)
   const created = new Date(record.createdAt)
@@ -299,7 +300,9 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
           <p style={{ margin: 0 }}>
             时间 {format(created, 'HH:mm', { locale: zhCN })}
           </p>
-          <p style={{ margin: 0 }}>车牌 {plate}</p>
+          <p style={{ margin: 0 }}>
+            {buyerLabel} {plate}
+          </p>
           <div
             style={{
               margin: '8px 0',

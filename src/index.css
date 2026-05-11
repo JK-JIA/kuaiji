@@ -25,3 +25,15 @@ body {
 #root {
   min-height: 100dvh;
 }
+
+/* 隐藏 type="number" 的上下箭头（应用内其它数字框仍可用 number） */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

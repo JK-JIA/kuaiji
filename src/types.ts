@@ -11,7 +11,7 @@ export interface FieldDef {
   required?: boolean
 }
 
-/** 同一车牌订单下的单行商品（仅含商品、数量等子字段） */
+/** 同一购买方订单下的单行商品（仅含商品、数量等子字段） */
 export interface LineItemRow {
   id: string
   values: Record<string, string>
@@ -22,7 +22,7 @@ export interface LedgerRecord {
   /** YYYY-MM-DD 记账日（当地日历日） */
   date: string
   createdAt: number
-  /** fieldId -> value（车牌、金额等；多商品时商品/数量也可保留首行兼容旧逻辑） */
+  /** fieldId -> value（购买方、金额等；多商品时商品/数量也可保留首行兼容旧逻辑） */
   values: Record<string, string>
   /** 同一客户一次购买多种商品 */
   lineItems?: LineItemRow[]

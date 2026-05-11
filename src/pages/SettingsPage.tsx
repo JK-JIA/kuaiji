@@ -3,7 +3,7 @@ import type { FieldDef } from '../types'
 import { getApiBase } from '../api/ledgerClient'
 import { useAuth } from '../context/AuthContext'
 import { useLedger } from '../context/LedgerContext'
-import { exportCsv, exportJson, parseLedgerBackupJson } from '../utils/exportData'
+import { exportCsv, parseLedgerImportCsv } from '../utils/exportData'
 import { TRIGGER_ANDROID_UPDATE_CHECK } from '../components/AppUpdateGate'
 import { APP_VERSION } from '../version'
 import {
@@ -18,6 +18,10 @@ import {
   persistReceiptExportHd,
   readReceiptExportHd,
 } from '../utils/receiptExport'
+import {
+  SETTINGS_CARD_CLASS,
+  SettingsSection,
+} from './settings/SettingsSection'
 
 export function SettingsPage() {
   const {
@@ -85,7 +89,7 @@ export function SettingsPage() {
   const removeField = async (id: string) => {
     const target = sorted.find((f) => f.id === id)
     if (target?.key) {
-      alert('默认字段（商品 / 单价 / 斤数 / 车牌号 / 金额）不能删除，可改名。')
+      alert('默认字段（商品 / 单价 / 斤数 / 购买方 / 金额）不能删除，可改名。')
       return
     }
     setBusy(true)
@@ -131,254 +135,296 @@ export function SettingsPage() {
 
   return (
     <div className="min-h-dvh bg-[#f8f9fa] pb-28 pt-12">
-      <header className="mb-4 px-4">
+      <header className="mb-6 px-4">
         <h1 className="text-[22px] font-bold tracking-tight text-neutral-900">
           设置
         </h1>
         <p className="mt-0.5 text-xs leading-relaxed text-[#666666]">
-          管理字段、备份与云端账号登录。
+          管理账号、显示、备份与字段。
         </p>
       </header>
 
-      <section className="mx-4 mb-6 rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm">
-        <p className="mb-1 text-sm font-semibold text-neutral-900">字体大小</p>
-        <p className="mb-3 text-xs leading-relaxed text-[#666666]">
-          仅影响本应用界面，与系统「显示大小」无关；调节后全页立即生效。
-        </p>
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <span className="text-xs tabular-nums text-neutral-600">
-            {FONT_SIZE_MIN}%
-          </span>
-          <output
-            className="text-sm font-semibold tabular-nums text-neutral-900"
-            htmlFor="kuaiji-font-slider"
-          >
-            {fontPct}%
-          </output>
-          <span className="text-xs tabular-nums text-neutral-600">
-            {FONT_SIZE_MAX}%
-          </span>
-        </div>
-        <input
-          id="kuaiji-font-slider"
-          type="range"
-          min={FONT_SIZE_MIN}
-          max={FONT_SIZE_MAX}
-          step={FONT_SIZE_STEP}
-          value={fontPct}
-          onChange={(e) => {
-            const n = Number(e.target.value)
-            setFontPct(n)
-            persistFontSizePercent(n)
-          }}
-          className="mb-4 h-2 w-full cursor-pointer accent-[#2ecc71]"
-        />
-        <div className="flex flex-wrap gap-2">
-          {[
-            { label: '较小', v: 90 },
-            { label: '标准', v: FONT_SIZE_DEFAULT },
-            { label: '较大', v: 120 },
-            { label: '最大', v: FONT_SIZE_MAX },
-          ].map(({ label, v }) => (
-            <button
-              key={label}
-              type="button"
-              onClick={() => {
-                setFontPct(v)
-                persistFontSizePercent(v)
-              }}
-              className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-                fontPct === v
-                  ? 'bg-[#2ecc71] text-white'
-                  : 'border border-stone-200 bg-[#fafafa] text-neutral-800'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className="mx-4 mb-6 rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm">
-        <p className="mb-1 text-sm font-semibold text-neutral-900">小票导出</p>
-        <p className="mb-3 text-xs leading-relaxed text-[#666666]">
-          默认以较快清晰度导出 JPEG；开启高清后像素更高、更清晰，保存耗时更长。
-        </p>
-        <label className="flex cursor-pointer items-start gap-3 text-sm text-neutral-900">
-          <input
-            type="checkbox"
-            checked={receiptExportHd}
-            onChange={(e) => {
-              const v = e.target.checked
-              setReceiptExportHd(v)
-              persistReceiptExportHd(v)
-            }}
-            className="mt-0.5 rounded border-stone-300 text-[#2ecc71] focus:ring-[#2ecc71]"
-          />
-          <span>
-            <span className="font-medium">高清导出</span>
-            <span className="mt-0.5 block text-xs font-normal text-[#666666]">
-              关闭时优先速度（约 1 秒内完成更常见）；开启时接近原 2× 清晰度。
-            </span>
-          </span>
-        </label>
-      </section>
-
-      <section className="mx-4 mb-6 rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm">
-        <p className="mb-3 text-sm font-semibold text-neutral-900">云端同步</p>
-        {!apiBase && (
-          <p className="rounded-xl border border-amber-200/90 bg-amber-50/90 px-3 py-2.5 text-xs leading-relaxed text-amber-900">
-            当前构建未包含可用的 API 地址，无法登录云端。请在源码根目录配置{' '}
-            <code className="rounded-md bg-amber-100/90 px-1.5 py-0.5 font-mono text-[11px]">
-              VITE_API_URL
-            </code>{' '}
-            后重新执行{' '}
-            <code className="rounded-md bg-amber-100/90 px-1.5 py-0.5 font-mono text-[11px]">
-              npm run build
-            </code>{' '}
-            再打 APK；未登录时数据仅存本机。
-          </p>
-        )}
-        {apiBase && (
-          <>
-            <p className="mb-3 text-[11px] leading-relaxed text-[#666666]">
-              API：
-              <span className="break-all font-mono text-neutral-800">
-                {apiBase}
-              </span>
-            </p>
-            {useRemoteLedger ? (
-              <div className="flex flex-col gap-3">
-                <p className="text-sm text-neutral-900">
-                  已登录且云备份已开通：
-                  <span className="font-medium"> {cloudEmail ?? '—'}</span>
-                </p>
-                <button
-                  type="button"
-                  onClick={() => logout()}
-                  className="w-fit rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-[#666666] shadow-sm transition-colors hover:bg-stone-50"
-                >
-                  退出登录
-                </button>
-              </div>
-            ) : token && !membershipActive ? (
-              <div className="space-y-4">
-                <p className="text-sm text-neutral-900">
-                  已登录：<span className="font-medium">{cloudEmail ?? '—'}</span>
-                </p>
-                <p className="text-[11px] leading-relaxed text-amber-900">
-                  当前账号尚未兑换会员，云端账本不会同步。请在下方输入兑换码。Docker
-                  部署时由{' '}
-                  <code className="rounded bg-amber-100 px-1 font-mono text-[10px]">
-                    redeem-daily
+      <SettingsSection title="账号">
+        <div className={SETTINGS_CARD_CLASS}>
+          <p className="mb-3 text-sm font-semibold text-neutral-900">云端同步</p>
+          {!apiBase && (
+            <>
+              <p className="rounded-xl border border-amber-200/90 bg-amber-50/90 px-3 py-2.5 text-xs leading-relaxed text-amber-900">
+                当前构建未包含可用的 API 地址，无法登录云端；数据仅存本机。
+              </p>
+              <details className="mt-3 rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2 text-[11px] leading-relaxed text-neutral-800">
+                <summary className="cursor-pointer font-medium text-neutral-900 select-none">
+                  如何配置 API（开发者）
+                </summary>
+                <p className="mt-2 text-amber-900">
+                  请在源码根目录配置{' '}
+                  <code className="rounded-md bg-amber-100/90 px-1.5 py-0.5 font-mono text-[11px]">
+                    VITE_API_URL
                   </code>{' '}
-                  每日刷新 5
-                  档码（7天/30天/半年/1年/永久），并覆盖写入服务器上的{' '}
-                  <code className="rounded bg-amber-100 px-1 font-mono text-[10px]">
-                    server/data/redeem-codes/redeem-codes.txt
-                  </code>
-                  ，也可查看该服务日志。
+                  后重新执行{' '}
+                  <code className="rounded-md bg-amber-100/90 px-1.5 py-0.5 font-mono text-[11px]">
+                    npm run build
+                  </code>{' '}
+                  再打 APK。
                 </p>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <input
-                    value={redeemCode}
-                    onChange={(e) => setRedeemCode(e.target.value)}
-                    placeholder="兑换码"
-                    className="min-h-[44px] flex-1 rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
-                  />
+              </details>
+            </>
+          )}
+          {apiBase && (
+            <>
+              <p className="mb-3 text-[11px] leading-relaxed text-[#666666]">
+                API：
+                <span className="break-all font-mono text-neutral-800">
+                  {apiBase}
+                </span>
+              </p>
+              {useRemoteLedger ? (
+                <div className="flex flex-col gap-3">
+                  <p className="text-sm text-neutral-900">
+                    已登录且云备份已开通：
+                    <span className="font-medium"> {cloudEmail ?? '—'}</span>
+                  </p>
                   <button
                     type="button"
-                    disabled={authBusy || !redeemCode.trim()}
-                    onClick={() => {
-                      void (async () => {
-                        setAuthBusy(true)
-                        try {
-                          await redeem(redeemCode.trim())
-                          setRedeemCode('')
-                          await refreshProfile()
-                          alert('兑换成功，云备份已开通')
-                        } catch (e) {
-                          alert(e instanceof Error ? e.message : '兑换失败')
-                        } finally {
-                          setAuthBusy(false)
-                        }
-                      })()
-                    }}
-                    className="min-h-[44px] shrink-0 rounded-xl bg-[#2ecc71] px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#27ae60] disabled:opacity-50"
+                    onClick={() => logout()}
+                    className="w-fit rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-[#666666] shadow-sm transition-colors hover:bg-stone-50"
                   >
-                    兑换会员
+                    退出登录
                   </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => logout()}
-                  className="w-fit rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-[#666666] shadow-sm hover:bg-stone-50"
-                >
-                  退出登录
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <p className="text-[11px] leading-relaxed text-[#666666]">
-                  登录后可兑换会员并开启云端备份。默认账号{' '}
-                  <span className="font-mono text-neutral-800">admin</span> /{' '}
-                  <span className="font-mono text-neutral-800">123456</span>
-                  （docker 首次启动）。手机号登录由服务端通过阿里云发送短信验证码。
-                </p>
-                <div className="flex gap-2">
+              ) : token && !membershipActive ? (
+                <div className="space-y-4">
+                  <p className="text-sm text-neutral-900">
+                    已登录：
+                    <span className="font-medium">{cloudEmail ?? '—'}</span>
+                  </p>
+                  <p className="text-[11px] leading-relaxed text-amber-900">
+                    当前账号尚未兑换会员，云端账本不会同步。请在下方输入兑换码。
+                  </p>
+                  <details className="rounded-xl border border-stone-200 bg-stone-50/80 px-3 py-2 text-[11px] leading-relaxed text-neutral-800">
+                    <summary className="cursor-pointer font-medium text-neutral-900 select-none">
+                      部署与兑换码说明（Docker）
+                    </summary>
+                    <p className="mt-2 text-amber-900">
+                      部署时由{' '}
+                      <code className="rounded bg-amber-100 px-1 font-mono text-[10px]">
+                        redeem-daily
+                      </code>{' '}
+                      每日刷新 5
+                      档码（7天/30天/半年/1年/永久），并覆盖写入服务器上的{' '}
+                      <code className="rounded bg-amber-100 px-1 font-mono text-[10px]">
+                        server/data/redeem-codes/redeem-codes.txt
+                      </code>
+                      ，也可查看该服务日志。
+                    </p>
+                  </details>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      value={redeemCode}
+                      onChange={(e) => setRedeemCode(e.target.value)}
+                      placeholder="兑换码"
+                      className="min-h-[44px] flex-1 rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
+                    />
+                    <button
+                      type="button"
+                      disabled={authBusy || !redeemCode.trim()}
+                      onClick={() => {
+                        void (async () => {
+                          setAuthBusy(true)
+                          try {
+                            await redeem(redeemCode.trim())
+                            setRedeemCode('')
+                            await refreshProfile()
+                            alert('兑换成功，云备份已开通')
+                          } catch (e) {
+                            alert(e instanceof Error ? e.message : '兑换失败')
+                          } finally {
+                            setAuthBusy(false)
+                          }
+                        })()
+                      }}
+                      className="min-h-[44px] shrink-0 rounded-xl bg-[#2ecc71] px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#27ae60] disabled:opacity-50"
+                    >
+                      兑换会员
+                    </button>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => setAuthMode('password')}
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                      authMode === 'password'
-                        ? 'bg-[#2ecc71] text-white'
-                        : 'bg-stone-100 text-neutral-700'
-                    }`}
+                    onClick={() => logout()}
+                    className="w-fit rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-[#666666] shadow-sm hover:bg-stone-50"
                   >
-                    邮箱 / 账号
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAuthMode('phone')}
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                      authMode === 'phone'
-                        ? 'bg-[#2ecc71] text-white'
-                        : 'bg-stone-100 text-neutral-700'
-                    }`}
-                  >
-                    手机号
+                    退出登录
                   </button>
                 </div>
-                {authMode === 'password' ? (
-                  <>
-                    <input
-                      type="text"
-                      autoComplete="username"
-                      value={authEmail}
-                      onChange={(e) => setAuthEmail(e.target.value)}
-                      placeholder="账号（默认 admin）或注册邮箱"
-                      className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
-                    />
-                    <input
-                      type="password"
-                      autoComplete="current-password"
-                      value={authPw}
-                      onChange={(e) => setAuthPw(e.target.value)}
-                      placeholder="密码（至少 6 位）"
-                      className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
-                    />
-                    <div className="flex flex-wrap gap-2">
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-[11px] leading-relaxed text-[#666666]">
+                    登录后可兑换会员并开启云端备份。默认账号{' '}
+                    <span className="font-mono text-neutral-800">admin</span> /{' '}
+                    <span className="font-mono text-neutral-800">123456</span>
+                    （docker 首次启动）。手机号登录由服务端通过阿里云发送短信验证码。
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode('password')}
+                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                        authMode === 'password'
+                          ? 'bg-[#2ecc71] text-white'
+                          : 'bg-stone-100 text-neutral-700'
+                      }`}
+                    >
+                      邮箱 / 账号
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode('phone')}
+                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                        authMode === 'phone'
+                          ? 'bg-[#2ecc71] text-white'
+                          : 'bg-stone-100 text-neutral-700'
+                      }`}
+                    >
+                      手机号
+                    </button>
+                  </div>
+                  {authMode === 'password' ? (
+                    <>
+                      <input
+                        type="text"
+                        autoComplete="username"
+                        value={authEmail}
+                        onChange={(e) => setAuthEmail(e.target.value)}
+                        placeholder="账号（默认 admin）或注册邮箱"
+                        className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
+                      />
+                      <input
+                        type="password"
+                        autoComplete="current-password"
+                        value={authPw}
+                        onChange={(e) => setAuthPw(e.target.value)}
+                        placeholder="密码（至少 6 位）"
+                        className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={
+                            authBusy || !authEmail.trim() || authPw.length < 6
+                          }
+                          onClick={() => {
+                            void (async () => {
+                              setAuthBusy(true)
+                              try {
+                                await login(authEmail.trim(), authPw)
+                                setAuthPw('')
+                                await refreshProfile()
+                              } catch (e) {
+                                alert(
+                                  e instanceof Error ? e.message : '登录失败',
+                                )
+                              } finally {
+                                setAuthBusy(false)
+                              }
+                            })()
+                          }}
+                          className="rounded-xl bg-[#2ecc71] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#27ae60] disabled:opacity-50"
+                        >
+                          登录
+                        </button>
+                        <button
+                          type="button"
+                          disabled={
+                            authBusy ||
+                            !authEmail.trim() ||
+                            authPw.length < 6 ||
+                            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+                              authEmail.trim(),
+                            )
+                          }
+                          onClick={() => {
+                            void (async () => {
+                              setAuthBusy(true)
+                              try {
+                                await register(authEmail.trim(), authPw)
+                                setAuthPw('')
+                                await refreshProfile()
+                              } catch (e) {
+                                alert(
+                                  e instanceof Error ? e.message : '注册失败',
+                                )
+                              } finally {
+                                setAuthBusy(false)
+                              }
+                            })()
+                          }}
+                          className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-neutral-800 shadow-sm transition-colors hover:bg-stone-50 disabled:opacity-50"
+                        >
+                          注册
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        autoComplete="tel"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="11 位手机号"
+                        className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={
+                            authBusy ||
+                            phone.replace(/\s/g, '').length < 11 ||
+                            smsWaitSec > 0
+                          }
+                          onClick={() => {
+                            void (async () => {
+                              setAuthBusy(true)
+                              try {
+                                await sendSms(phone)
+                                setSmsWaitSec(60)
+                                alert('验证码已发送，请查收短信')
+                              } catch (e) {
+                                alert(
+                                  e instanceof Error ? e.message : '发送失败',
+                                )
+                              } finally {
+                                setAuthBusy(false)
+                              }
+                            })()
+                          }}
+                          className="shrink-0 rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-neutral-800 disabled:opacity-50"
+                        >
+                          {smsWaitSec > 0 ? `${smsWaitSec}s` : '获取验证码'}
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={smsCode}
+                        onChange={(e) => setSmsCode(e.target.value)}
+                        placeholder="短信验证码"
+                        className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
+                      />
                       <button
                         type="button"
                         disabled={
-                          authBusy || !authEmail.trim() || authPw.length < 6
+                          authBusy ||
+                          phone.replace(/\s/g, '').length < 11 ||
+                          smsCode.trim().length < 4
                         }
                         onClick={() => {
                           void (async () => {
                             setAuthBusy(true)
                             try {
-                              await login(authEmail.trim(), authPw)
-                              setAuthPw('')
+                              await smsLogin(phone, smsCode.trim())
+                              setSmsCode('')
                               await refreshProfile()
                             } catch (e) {
                               alert(
@@ -389,291 +435,260 @@ export function SettingsPage() {
                             }
                           })()
                         }}
-                        className="rounded-xl bg-[#2ecc71] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#27ae60] disabled:opacity-50"
+                        className="rounded-xl bg-[#2ecc71] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#27ae60] disabled:opacity-50"
                       >
-                        登录
+                        手机号登录
                       </button>
-                      <button
-                        type="button"
-                        disabled={
-                          authBusy ||
-                          !authEmail.trim() ||
-                          authPw.length < 6 ||
-                          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-                            authEmail.trim(),
-                          )
-                        }
-                        onClick={() => {
-                          void (async () => {
-                            setAuthBusy(true)
-                            try {
-                              await register(authEmail.trim(), authPw)
-                              setAuthPw('')
-                              await refreshProfile()
-                            } catch (e) {
-                              alert(
-                                e instanceof Error ? e.message : '注册失败',
-                              )
-                            } finally {
-                              setAuthBusy(false)
-                            }
-                          })()
-                        }}
-                        className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-neutral-800 shadow-sm transition-colors hover:bg-stone-50 disabled:opacity-50"
-                      >
-                        注册
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <input
-                      type="tel"
-                      inputMode="numeric"
-                      autoComplete="tel"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="11 位手机号"
-                      className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        disabled={
-                          authBusy ||
-                          phone.replace(/\s/g, '').length < 11 ||
-                          smsWaitSec > 0
-                        }
-                        onClick={() => {
-                          void (async () => {
-                            setAuthBusy(true)
-                            try {
-                              await sendSms(phone)
-                              setSmsWaitSec(60)
-                              alert('验证码已发送，请查收短信')
-                            } catch (e) {
-                              alert(
-                                e instanceof Error ? e.message : '发送失败',
-                              )
-                            } finally {
-                              setAuthBusy(false)
-                            }
-                          })()
-                        }}
-                        className="shrink-0 rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-neutral-800 disabled:opacity-50"
-                      >
-                        {smsWaitSec > 0 ? `${smsWaitSec}s` : '获取验证码'}
-                      </button>
-                    </div>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={smsCode}
-                      onChange={(e) => setSmsCode(e.target.value)}
-                      placeholder="短信验证码"
-                      className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
-                    />
-                    <button
-                      type="button"
-                      disabled={
-                        authBusy ||
-                        phone.replace(/\s/g, '').length < 11 ||
-                        smsCode.trim().length < 4
-                      }
-                      onClick={() => {
-                        void (async () => {
-                          setAuthBusy(true)
-                          try {
-                            await smsLogin(phone, smsCode.trim())
-                            setSmsCode('')
-                            await refreshProfile()
-                          } catch (e) {
-                            alert(
-                              e instanceof Error ? e.message : '登录失败',
-                            )
-                          } finally {
-                            setAuthBusy(false)
-                          }
-                        })()
-                      }}
-                      className="rounded-xl bg-[#2ecc71] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#27ae60] disabled:opacity-50"
-                    >
-                      手机号登录
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </>
-        )}
-      </section>
-
-      <header className="mb-3 px-4">
-        <h2 className="text-sm font-semibold text-neutral-900">自定义字段</h2>
-        <p className="mt-1 text-[11px] leading-relaxed text-[#666666]">
-          默认含商品、单价、斤数、车牌号、金额（数字）；明细行金额为单价×斤数自动计算。可新增备注等自定义字段。可为字段勾选「必填」，记账时将标红星并校验。
-        </p>
-      </header>
-
-      <section className="mx-4 mb-6 rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm">
-        <p className="mb-3 text-sm font-semibold text-neutral-900">
-          导出 / 恢复备份
-        </p>
-        <p className="mb-3 text-[11px] leading-relaxed text-[#666666]">
-          {useRemoteLedger
-            ? '当前已开通云备份，账单保存在服务器。仍可导出 JSON 作离线存档；从 JSON 恢复会写入云端当前账号。'
-            : token && apiBase && !membershipActive
-              ? '已登录但未开通云备份，数据仍仅存本机；兑换会员后才会同步到服务器。请定期导出 JSON。'
-              : '数据保存在本机（IndexedDB）。卸载 App、清理数据或换设备会清空本地库，请定期导出 JSON。'}
-          CSV 仅方便用表格查看，不能完整恢复字段与多商品结构。
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => exportJson(records, fields)}
-            className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-neutral-800 shadow-sm transition-colors hover:bg-stone-50"
-          >
-            导出 JSON
-          </button>
-          <button
-            type="button"
-            onClick={() => exportCsv(records, fields)}
-            className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-neutral-800 shadow-sm transition-colors hover:bg-stone-50"
-          >
-            导出 CSV
-          </button>
-          <button
-            type="button"
-            onClick={() => importInputRef.current?.click()}
-            className="rounded-xl border border-stone-300 bg-[#fafafa] px-4 py-2.5 text-sm font-semibold text-neutral-800 shadow-sm transition-colors hover:bg-stone-100"
-          >
-            从 JSON 恢复…
-          </button>
-          <input
-            ref={importInputRef}
-            type="file"
-            accept="application/json,.json"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              e.target.value = ''
-              if (!file) return
-              void (async () => {
-                try {
-                  const text = await file.text()
-                  const parsed = parseLedgerBackupJson(text)
-                  if (!parsed.ok) {
-                    alert(parsed.error)
-                    return
-                  }
-                  const { fields: f, records: r } = parsed.data
-                  const ok = window.confirm(
-                    `将用备份替换当前全部数据（共 ${r.length} 条账单）。此操作不可撤销，确定继续？`,
-                  )
-                  if (!ok) return
-                  await restoreFullBackup(f, r)
-                  alert('恢复完成')
-                } catch (err) {
-                  console.error(err)
-                  alert(
-                    err instanceof Error ? err.message : '读取备份失败',
-                  )
-                }
-              })()
-            }}
-          />
+                    </>
+                  )}
+                </div>
+              )}
+            </>
+          )}
         </div>
-      </section>
+      </SettingsSection>
 
-      <section className="mx-4 mb-6 rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm">
-        <p className="mb-3 text-sm font-semibold text-neutral-900">新增字段</p>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="字段名称，例如：金额"
-            className="min-h-[44px] flex-1 rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
-          />
-          <select
-            value={type}
-            onChange={(e) => setType(e.target.value as 'text' | 'number')}
-            className="min-h-[44px] rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 sm:w-28"
-          >
-            <option value="text">文本</option>
-            <option value="number">数字</option>
-          </select>
-          <button
-            type="button"
-            disabled={busy || !name.trim()}
-            onClick={() => void addField()}
-            className="min-h-[44px] shrink-0 rounded-xl bg-[#2ecc71] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#27ae60] disabled:opacity-50"
-          >
-            添加
-          </button>
-        </div>
-      </section>
-
-      <ul className="mx-4 space-y-3">
-        {sorted.map((f) => (
-          <li
-            key={f.id}
-            className="flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200/90 bg-white px-4 py-3.5 shadow-sm"
-          >
-            <EditableName
-              initial={f.name}
-              onSave={(v) => void renameField(f.id, v)}
+      <SettingsSection title="字体大小">
+        <div className="overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-sm">
+          <div className="p-4">
+            <p className="mb-3 text-xs leading-relaxed text-[#666666]">
+              仅影响本应用界面，与系统「显示大小」无关；调节后全页立即生效。
+            </p>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <span className="text-xs tabular-nums text-neutral-600">
+                {FONT_SIZE_MIN}%
+              </span>
+              <output
+                className="text-sm font-semibold tabular-nums text-neutral-900"
+                htmlFor="kuaiji-font-slider"
+              >
+                {fontPct}%
+              </output>
+              <span className="text-xs tabular-nums text-neutral-600">
+                {FONT_SIZE_MAX}%
+              </span>
+            </div>
+            <input
+              id="kuaiji-font-slider"
+              type="range"
+              min={FONT_SIZE_MIN}
+              max={FONT_SIZE_MAX}
+              step={FONT_SIZE_STEP}
+              value={fontPct}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                setFontPct(n)
+                persistFontSizePercent(n)
+              }}
+              className="mb-4 h-2 w-full cursor-pointer accent-[#2ecc71]"
             />
-            <span className="rounded-lg bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800">
-              {f.type === 'number' ? '数字' : '文本'}
-            </span>
-            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-neutral-800">
+            <div className="flex flex-wrap gap-2">
+              {[
+                { label: '较小', v: 90 },
+                { label: '标准', v: FONT_SIZE_DEFAULT },
+                { label: '较大', v: 120 },
+                { label: '最大', v: FONT_SIZE_MAX },
+              ].map(({ label, v }) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => {
+                    setFontPct(v)
+                    persistFontSizePercent(v)
+                  }}
+                  className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                    fontPct === v
+                      ? 'bg-[#2ecc71] text-white'
+                      : 'border border-stone-200 bg-[#fafafa] text-neutral-800'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="border-t border-stone-100 p-4">
+            <p className="mb-1 text-sm font-semibold text-neutral-900">小票导出</p>
+            <p className="mb-3 text-xs leading-relaxed text-[#666666]">
+              默认以较快清晰度导出 JPEG；开启高清后像素更高、更清晰，保存耗时更长。
+            </p>
+            <label className="flex cursor-pointer items-start gap-3 text-sm text-neutral-900">
               <input
                 type="checkbox"
-                checked={f.required === true}
-                disabled={busy}
-                onChange={(e) =>
-                  void setFieldRequired(f.id, e.target.checked)
-                }
-                className="rounded border-stone-300 text-[#2ecc71] focus:ring-[#2ecc71]"
+                checked={receiptExportHd}
+                onChange={(e) => {
+                  const v = e.target.checked
+                  setReceiptExportHd(v)
+                  persistReceiptExportHd(v)
+                }}
+                className="mt-0.5 rounded border-stone-300 text-[#2ecc71] focus:ring-[#2ecc71]"
               />
-              必填
+              <span>
+                <span className="font-medium">高清导出</span>
+                <span className="mt-0.5 block text-xs font-normal text-[#666666]">
+                  关闭时优先速度（约 1 秒内完成更常见）；开启时接近原 2× 清晰度。
+                </span>
+              </span>
             </label>
-            {f.key && (
-              <span className="text-xs text-[#999999]">系统默认</span>
-            )}
-            {!f.key && (
-              <button
-                type="button"
-                onClick={() => void removeField(f.id)}
-                className="ml-auto text-sm font-medium text-[#999999] transition-colors hover:text-rose-600"
-              >
-                删除
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
+          </div>
+        </div>
+      </SettingsSection>
 
-      <footer className="mx-4 mb-10 mt-6 rounded-2xl border border-stone-200/90 bg-white px-4 py-3.5 text-[11px] leading-relaxed text-[#666666] shadow-sm">
-        <p className="font-semibold text-neutral-900">应用版本 {APP_VERSION}</p>
-        <button
-          type="button"
-          onClick={() =>
-            window.dispatchEvent(new Event(TRIGGER_ANDROID_UPDATE_CHECK))
-          }
-          className="mt-2 min-h-[40px] w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2 text-sm font-medium text-neutral-800 transition-colors hover:bg-stone-100"
-        >
-          检查更新（Android）
-        </button>
-        <p className="mt-1.5">
-          本版为<strong className="font-medium text-neutral-800">纯手动录入</strong>
-          ：在记账页逐项填写或粘贴；无应用内语音解析。配置{' '}
-          <code className="rounded-md bg-[#f8f9fa] px-1.5 py-0.5 font-mono text-[11px] text-neutral-800">
-            VITE_API_URL
-          </code>{' '}
-          后，可在「云端同步」使用邮箱或手机号登录，兑换会员后数据同步至自建后端。
-        </p>
-      </footer>
+      <SettingsSection title="导出备份">
+        <div className={SETTINGS_CARD_CLASS}>
+          <p className="mb-3 text-sm font-semibold text-neutral-900">
+            导出 / 恢复备份
+          </p>
+          <p className="mb-3 text-[11px] leading-relaxed text-[#666666]">
+            {useRemoteLedger
+              ? '当前已开通云备份，账单保存在服务器。可导出 CSV 作离线存档；从 CSV 恢复会按当前字段设置写入云端当前账号的全部账单。'
+              : token && apiBase && !membershipActive
+                ? '已登录但未开通云备份，数据仍仅存本机；兑换会员后才会同步到服务器。请定期导出 CSV。'
+                : '数据保存在本机（IndexedDB）。卸载 App、清理数据或换设备会清空本地库，请定期导出 CSV。'}
+            导入时使用当前字段配置，表头需与本应用导出的 CSV 一致（列名与字段名对应）。
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => exportCsv(records, fields)}
+              className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-neutral-800 shadow-sm transition-colors hover:bg-stone-50"
+            >
+              导出 CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => importInputRef.current?.click()}
+              className="rounded-xl border border-stone-300 bg-[#fafafa] px-4 py-2.5 text-sm font-semibold text-neutral-800 shadow-sm transition-colors hover:bg-stone-100"
+            >
+              从 CSV 恢复…
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                e.target.value = ''
+                if (!file) return
+                void (async () => {
+                  try {
+                    const text = await file.text()
+                    const parsed = parseLedgerImportCsv(text, fields)
+                    if (!parsed.ok) {
+                      alert(parsed.error)
+                      return
+                    }
+                    const { records: r } = parsed
+                    const ok = window.confirm(
+                      `将用 CSV 替换当前全部账单（共 ${r.length} 条）。字段仍使用当前设置，此操作不可撤销，确定继续？`,
+                    )
+                    if (!ok) return
+                    await restoreFullBackup(fields, r)
+                    alert('恢复完成')
+                  } catch (err) {
+                    console.error(err)
+                    alert(
+                      err instanceof Error ? err.message : '读取备份失败',
+                    )
+                  }
+                })()
+              }}
+            />
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title="新增字段"
+        description="默认含商品、单价、斤数、购买方、金额（数字）；明细行金额为单价×斤数自动计算。可新增备注等自定义字段。可为字段勾选「必填」，记账时将标红星并校验。"
+      >
+        <div className={SETTINGS_CARD_CLASS}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="字段名称，例如：金额"
+              className="min-h-[44px] flex-1 rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
+            />
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value as 'text' | 'number')}
+              className="min-h-[44px] rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 sm:w-28"
+            >
+              <option value="text">文本</option>
+              <option value="number">数字</option>
+            </select>
+            <button
+              type="button"
+              disabled={busy || !name.trim()}
+              onClick={() => void addField()}
+              className="min-h-[44px] shrink-0 rounded-xl bg-[#2ecc71] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#27ae60] disabled:opacity-50"
+            >
+              添加
+            </button>
+          </div>
+          <ul className="mt-4 space-y-3 border-t border-stone-100 pt-4">
+            {sorted.map((f) => (
+              <li
+                key={f.id}
+                className="flex flex-wrap items-center gap-3 rounded-xl border border-stone-100 bg-[#fafafa] px-3 py-3"
+              >
+                <EditableName
+                  initial={f.name}
+                  onSave={(v) => void renameField(f.id, v)}
+                />
+                <span className="rounded-lg bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                  {f.type === 'number' ? '数字' : '文本'}
+                </span>
+                <label className="flex cursor-pointer items-center gap-1.5 text-xs text-neutral-800">
+                  <input
+                    type="checkbox"
+                    checked={f.required === true}
+                    disabled={busy}
+                    onChange={(e) =>
+                      void setFieldRequired(f.id, e.target.checked)
+                    }
+                    className="rounded border-stone-300 text-[#2ecc71] focus:ring-[#2ecc71]"
+                  />
+                  必填
+                </label>
+                {f.key && (
+                  <span className="text-xs text-[#999999]">系统默认</span>
+                )}
+                {!f.key && (
+                  <button
+                    type="button"
+                    onClick={() => void removeField(f.id)}
+                    className="ml-auto text-sm font-medium text-[#999999] transition-colors hover:text-rose-600"
+                  >
+                    删除
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="关于">
+        <footer className={`${SETTINGS_CARD_CLASS} mb-10`}>
+          <p className="font-semibold text-neutral-900">应用版本 {APP_VERSION}</p>
+          <button
+            type="button"
+            onClick={() =>
+              window.dispatchEvent(new Event(TRIGGER_ANDROID_UPDATE_CHECK))
+            }
+            className="mt-2 min-h-[40px] w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2 text-sm font-medium text-neutral-800 transition-colors hover:bg-stone-100"
+          >
+            检查更新（Android）
+          </button>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-[#666666]">
+            本版为<strong className="font-medium text-neutral-800">纯手动录入</strong>
+            ：在记账页逐项填写或粘贴；无应用内语音解析。云端登录与同步见上方「账号」。
+          </p>
+        </footer>
+      </SettingsSection>
     </div>
   )
 }

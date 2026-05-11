@@ -27,7 +27,7 @@ export function getDefaultFieldDefs(): FieldDef[] {
     },
     {
       id: DEFAULT_FIELD_KEYS.plate,
-      name: '车牌号',
+      name: '购买方',
       type: 'text',
       key: 'plate',
       order: 3,

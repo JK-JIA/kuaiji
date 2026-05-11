@@ -5,10 +5,14 @@ import { useLedger } from '../context/LedgerContext'
 import {
   computedLineAmountFromUnitAndQty,
   deriveUnitPriceFromAmountAndQty,
+  emptyLineTripleTouched,
   getAmountFieldId,
   parseMoney,
   parseNonNegativeMoney,
+  reconcileLineTripleByLastEdited,
   sanitizeUnsignedDecimalInput,
+  type LineTripleLastEdited,
+  type LineTripleTouched,
 } from '../utils/recordHelpers'
 import { CalendarPickerModal } from './CalendarPickerModal'
 import { VoiceInputSection } from './VoiceInputSection'
@@ -19,6 +23,8 @@ type LineForm = {
   unitPrice: string
   quantity: string
   lineAmount: string
+  lastEdited: LineTripleLastEdited
+  touched: LineTripleTouched
 }
 
 function formatMoneyInput(n: number): string {
@@ -57,6 +63,7 @@ export function AddRecordModal({
   const prodField = sortedFields.find((f) => f.key === 'product')
   const qtyField = sortedFields.find((f) => f.key === 'quantity')
   const unitPriceField = sortedFields.find((f) => f.key === 'unitPrice')
+  const amountField = sortedFields.find((f) => f.key === 'amount')
   const prodId = prodField?.id
   const qtyId = qtyField?.id
   const unitPriceId = unitPriceField?.id
@@ -114,6 +121,8 @@ export function AddRecordModal({
       unitPrice: '',
       quantity: '',
       lineAmount: '',
+      lastEdited: null,
+      touched: emptyLineTripleTouched(),
     },
   ])
   const [dealInput, setDealInput] = useState('')
@@ -121,7 +130,6 @@ export function AddRecordModal({
   const [datePickerOpen, setDatePickerOpen] = useState(false)
   /** 校验失败文案（弹窗内展示；避免 WebView / 原生校验拦截导致无提示） */
   const [formError, setFormError] = useState<string | null>(null)
-
   const lineSubtotal = useMemo(
     () => lines.reduce((s, l) => s + parseMoney(l.lineAmount), 0),
     [lines],
@@ -213,6 +221,8 @@ export function AddRecordModal({
               unitPrice,
               quantity: qStr,
               lineAmount,
+              lastEdited: null,
+              touched: emptyLineTripleTouched(),
             }
           }),
         )
@@ -224,6 +234,8 @@ export function AddRecordModal({
             unitPrice: '',
             quantity: recordToEdit.values[qtyId] ?? '',
             lineAmount: '',
+            lastEdited: null,
+            touched: emptyLineTripleTouched(),
           },
         ])
       }
@@ -238,6 +250,8 @@ export function AddRecordModal({
           unitPrice: '',
           quantity: '',
           lineAmount: '',
+          lastEdited: null,
+          touched: emptyLineTripleTouched(),
         },
       ])
     }
@@ -287,11 +301,19 @@ export function AddRecordModal({
       if (qtyField?.required && !q) {
         return `第 ${i + 1} 行：请填写「${qtyField.name}」`
       }
-      if (showDetailAmounts && p && q && !lines[i].unitPrice.trim()) {
-        return `第 ${i + 1} 行：已填写商品与斤数，请填写「${unitPriceField?.name ?? '单价'}」以计算金额`
-      }
-      if (showDetailAmounts && lines[i].unitPrice.trim() && !q) {
-        return `第 ${i + 1} 行：已填单价，请填写「${qtyField?.name ?? '斤数'}」`
+      if (showDetailAmounts) {
+        const u = parseFloat(
+          sanitizeUnsignedDecimalInput(lines[i].unitPrice),
+        )
+        const nq = parseFloat(sanitizeUnsignedDecimalInput(lines[i].quantity))
+        const a = parseMoney(lines[i].lineAmount)
+        const uOk = Number.isFinite(u) && u > 0
+        const qOk = Number.isFinite(nq) && nq > 0
+        const aOk = a > 0
+        const pairs = (uOk ? 1 : 0) + (qOk ? 1 : 0) + (aOk ? 1 : 0)
+        if (p && q && pairs < 2) {
+          return `第 ${i + 1} 行：请填写「${unitPriceField?.name ?? '单价'}」、「${qtyField.name}」、「金额」中至少两项有效数字`
+        }
       }
     }
 
@@ -428,6 +450,8 @@ export function AddRecordModal({
         unitPrice: '',
         quantity: '',
         lineAmount: '',
+        lastEdited: null,
+        touched: emptyLineTripleTouched(),
       },
     ])
   }
@@ -531,12 +555,28 @@ export function AddRecordModal({
                       l.lineAmount?.trim() ?? '',
                     )
                     const computed = computedLineAmountFromUnitAndQty(u, q)
+                    const merged = {
+                      unitPrice: u,
+                      quantity: q,
+                      lineAmount: fromAi || computed,
+                    }
+                    const lastEdited: LineTripleLastEdited =
+                      fromAi.trim() !== ''
+                        ? 'lineAmount'
+                        : computed
+                          ? 'quantity'
+                          : 'unitPrice'
+                    const r = reconcileLineTripleByLastEdited({
+                      ...merged,
+                      lastEdited,
+                      touched: emptyLineTripleTouched(),
+                    })
                     return {
                       id: crypto.randomUUID(),
                       product: l.product,
-                      unitPrice: u,
-                      quantity: q,
-                      lineAmount: computed || fromAi,
+                      ...r,
+                      lastEdited: null,
+                      touched: emptyLineTripleTouched(),
                     }
                   }),
                 )
@@ -544,18 +584,26 @@ export function AddRecordModal({
             }}
             onFillFirstLine={(product, quantity) => {
               setLines((prev) =>
-                prev.map((row, i) =>
-                  i === 0
-                    ? {
-                        ...row,
-                        product: product || row.product,
-                        quantity:
-                          quantity !== undefined && quantity !== ''
-                            ? sanitizeUnsignedDecimalInput(quantity)
-                            : row.quantity,
-                      }
-                    : row,
-                ),
+                prev.map((row, i) => {
+                  if (i !== 0) return row
+                  const qSan =
+                    quantity !== undefined && quantity !== ''
+                      ? sanitizeUnsignedDecimalInput(quantity)
+                      : row.quantity
+                  const touched: LineTripleTouched = {
+                    ...(row.touched ?? emptyLineTripleTouched()),
+                    quantity:
+                      quantity !== undefined && quantity !== ''
+                        ? qSan.trim() !== ''
+                        : (row.touched?.quantity ?? false),
+                  }
+                  return {
+                    ...row,
+                    product: product || row.product,
+                    quantity: qSan,
+                    touched,
+                  }
+                }),
               )
             }}
             />
@@ -714,7 +762,9 @@ export function AddRecordModal({
                           {unitPriceField?.name ?? '单价'}
                         </span>
                         <span className="text-center">{qtyField.name}</span>
-                        <span className="text-right">金额</span>
+                        <span className="text-right">
+                          {amountField?.name ?? '金额'}
+                        </span>
                         <span aria-hidden className="w-2 shrink-0" />
                       </div>
                   <div className="divide-y divide-stone-100">
@@ -743,23 +793,30 @@ export function AddRecordModal({
                           inputMode="decimal"
                           value={line.unitPrice}
                           onChange={(e) => {
-                            const u = sanitizeUnsignedDecimalInput(
-                              e.target.value,
-                            )
+                            const raw = e.target.value
+                            const u =
+                              raw === ''
+                                ? ''
+                                : sanitizeUnsignedDecimalInput(raw)
+                            const lastEdited: LineTripleLastEdited =
+                              u.trim() === '' ? null : 'unitPrice'
                             setLines((prev) =>
-                              prev.map((row, i) =>
-                                i === idx
-                                  ? {
-                                      ...row,
-                                      unitPrice: u,
-                                      lineAmount:
-                                        computedLineAmountFromUnitAndQty(
-                                          u,
-                                          row.quantity,
-                                        ),
-                                    }
-                                  : row,
-                              ),
+                              prev.map((row, i) => {
+                                if (i !== idx) return row
+                                const touched: LineTripleTouched = {
+                                  ...(row.touched ?? emptyLineTripleTouched()),
+                                  unitPrice: u.trim() !== '',
+                                }
+                                return {
+                                  ...row,
+                                  ...reconcileLineTripleByLastEdited({
+                                    ...row,
+                                    unitPrice: u,
+                                    lastEdited,
+                                    touched,
+                                  }),
+                                }
+                              }),
                             )
                           }}
                           className="rounded-xl border border-stone-200 bg-[#fafafa] px-1.5 py-2 text-center text-sm tabular-nums text-neutral-900 placeholder:text-[#999999]"
@@ -773,23 +830,30 @@ export function AddRecordModal({
                           inputMode="decimal"
                           value={line.quantity}
                           onChange={(e) => {
-                            const q = sanitizeUnsignedDecimalInput(
-                              e.target.value,
-                            )
+                            const raw = e.target.value
+                            const q =
+                              raw === ''
+                                ? ''
+                                : sanitizeUnsignedDecimalInput(raw)
+                            const lastEdited: LineTripleLastEdited =
+                              q.trim() === '' ? null : 'quantity'
                             setLines((prev) =>
-                              prev.map((row, i) =>
-                                i === idx
-                                  ? {
-                                      ...row,
-                                      quantity: q,
-                                      lineAmount:
-                                        computedLineAmountFromUnitAndQty(
-                                          row.unitPrice,
-                                          q,
-                                        ),
-                                    }
-                                  : row,
-                              ),
+                              prev.map((row, i) => {
+                                if (i !== idx) return row
+                                const touched: LineTripleTouched = {
+                                  ...(row.touched ?? emptyLineTripleTouched()),
+                                  quantity: q.trim() !== '',
+                                }
+                                return {
+                                  ...row,
+                                  ...reconcileLineTripleByLastEdited({
+                                    ...row,
+                                    quantity: q,
+                                    lastEdited,
+                                    touched,
+                                  }),
+                                }
+                              }),
                             )
                           }}
                           className="rounded-xl border border-stone-200 bg-[#fafafa] px-1.5 py-2 text-center text-sm tabular-nums text-neutral-900 placeholder:text-[#999999]"
@@ -798,13 +862,44 @@ export function AddRecordModal({
                           autoComplete="off"
                           spellCheck={false}
                         />
-                        <div
-                          className="rounded-xl border border-dashed border-stone-200 bg-stone-50 px-1.5 py-2 text-right text-sm font-semibold tabular-nums text-amber-900"
-                          aria-label="金额"
-                          title="由单价×斤数自动计算"
-                        >
-                          {line.lineAmount || '—'}
-                        </div>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={line.lineAmount}
+                          onChange={(e) => {
+                            const raw = e.target.value
+                            const a =
+                              raw === ''
+                                ? ''
+                                : sanitizeUnsignedDecimalInput(raw)
+                            const lastEdited: LineTripleLastEdited =
+                              a.trim() === '' ? null : 'lineAmount'
+                            setLines((prev) =>
+                              prev.map((row, i) => {
+                                if (i !== idx) return row
+                                const touched: LineTripleTouched = {
+                                  ...(row.touched ?? emptyLineTripleTouched()),
+                                  lineAmount: a.trim() !== '',
+                                }
+                                return {
+                                  ...row,
+                                  ...reconcileLineTripleByLastEdited({
+                                    ...row,
+                                    lineAmount: a,
+                                    lastEdited,
+                                    touched,
+                                  }),
+                                }
+                              }),
+                            )
+                          }}
+                          className="rounded-xl border border-stone-200 bg-[#fafafa] px-1.5 py-2 text-right text-sm font-semibold tabular-nums text-amber-900 placeholder:text-[#999999] placeholder:font-normal"
+                          placeholder="金额"
+                          aria-label={amountField?.name ?? '金额'}
+                          title="单价、数量、金额填两项自动算第三项"
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
                         <div className="flex justify-end">
                           {lines.length > 1 ? (
                             <button
@@ -840,7 +935,7 @@ export function AddRecordModal({
                         </span>
                       </div>
                       <p className="mt-1 text-xs leading-tight text-[#999999]">
-                        各行金额 = 单价 × 斤数，自动合计为应收
+                        各行：单价、{qtyField.name}、金额任填两项，自动算第三项并合计为应收
                       </p>
                     </div>
                     <div className="mt-4 rounded-xl border border-stone-100 bg-[#f8f9fa] p-3">
