@@ -1,4 +1,5 @@
 import zlib from 'zlib'
+import { mergeVolcAsrHotwords } from './asrHotwords.js'
 
 /** 火山大模型流式 ASR 二进制协议（见文档 6561/1354869） */
 
@@ -132,7 +133,30 @@ function extractDefinite(json: unknown): boolean | undefined {
   return undefined
 }
 
-export function defaultAsrInitPayload(): Record<string, unknown> {
+/**
+ * 构建首包 JSON：可选合并客户端热词 + 控制台词表 ID（VOLC_ASR_BOOSTING_TABLE_ID）。
+ * 热词放在 request.corpus.context，序列化为 JSON 字符串（文档示例）。
+ */
+export function buildAsrInitPayload(clientHotwords: string[]): Record<string, unknown> {
+  const merged = mergeVolcAsrHotwords(clientHotwords)
+  const boostingId = process.env.VOLC_ASR_BOOSTING_TABLE_ID?.trim()
+
+  const request: Record<string, unknown> = {
+    model_name: 'bigmodel',
+    enable_itn: true,
+    enable_punc: true,
+    result_type: 'single',
+  }
+
+  const corpus: Record<string, string> = {}
+  if (boostingId) corpus.boosting_table_id = boostingId
+  if (merged.length) {
+    corpus.context = JSON.stringify({
+      hotwords: merged.map((word) => ({ word })),
+    })
+  }
+  if (Object.keys(corpus).length) request.corpus = corpus
+
   return {
     user: {
       uid: 'ledger-app',
@@ -147,11 +171,6 @@ export function defaultAsrInitPayload(): Record<string, unknown> {
       bits: 16,
       channel: 1,
     },
-    request: {
-      model_name: 'bigmodel',
-      enable_itn: true,
-      enable_punc: true,
-      result_type: 'single',
-    },
+    request,
   }
 }

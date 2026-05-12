@@ -60,6 +60,51 @@ const AMOUNT_JSON_KEYS = [
   '钱',
 ]
 
+/** 口语里常指购买方（与列名同义，用于解析 JSON 键） */
+const BUYER_SPEECH_ALIASES = ['对方', '客户', '买家'] as const
+
+/**
+ * 购买方字段值：去掉用户复述的列名前缀（如「购买方4排三号」→「4排三号」），
+ * 并去掉「对方：」等同义引导语。
+ */
+function normalizeBuyerFieldValue(
+  value: string,
+  buyerLabel: string,
+): string {
+  let v = value.trim()
+  if (!v) return v
+  const stripPrefix = (s: string, prefix: string) => {
+    const esc = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return s.replace(new RegExp(`^${esc}(?:[:：\\s，,、]*)`), '').trim()
+  }
+  v = stripPrefix(v, buyerLabel)
+  for (const syn of BUYER_SPEECH_ALIASES) {
+    if (syn !== buyerLabel) {
+      v = stripPrefix(v, syn)
+    }
+  }
+  return v
+}
+
+function pickPlateFromParsed(
+  parsed: Record<string, unknown>,
+  buyerLabel: string,
+): string | undefined {
+  const tryKey = (k: string) => {
+    const raw = parsed[k]
+    if (raw === undefined || raw === null) return undefined
+    const s = String(raw).trim()
+    return s || undefined
+  }
+  const primary = tryKey(buyerLabel)
+  if (primary) return normalizeBuyerFieldValue(primary, buyerLabel)
+  for (const syn of BUYER_SPEECH_ALIASES) {
+    const s = tryKey(syn)
+    if (s) return normalizeBuyerFieldValue(s, buyerLabel)
+  }
+  return undefined
+}
+
 function pickAmountFromParsed(
   parsed: Record<string, unknown>,
   amountFieldName: string,
@@ -237,7 +282,9 @@ export async function parseWithDoubao(
 - **关键词**：收了、货款、一共、合计、总共、实收、给了、转账、元、块、块钱、￥ —— 后面出现的数字即金额。
 - 若只说「50」且上下文明确是钱（如收了50），也要写入「${amountLabel}」。
 
-【${buyerLabel}】可填车牌号、姓名、手机尾号等购买方标识。
+【${buyerLabel}】可填车牌号、摊位号（如「4排三号」）、姓名、手机尾号等购买方标识。
+- 用户说「对方」「客户」「买家」时与「${buyerLabel}」同义，一律用 JSON 键「${buyerLabel}」输出。
+- **值只写标识本身**，不要把列名复述进值里：如用户说「${buyerLabel}4排三号」「对方4排三号」「买家 京A123」，值应分别为「4排三号」「4排三号」「京A123」，禁止写成「${buyerLabel}4排三号」。
 
 【输出】只输出一个 JSON 对象，不要 markdown、不要解释。
 
@@ -405,6 +452,13 @@ export async function parseWithDoubao(
         field.key === 'unitPrice'
       )
         continue
+      if (field.key === 'plate') {
+        const picked = pickPlateFromParsed(parsed, buyerLabel)
+        if (picked) {
+          mappedData[field.id] = picked
+        }
+        continue
+      }
       const v = parsed[field.name]
       if (v !== undefined && v !== null && String(v).trim()) {
         mappedData[field.id] = String(v).trim()

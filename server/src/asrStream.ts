@@ -2,9 +2,9 @@ import { randomUUID } from 'crypto'
 import type { IncomingMessage, Server } from 'http'
 import WebSocket, { type RawData, WebSocketServer } from 'ws'
 import {
+  buildAsrInitPayload,
   buildAudioOnlyRequest,
   buildFullClientRequest,
-  defaultAsrInitPayload,
   nextAudioSequence,
   parseVolcServerBinaryMessage,
   resetAudioSequence,
@@ -137,10 +137,23 @@ export function attachAsrWebSocket(
   })
 }
 
-function runAsrSession(
-  clientWs: WebSocket,
-  verifyToken: VerifyToken,
-): void {
+const MAX_CLIENT_HOTWORD_STRINGS = 120
+
+function parseClientHotwords(msg: unknown): string[] {
+  if (!msg || typeof msg !== 'object') return []
+  const hw = (msg as { hotwords?: unknown }).hotwords
+  if (!Array.isArray(hw)) return []
+  const out: string[] = []
+  for (const x of hw) {
+    if (typeof x !== 'string') continue
+    const t = x.trim()
+    if (t) out.push(t)
+    if (out.length >= MAX_CLIENT_HOTWORD_STRINGS) break
+  }
+  return out
+}
+
+function runAsrSession(clientWs: WebSocket, verifyToken: VerifyToken): void {
   const volcUrl = process.env.VOLC_ASR_WS_URL?.trim() || VOLC_DEFAULT_URL
   let volcWs: WebSocket | null = null
   let pcmBuf = Buffer.alloc(0)
@@ -149,6 +162,7 @@ function runAsrSession(
   let closed = false
   let authenticated = false
   let readySent = false
+  let clientHotwords: string[] = []
 
   const safeSendClient = (obj: unknown) => {
     if (clientWs.readyState === WebSocket.OPEN) {
@@ -245,7 +259,9 @@ function runAsrSession(
         earlyClientPcm = Buffer.alloc(0)
       }
       try {
-        volcWs!.send(buildFullClientRequest(defaultAsrInitPayload()))
+        volcWs!.send(
+          buildFullClientRequest(buildAsrInitPayload(clientHotwords)),
+        )
         flushPcm(false)
         if (pendingStop) {
           flushPcm(true)
@@ -332,6 +348,7 @@ function runAsrSession(
           }
           clearTimeout(authTimer)
           authenticated = true
+          clientHotwords = parseClientHotwords(msg)
           startVolcUpstream()
           return
         }

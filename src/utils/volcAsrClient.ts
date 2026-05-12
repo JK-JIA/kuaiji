@@ -97,6 +97,7 @@ export function startVolcAsrSession(
     onError: (message: string) => void
     onEnded?: () => void
   },
+  options?: { hotwords?: string[] },
 ): Promise<VolcAsrSession> {
   const url = getAsrWebSocketUrl(apiBase)
 
@@ -216,7 +217,16 @@ export function startVolcAsrSession(
           `WebSocket onopen readyState=${ws.readyState} protocol=${ws.protocol || '(empty)'}`,
         )
         try {
-          ws.send(JSON.stringify({ type: 'auth', token }))
+          const hw = options?.hotwords?.filter(
+            (s): s is string => typeof s === 'string' && s.trim().length > 0,
+          )
+          ws.send(
+            JSON.stringify(
+              hw?.length
+                ? { type: 'auth', token, hotwords: hw }
+                : { type: 'auth', token },
+            ),
+          )
           asrDiagLog('已发送 auth 帧（token 未写入日志）')
         } catch (e) {
           failEarly(

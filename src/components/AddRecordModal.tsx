@@ -1,12 +1,11 @@
 import { format, parseISO } from 'date-fns'
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { FieldDef, LedgerRecord, LineItemRow } from '../types'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { FieldDef, LedgerRecord } from '../types'
 import { useLedger } from '../context/LedgerContext'
 import {
   computedLineAmountFromUnitAndQty,
   deriveUnitPriceFromAmountAndQty,
   emptyLineTripleTouched,
-  getAmountFieldId,
   parseMoney,
   parseNonNegativeMoney,
   reconcileLineTripleByLastEdited,
@@ -14,28 +13,35 @@ import {
   type LineTripleLastEdited,
   type LineTripleTouched,
 } from '../utils/recordHelpers'
+import {
+  applyVoiceFillFirstLine,
+  buildLedgerRecordForSave,
+  createEmptyLineForm,
+  emptyLedgerFieldValues,
+  formatLedgerMoneyInput,
+  getLedgerFormLayout,
+  mapDoubaoProductLinesToLineForms,
+  mergeVoiceParsedIntoValues,
+  rootValuesFromRecord,
+  validateRecordForm,
+  type LedgerLineForm,
+} from '../utils/ledgerRecordDraft'
+import { collectAsrHotwordsFromLedger } from '../utils/asrHotwordsFromLedger'
 import { CalendarPickerModal } from './CalendarPickerModal'
 import { VoiceInputSection } from './VoiceInputSection'
 
-type LineForm = {
-  id: string
-  product: string
-  unitPrice: string
-  quantity: string
-  lineAmount: string
-  lastEdited: LineTripleLastEdited
-  touched: LineTripleTouched
-}
-
-function formatMoneyInput(n: number): string {
-  const r = Math.round(n * 100) / 100
-  if (!Number.isFinite(r) || r <= 0) return ''
-  return Number.isInteger(r) ? String(r) : r.toFixed(2)
-}
-
-/** 含任意空白（空格、换行、制表符等）则不允许保存 */
-function hasWhitespace(s: string): boolean {
-  return /\s/.test(s)
+/** 首页语音低置信度或校验失败时预填「记一笔」 */
+export type VoiceFormPrefillPayload = {
+  values: Record<string, string>
+  lines: Array<{
+    product: string
+    quantity: string
+    unitPrice: string
+    lineAmount: string
+  }>
+  recordDate?: string
+  dealInput?: string
+  formError?: string | null
 }
 
 type Props = {
@@ -45,6 +51,9 @@ type Props = {
   onSave: (rec: LedgerRecord) => Promise<void>
   recordToEdit?: LedgerRecord | null
   recordDates?: Set<string>
+  voiceFormPrefill?: VoiceFormPrefillPayload | null
+  /** 递增则重新应用 voiceFormPrefill（与 recordToEdit 互斥） */
+  voiceFormPrefillKey?: number
 }
 
 export function AddRecordModal({
@@ -54,77 +63,33 @@ export function AddRecordModal({
   onSave,
   recordToEdit = null,
   recordDates,
+  voiceFormPrefill = null,
+  voiceFormPrefillKey = 0,
 }: Props) {
-  const sortedFields = useMemo(
-    () => [...fields].sort((a, b) => a.order - b.order),
-    [fields],
-  )
-
-  const prodField = sortedFields.find((f) => f.key === 'product')
-  const qtyField = sortedFields.find((f) => f.key === 'quantity')
-  const unitPriceField = sortedFields.find((f) => f.key === 'unitPrice')
+  const layout = useMemo(() => getLedgerFormLayout(fields), [fields])
+  const {
+    sortedFields,
+    prodField,
+    qtyField,
+    unitPriceField,
+    canonicalAmountId,
+    showDetailAmounts,
+    rootFieldIdsForRender,
+    prodId,
+    qtyId,
+    unitPriceId,
+  } = layout
   const amountField = sortedFields.find((f) => f.key === 'amount')
-  const prodId = prodField?.id
-  const qtyId = qtyField?.id
-  const unitPriceId = unitPriceField?.id
 
   const { records } = useLedger()
-
-  /** 只保留一列「金额」输入，避免系统金额 + 自定义同名数字字段出现两个框 */
-  const canonicalAmountId = useMemo(
-    () => getAmountFieldId(sortedFields),
-    [sortedFields],
-  )
-  const rootFieldIds = useMemo(
-    () =>
-      sortedFields
-        .filter(
-          (f) =>
-            f.key !== 'product' &&
-            f.key !== 'quantity' &&
-            f.key !== 'unitPrice',
-        )
-        .filter((f) => {
-          if (!canonicalAmountId) return true
-          if (f.id === canonicalAmountId) return true
-          if (
-            f.type === 'number' &&
-            f.name.trim() === '金额' &&
-            f.id !== canonicalAmountId
-          )
-            return false
-          return true
-        })
-        .map((f) => f.id),
-    [sortedFields, canonicalAmountId],
-  )
-
-  const showDetailAmounts = Boolean(
-    prodField && qtyField && canonicalAmountId && unitPriceId,
-  )
-
-  const rootFieldIdsForRender = useMemo(() => {
-    if (!showDetailAmounts || !canonicalAmountId) return rootFieldIds
-    return rootFieldIds.filter((id) => id !== canonicalAmountId)
-  }, [rootFieldIds, showDetailAmounts, canonicalAmountId])
 
   const [recordDate, setRecordDate] = useState(() =>
     format(new Date(), 'yyyy-MM-dd'),
   )
   const [values, setValues] = useState<Record<string, string>>(() =>
-    emptyFields(sortedFields),
+    emptyLedgerFieldValues(sortedFields),
   )
-  const [lines, setLines] = useState<LineForm[]>([
-    {
-      id: crypto.randomUUID(),
-      product: '',
-      unitPrice: '',
-      quantity: '',
-      lineAmount: '',
-      lastEdited: null,
-      touched: emptyLineTripleTouched(),
-    },
-  ])
+  const [lines, setLines] = useState<LedgerLineForm[]>([createEmptyLineForm()])
   const [dealInput, setDealInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [datePickerOpen, setDatePickerOpen] = useState(false)
@@ -134,6 +99,8 @@ export function AddRecordModal({
     () => lines.reduce((s, l) => s + parseMoney(l.lineAmount), 0),
     [lines],
   )
+
+  const lastVoicePrefillKeyRef = useRef(0)
 
   const dealNum = useMemo(
     () => parseNonNegativeMoney(dealInput),
@@ -149,6 +116,11 @@ export function AddRecordModal({
   const recentProductNames = useMemo(
     () => recentProductNamesFromRecords(records, prodId, 14),
     [records, prodId],
+  )
+
+  const modalAsrHotwords = useMemo(
+    () => collectAsrHotwordsFromLedger(records, fields),
+    [records, fields],
   )
 
   const dateCompactLabel = useMemo(() => {
@@ -178,7 +150,7 @@ export function AddRecordModal({
   useEffect(() => {
     if (!open || !canonicalAmountId || !showDetailAmounts) return
     const sub = lines.reduce((s, l) => s + parseMoney(l.lineAmount), 0)
-    const next = sub > 0 ? formatMoneyInput(sub) : ''
+    const next = sub > 0 ? formatLedgerMoneyInput(sub) : ''
     setValues((v) =>
       v[canonicalAmountId] === next ? v : { ...v, [canonicalAmountId]: next },
     )
@@ -191,11 +163,12 @@ export function AddRecordModal({
   useEffect(() => {
     if (!open) return
     if (recordToEdit && prodId && qtyId) {
+      lastVoicePrefillKeyRef.current = 0
       setRecordDate(recordToEdit.date)
       setValues(rootValuesFromRecord(sortedFields, recordToEdit.values))
       const da = recordToEdit.dealAmount
       setDealInput(
-        da !== undefined && !Number.isNaN(da) ? formatMoneyInput(da) : '',
+        da !== undefined && !Number.isNaN(da) ? formatLedgerMoneyInput(da) : '',
       )
       if (recordToEdit.lineItems && recordToEdit.lineItems.length > 0) {
         setLines(
@@ -239,21 +212,43 @@ export function AddRecordModal({
           },
         ])
       }
-    } else {
+    } else if (
+      voiceFormPrefill &&
+      voiceFormPrefillKey > 0 &&
+      lastVoicePrefillKeyRef.current !== voiceFormPrefillKey
+    ) {
+      lastVoicePrefillKeyRef.current = voiceFormPrefillKey
+      setRecordDate(
+        voiceFormPrefill.recordDate ?? format(new Date(), 'yyyy-MM-dd'),
+      )
+      setValues({
+        ...emptyLedgerFieldValues(sortedFields),
+        ...voiceFormPrefill.values,
+      })
+      setDealInput(voiceFormPrefill.dealInput ?? '')
+      setFormError(voiceFormPrefill.formError ?? null)
+      setLines(
+        voiceFormPrefill.lines.length > 0
+          ? voiceFormPrefill.lines.map((row) => ({
+              id: crypto.randomUUID(),
+              product: row.product,
+              unitPrice: row.unitPrice,
+              quantity: row.quantity,
+              lineAmount: row.lineAmount,
+              lastEdited: null,
+              touched: emptyLineTripleTouched(),
+            }))
+          : [createEmptyLineForm()],
+      )
+    } else if (
+      !recordToEdit &&
+      (!voiceFormPrefill || voiceFormPrefillKey === 0)
+    ) {
+      lastVoicePrefillKeyRef.current = 0
       setRecordDate(format(new Date(), 'yyyy-MM-dd'))
-      setValues(emptyFields(sortedFields))
+      setValues(emptyLedgerFieldValues(sortedFields))
       setDealInput('')
-      setLines([
-        {
-          id: crypto.randomUUID(),
-          product: '',
-          unitPrice: '',
-          quantity: '',
-          lineAmount: '',
-          lastEdited: null,
-          touched: emptyLineTripleTouched(),
-        },
-      ])
+      setLines([createEmptyLineForm()])
     }
   }, [
     open,
@@ -263,114 +258,12 @@ export function AddRecordModal({
     qtyId,
     unitPriceId,
     canonicalAmountId,
+    voiceFormPrefill,
+    voiceFormPrefillKey,
   ])
 
-  const validate = (): string | null => {
-    const merged = buildMergedValues(values, lines, prodId, qtyId)
-    if (!prodId || !qtyId) return '缺少商品或数量字段配置'
-
-    for (const f of sortedFields) {
-      if (f.key === 'product' || f.key === 'quantity' || f.key === 'unitPrice')
-        continue
-      if (
-        canonicalAmountId &&
-        f.id !== canonicalAmountId &&
-        f.type === 'number' &&
-        f.name.trim() === '金额'
-      ) {
-        continue
-      }
-      if (!f.required) continue
-      if (!(merged[f.id] ?? '').trim()) {
-        return `请填写「${f.name}」`
-      }
-    }
-
-    const hasAnyLine =
-      lines.some((l) => l.product.trim()) ||
-      lines.some((l) => l.quantity.trim())
-    if (!hasAnyLine) return '请至少填写一行商品或数量'
-
-    for (let i = 0; i < lines.length; i++) {
-      const p = lines[i].product.trim()
-      const q = lines[i].quantity.trim()
-      if (!p && !q) continue
-      if (prodField?.required && !p) {
-        return `第 ${i + 1} 行：请填写「${prodField.name}」`
-      }
-      if (qtyField?.required && !q) {
-        return `第 ${i + 1} 行：请填写「${qtyField.name}」`
-      }
-      if (showDetailAmounts) {
-        const u = parseFloat(
-          sanitizeUnsignedDecimalInput(lines[i].unitPrice),
-        )
-        const nq = parseFloat(sanitizeUnsignedDecimalInput(lines[i].quantity))
-        const a = parseMoney(lines[i].lineAmount)
-        const uOk = Number.isFinite(u) && u > 0
-        const qOk = Number.isFinite(nq) && nq > 0
-        const aOk = a > 0
-        const pairs = (uOk ? 1 : 0) + (qOk ? 1 : 0) + (aOk ? 1 : 0)
-        if (p && q && pairs < 2) {
-          return `第 ${i + 1} 行：请填写「${unitPriceField?.name ?? '单价'}」、「${qtyField.name}」、「金额」中至少两项有效数字`
-        }
-      }
-    }
-
-    const spaceIssues: string[] = []
-    for (const fid of rootFieldIdsForRender) {
-      const f = sortedFields.find((x) => x.id === fid)
-      if (!f) continue
-      const raw = values[fid] ?? ''
-      if (raw && hasWhitespace(raw)) {
-        spaceIssues.push(`「${f.name}」中含空格或空白，请删去后再保存`)
-      }
-    }
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]
-      const rowUsed =
-        line.product.trim() ||
-        line.quantity.trim() ||
-        line.unitPrice.trim() ||
-        line.lineAmount.trim()
-      if (!rowUsed) continue
-      if (hasWhitespace(line.product)) {
-        spaceIssues.push(
-          `第 ${i + 1} 行「${prodField?.name ?? '商品'}」中含空格或空白，请删去后再保存`,
-        )
-      }
-      if (hasWhitespace(line.quantity)) {
-        spaceIssues.push(
-          `第 ${i + 1} 行「${qtyField?.name ?? '数量'}」中含空格或空白，请删去后再保存`,
-        )
-      }
-      if (showDetailAmounts && line.unitPrice && hasWhitespace(line.unitPrice)) {
-        spaceIssues.push(
-          `第 ${i + 1} 行「${unitPriceField?.name ?? '单价'}」中含空格或空白，请删去后再保存`,
-        )
-      }
-      if (
-        showDetailAmounts &&
-        canonicalAmountId &&
-        line.lineAmount &&
-        hasWhitespace(line.lineAmount)
-      ) {
-        spaceIssues.push(
-          `第 ${i + 1} 行「金额」中含空格或空白，请删去后再保存`,
-        )
-      }
-    }
-    if (dealInput && hasWhitespace(dealInput)) {
-      spaceIssues.push(
-        '「总价（优惠后实收价）」中含空格或空白，请删去后再保存',
-      )
-    }
-    if (spaceIssues.length > 0) {
-      return spaceIssues.join('\n')
-    }
-
-    return null
-  }
+  const validate = (): string | null =>
+    validateRecordForm(layout, { values, lines, dealInput })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -384,52 +277,18 @@ export function AddRecordModal({
 
     setSaving(true)
     try {
-      const mergedValues = buildMergedValues(values, lines, prodId, qtyId)
       const live = recordToEdit
         ? records.find((r) => r.id === recordToEdit.id)
         : undefined
 
-      const shouldPersistLineItems =
-        lines.length > 1 ||
-        Boolean(
-          canonicalAmountId &&
-            lines.some(
-              (l) =>
-                l.lineAmount.trim() !== '' || l.unitPrice.trim() !== '',
-            ),
-        )
-
-      let lineItems: LineItemRow[] | undefined
-      if (shouldPersistLineItems) {
-        lineItems = lines.map((l) => ({
-          id: l.id,
-          values: {
-            [prodId]: l.product.trim(),
-            [qtyId]: l.quantity.trim(),
-            ...(unitPriceId
-              ? { [unitPriceId]: l.unitPrice.trim() }
-              : {}),
-            ...(canonicalAmountId
-              ? { [canonicalAmountId]: l.lineAmount.trim() }
-              : {}),
-          },
-        }))
-      }
-
-      const dealParsed = parseNonNegativeMoney(dealInput)
-      const nextDeal: number | undefined =
-        dealInput.trim() === '' ? undefined : dealParsed
-
-      const rec: LedgerRecord = {
-        id: recordToEdit?.id ?? crypto.randomUUID(),
-        date: recordDate,
-        createdAt: recordToEdit?.createdAt ?? Date.now(),
-        values: mergedValues,
-        lineItems,
-        settled: (live?.settled ?? recordToEdit?.settled) === true,
-        receivedAmount: live?.receivedAmount ?? recordToEdit?.receivedAmount,
-        dealAmount: nextDeal,
-      }
+      const rec = buildLedgerRecordForSave(layout, {
+        values,
+        lines,
+        dealInput,
+        recordDate,
+        recordToEdit,
+        liveRecord: live,
+      })
       await onSave(rec)
       onClose()
     } catch (saveErr) {
@@ -442,18 +301,7 @@ export function AddRecordModal({
   }
 
   const addLine = () => {
-    setLines((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        product: '',
-        unitPrice: '',
-        quantity: '',
-        lineAmount: '',
-        lastEdited: null,
-        touched: emptyLineTripleTouched(),
-      },
-    ])
+    setLines((prev) => [...prev, createEmptyLineForm()])
   }
 
   const removeLine = (index: number) => {
@@ -529,82 +377,16 @@ export function AddRecordModal({
           <div className="mb-4">
             <VoiceInputSection
             fields={sortedFields}
+            records={records}
+            asrHotwords={modalAsrHotwords}
             onApplyParsed={(data, productLines) => {
-              setValues((v) => {
-                const next = { ...v, ...data }
-                for (const k of Object.keys(data)) {
-                  const f = sortedFields.find((x) => x.id === k)
-                  if (f?.type === 'number') {
-                    next[k] = sanitizeUnsignedDecimalInput(
-                      String(data[k] ?? ''),
-                    )
-                  } else if (data[k] !== undefined) {
-                    next[k] = String(data[k])
-                  }
-                }
-                return next
-              })
+              setValues((v) => mergeVoiceParsedIntoValues(sortedFields, v, data))
               if (productLines?.length && prodId && qtyId) {
-                setLines(
-                  productLines.map((l) => {
-                    const q = sanitizeUnsignedDecimalInput(l.quantity)
-                    const u = sanitizeUnsignedDecimalInput(
-                      (l.unitPrice ?? '').trim(),
-                    )
-                    const fromAi = sanitizeUnsignedDecimalInput(
-                      l.lineAmount?.trim() ?? '',
-                    )
-                    const computed = computedLineAmountFromUnitAndQty(u, q)
-                    const merged = {
-                      unitPrice: u,
-                      quantity: q,
-                      lineAmount: fromAi || computed,
-                    }
-                    const lastEdited: LineTripleLastEdited =
-                      fromAi.trim() !== ''
-                        ? 'lineAmount'
-                        : computed
-                          ? 'quantity'
-                          : 'unitPrice'
-                    const r = reconcileLineTripleByLastEdited({
-                      ...merged,
-                      lastEdited,
-                      touched: emptyLineTripleTouched(),
-                    })
-                    return {
-                      id: crypto.randomUUID(),
-                      product: l.product,
-                      ...r,
-                      lastEdited: null,
-                      touched: emptyLineTripleTouched(),
-                    }
-                  }),
-                )
+                setLines(mapDoubaoProductLinesToLineForms(productLines))
               }
             }}
             onFillFirstLine={(product, quantity) => {
-              setLines((prev) =>
-                prev.map((row, i) => {
-                  if (i !== 0) return row
-                  const qSan =
-                    quantity !== undefined && quantity !== ''
-                      ? sanitizeUnsignedDecimalInput(quantity)
-                      : row.quantity
-                  const touched: LineTripleTouched = {
-                    ...(row.touched ?? emptyLineTripleTouched()),
-                    quantity:
-                      quantity !== undefined && quantity !== ''
-                        ? qSan.trim() !== ''
-                        : (row.touched?.quantity ?? false),
-                  }
-                  return {
-                    ...row,
-                    product: product || row.product,
-                    quantity: qSan,
-                    touched,
-                  }
-                }),
-              )
+              setLines((prev) => applyVoiceFillFirstLine(prev, product, quantity))
             }}
             />
           </div>
@@ -930,7 +712,7 @@ export function AddRecordModal({
                         </span>
                         <span className="text-xl font-bold tabular-nums leading-none text-neutral-900">
                           {lineSubtotal > 0
-                            ? `¥${formatMoneyInput(lineSubtotal)}`
+                            ? `¥${formatLedgerMoneyInput(lineSubtotal)}`
                             : '¥0'}
                         </span>
                       </div>
@@ -960,7 +742,7 @@ export function AddRecordModal({
                       </label>
                       {discountShown > 0 && (
                         <p className="mt-2 text-base font-semibold text-[#2ecc71]">
-                          已优惠 ¥{formatMoneyInput(discountShown)}
+                          已优惠 ¥{formatLedgerMoneyInput(discountShown)}
                         </p>
                       )}
                       {lineSubtotal > 0 &&
@@ -1087,38 +869,5 @@ function recentProductNamesFromRecords(
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-CN'))
     .slice(0, limit)
     .map(([name]) => name)
-}
-
-function emptyFields(fields: FieldDef[]): Record<string, string> {
-  const o: Record<string, string> = {}
-  for (const f of fields) o[f.id] = ''
-  return o
-}
-
-function rootValuesFromRecord(
-  fields: FieldDef[],
-  raw: Record<string, string>,
-): Record<string, string> {
-  const o = emptyFields(fields)
-  for (const f of fields) {
-    if (f.key === 'product' || f.key === 'quantity' || f.key === 'unitPrice')
-      continue
-    if (raw[f.id] !== undefined) o[f.id] = raw[f.id]
-  }
-  return o
-}
-
-function buildMergedValues(
-  values: Record<string, string>,
-  lines: LineForm[],
-  prodId: string | undefined,
-  qtyId: string | undefined,
-): Record<string, string> {
-  const merged = { ...values }
-  if (prodId && qtyId && lines[0]) {
-    merged[prodId] = lines[0].product.trim()
-    merged[qtyId] = lines[0].quantity.trim()
-  }
-  return merged
 }
 

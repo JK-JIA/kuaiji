@@ -37,3 +37,19 @@ input[type='number'] {
   -moz-appearance: textfield;
   appearance: textfield;
 }
+
+/* 首页底栏长按收音：竖条跳动 */
+@keyframes recording-wave-bar {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.recording-wave-bar {
+  transform-origin: bottom center;
+  animation: recording-wave-bar 0.55s ease-in-out infinite;
+}

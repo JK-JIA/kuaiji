@@ -2,12 +2,16 @@ import { format, parseISO, subDays } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AddRecordModal } from '../components/AddRecordModal'
+import {
+  AddRecordModal,
+  type VoiceFormPrefillPayload,
+} from '../components/AddRecordModal'
 import { CalendarPickerModal } from '../components/CalendarPickerModal'
 import { HomeFilterSheet } from '../components/HomeFilterSheet'
 import { ReconcileModal } from '../components/ReconcileModal'
 import { RecordCard } from '../components/RecordCard'
 import { useAuth } from '../context/AuthContext'
+import { useHoldVolcTranscript } from '../hooks/useHoldVolcTranscript'
 import {
   getAmountFieldId,
   getPlateValue,
@@ -21,6 +25,18 @@ import {
   recordMatchesHomeFilters,
   type HomeFilterState,
 } from '../utils/homeFilters'
+import { collectAsrHotwordsFromLedger } from '../utils/asrHotwordsFromLedger'
+import { isDoubaoConfigured, parseWithDoubao } from '../utils/doubaoParser'
+import { applyVoiceHistoryFuzzyMatch } from '../utils/voiceHistoryFuzzy'
+import {
+  applyVoiceParsedToDraft,
+  buildLedgerRecordForSave,
+  createEmptyLineForm,
+  emptyLedgerFieldValues,
+  getLedgerFormLayout,
+  validateRecordForm,
+} from '../utils/ledgerRecordDraft'
+import { messageIfPremiumFeatureBlocked } from '../utils/premiumGate'
 import { findFieldIdByName, sumAmount } from '../utils/stats'
 import type { FieldDef, LedgerRecord } from '../types'
 import { useLedger } from '../context/LedgerContext'
@@ -47,10 +63,202 @@ export function HomePage() {
     defaultHomeFilter,
   )
   const [showTopBtn, setShowTopBtn] = useState(false)
+  const [voiceParsing, setVoiceParsing] = useState(false)
+  const [voiceBanner, setVoiceBanner] = useState<string | null>(null)
+  const [voiceFormPrefill, setVoiceFormPrefill] =
+    useState<VoiceFormPrefillPayload | null>(null)
+  const [voiceFormPrefillKey, setVoiceFormPrefillKey] = useState(0)
 
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
 
   const todayStr = format(new Date(), 'yyyy-MM-dd')
+
+  const ledgerLayout = useMemo(() => getLedgerFormLayout(fields), [fields])
+
+  const voiceAsrHotwords = useMemo(
+    () => collectAsrHotwordsFromLedger(records, fields),
+    [records, fields],
+  )
+
+  const openAddRecordModal = useCallback(() => {
+    setVoiceFormPrefill(null)
+    setEditingRecord(null)
+    setModalOpen(true)
+  }, [])
+
+  const emptySpeechToastRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const runVoicePipeline = useCallback(
+    async (rawText: string) => {
+      const text = rawText.trim()
+      if (!text) {
+        if (emptySpeechToastRef.current) {
+          clearTimeout(emptySpeechToastRef.current)
+          emptySpeechToastRef.current = null
+        }
+        setVoiceBanner('没检测到说话')
+        emptySpeechToastRef.current = window.setTimeout(() => {
+          emptySpeechToastRef.current = null
+          setVoiceBanner(null)
+        }, 2200)
+        return
+      }
+
+      const block = messageIfPremiumFeatureBlocked({
+        apiBase,
+        token,
+        membershipActive,
+      })
+      if (block) {
+        setVoiceBanner(`${block}\n\n请重新语音录入`)
+        return
+      }
+
+      if (!isDoubaoConfigured()) {
+        setVoiceBanner(
+          '未配置豆包智能解析，无法在首页自动入账。请在 .env 设置 VITE_DOUBAO_API_KEY 与 VITE_DOUBAO_MODEL，或使用「记一笔」手动录入。\n\n请重新语音录入',
+        )
+        return
+      }
+
+      setVoiceParsing(true)
+      setVoiceBanner('正在识别中…')
+      try {
+        const r = await parseWithDoubao(text, ledgerLayout.sortedFields)
+        if (!r.success || !r.data) {
+          setVoiceBanner(`${r.error ?? '解析失败'}\n\n请重新语音录入`)
+          return
+        }
+
+        const emptyVals = emptyLedgerFieldValues(ledgerLayout.sortedFields)
+        const emptyLines = [createEmptyLineForm()]
+        let { values, lines } = applyVoiceParsedToDraft(
+          ledgerLayout,
+          emptyVals,
+          emptyLines,
+          r.data,
+          r.productLines,
+        )
+
+        const fuzzy = applyVoiceHistoryFuzzyMatch({
+          layout: ledgerLayout,
+          values,
+          lines,
+          records,
+          fields,
+        })
+        values = fuzzy.values
+        lines = fuzzy.lines
+
+        const err = validateRecordForm(ledgerLayout, {
+          values,
+          lines,
+          dealInput: '',
+        })
+
+        const prefillMessages = [err, fuzzy.confirmHint].filter(
+          (x): x is string => Boolean(x && String(x).trim()),
+        )
+
+        const openVoicePrefillModal = () => {
+          setVoiceFormPrefill({
+            values,
+            lines: lines.map((l) => ({
+              product: l.product,
+              quantity: l.quantity,
+              unitPrice: l.unitPrice,
+              lineAmount: l.lineAmount,
+            })),
+            recordDate: todayStr,
+            dealInput: '',
+            formError:
+              prefillMessages.length > 0
+                ? prefillMessages.join('\n\n')
+                : fuzzy.needConfirm
+                  ? '请核对购买方与商品是否正确后再保存'
+                  : null,
+          })
+          setVoiceFormPrefillKey((k) => k + 1)
+          setEditingRecord(null)
+          setModalOpen(true)
+          setVoiceBanner(null)
+        }
+
+        if (err === '缺少商品或数量字段配置') {
+          setVoiceBanner(`${err}\n\n请重新语音录入`)
+          return
+        }
+
+        if (!err && !fuzzy.needConfirm) {
+          const rec = buildLedgerRecordForSave(ledgerLayout, {
+            values,
+            lines,
+            dealInput: '',
+            recordDate: todayStr,
+            recordToEdit: null,
+          })
+          await saveRecord(rec)
+          setVoiceBanner(null)
+          return
+        }
+
+        openVoicePrefillModal()
+      } catch (e) {
+        setVoiceBanner(
+          `${e instanceof Error ? e.message : '保存失败'}\n\n请重新语音录入`,
+        )
+      } finally {
+        setVoiceParsing(false)
+      }
+    },
+    [
+      apiBase,
+      token,
+      membershipActive,
+      ledgerLayout,
+      todayStr,
+      saveRecord,
+      records,
+      fields,
+    ],
+  )
+
+  const voicePipelineRef = useRef(runVoicePipeline)
+  voicePipelineRef.current = runVoicePipeline
+
+  const ignoreNextRecordBarClickRef = useRef(false)
+
+  const {
+    micBtnRef: homeRecordBarRef,
+    recording: voiceRecording,
+    hint: voiceMicHint,
+    canUseVoice: homeVoiceEnabled,
+    handleMicPointerDown: homeRecordBarPointerDown,
+    handleMicPointerUp: homeRecordBarPointerUp,
+  } = useHoldVolcTranscript({
+    apiBase,
+    token,
+    membershipActive,
+    asrHotwords: voiceAsrHotwords,
+    onSessionFinalized: (t) => {
+      void voicePipelineRef.current(t)
+    },
+    onHoldReleased: () => {
+      ignoreNextRecordBarClickRef.current = true
+    },
+    onShortTap: () => {
+      ignoreNextRecordBarClickRef.current = true
+      openAddRecordModal()
+    },
+  })
+
+  const onRecordBarClick = () => {
+    if (ignoreNextRecordBarClickRef.current) {
+      ignoreNextRecordBarClickRef.current = false
+      return
+    }
+    openAddRecordModal()
+  }
 
   const filteredRecords = useMemo(
     () =>
@@ -109,6 +317,24 @@ export function HomePage() {
     onScroll()
     window.addEventListener('scroll', onScroll, { passive: true })
     return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
+  useEffect(() => {
+    if (voiceRecording) {
+      if (emptySpeechToastRef.current) {
+        clearTimeout(emptySpeechToastRef.current)
+        emptySpeechToastRef.current = null
+      }
+      setVoiceBanner(null)
+    }
+  }, [voiceRecording])
+
+  useEffect(() => {
+    return () => {
+      if (emptySpeechToastRef.current) {
+        clearTimeout(emptySpeechToastRef.current)
+      }
+    }
   }, [])
 
   const scrollTop = () => {
@@ -207,13 +433,16 @@ export function HomePage() {
       </section>
 
       {useRemoteLedger && (
-        <div className="mx-4 mb-3 flex items-center gap-2.5 rounded-2xl border border-sky-100 bg-sky-50/90 px-3.5 py-3">
-          <CloudOkGlyph className="h-5 w-5 shrink-0 text-sky-600" />
+        <div className="mx-4 mb-3 flex items-start gap-2.5 rounded-2xl border border-sky-100 bg-sky-50/90 px-3.5 py-3">
+          <CloudOkGlyph className="mt-0.5 h-5 w-5 shrink-0 text-sky-600" />
           <p className="text-left text-xs leading-relaxed text-sky-950">
             <span className="font-semibold text-sky-800">云端已同步</span>
             <span className="font-normal text-sky-900/90">
               {' '}
               账单数据已上云，换机登录同一账号可恢复。点击账单可编辑，左滑删除需确认。
+              {homeVoiceEnabled
+                ? ' 长按底部「记一笔」可语音说话识别，松手后保存。'
+                : ''}
             </span>
           </p>
         </div>
@@ -264,7 +493,7 @@ export function HomePage() {
 
         {visibleTimelineDates.length === 0 && records.length === 0 && (
           <p className="rounded-2xl border border-dashed border-stone-200 bg-white py-12 text-center text-stone-400">
-            暂无记录，点击下方记一笔。
+            暂无记录，轻点下方记一笔手动录入，长按同按钮语音识别。
           </p>
         )}
 
@@ -301,6 +530,7 @@ export function HomePage() {
                               record={r}
                               fields={fields}
                               onEdit={(rec) => {
+                                setVoiceFormPrefill(null)
                                 setEditingRecord(rec)
                                 setModalOpen(true)
                               }}
@@ -325,24 +555,90 @@ export function HomePage() {
         <button
           type="button"
           onClick={scrollTop}
-          className="fixed bottom-36 right-4 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-700 shadow-md backdrop-blur hover:bg-stone-50"
+          className="fixed bottom-52 right-4 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-700 shadow-md backdrop-blur hover:bg-stone-50"
           aria-label="回到顶部"
         >
           <ChevronUpGlyph className="h-5 w-5" />
         </button>
       )}
 
-      <button
-        type="button"
-        onClick={() => {
-          setEditingRecord(null)
-          setModalOpen(true)
-        }}
-        className="fixed bottom-20 left-1/2 z-30 flex -translate-x-1/2 items-center justify-center rounded-full bg-stone-900 px-8 py-3 text-base font-medium text-white shadow-md"
-        aria-label="记一笔"
-      >
-        记一笔
-      </button>
+      {(voiceParsing || voiceBanner || voiceMicHint) && (
+        <div
+          className="fixed bottom-[9.5rem] left-1/2 z-30 w-max min-w-0 max-w-[min(32rem,calc(100vw-2rem-env(safe-area-inset-left)-env(safe-area-inset-right)))] -translate-x-1/2 rounded-xl border border-stone-200/90 bg-white/95 px-3 py-2 text-sm leading-snug text-neutral-800 shadow-md backdrop-blur-md whitespace-pre-line break-words"
+          role="status"
+        >
+          {voiceMicHint
+            ? voiceMicHint
+            : voiceBanner ??
+              (voiceParsing ? '正在识别中…' : '')}
+        </div>
+      )}
+
+      <div className="pointer-events-none fixed bottom-20 left-1/2 z-30 w-full max-w-lg -translate-x-1/2 px-4">
+        <div className="pointer-events-auto mx-auto w-[60%] min-w-0 max-w-full">
+          <button
+            ref={homeRecordBarRef}
+            type="button"
+            style={{ touchAction: 'none' }}
+            onPointerDown={homeRecordBarPointerDown}
+            onPointerUp={homeRecordBarPointerUp}
+            onPointerCancel={homeRecordBarPointerUp}
+            onClick={onRecordBarClick}
+            className={
+              voiceRecording
+                ? 'flex min-h-11 w-full select-none items-center justify-center gap-3 rounded-full bg-neutral-500 py-2.5 pl-4 pr-4 text-sm font-semibold tracking-wide text-white shadow-lg'
+                : homeVoiceEnabled
+                  ? 'flex min-h-11 w-full select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-white shadow-lg active:bg-neutral-500'
+                  : 'flex min-h-11 w-full select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-neutral-500 shadow-lg'
+            }
+            title={
+              voiceRecording
+                ? undefined
+                : '轻点：手动记账；长按：语音识别并保存'
+            }
+            aria-label={
+              voiceRecording
+                ? '录音中，松手结束'
+                : '记一笔：轻点手动记账，长按语音识别'
+            }
+          >
+            {voiceRecording ? (
+              <>
+                <span className="shrink-0">收音中</span>
+                <span
+                  className="flex h-5 items-end gap-0.5"
+                  aria-hidden
+                >
+                  {[0, 1, 2, 3].map((i) => (
+                    <span
+                      key={i}
+                      className="recording-wave-bar inline-block w-1 rounded-sm bg-white"
+                      style={{
+                        height: '1rem',
+                        animationDelay: `${i * 0.12}s`,
+                      }}
+                    />
+                  ))}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="min-w-0 flex-1 text-center">记一笔</span>
+                <span
+                  className={
+                    homeVoiceEnabled
+                      ? 'shrink-0 text-white/75'
+                      : 'shrink-0 text-neutral-500'
+                  }
+                  aria-hidden
+                >
+                  <HomeMiniMicGlyph className="h-5 w-5" />
+                </span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
 
       <HomeFilterSheet
         open={filterOpen}
@@ -356,11 +652,14 @@ export function HomePage() {
         onClose={() => {
           setModalOpen(false)
           setEditingRecord(null)
+          setVoiceFormPrefill(null)
         }}
         fields={fields}
         onSave={saveRecord}
         recordToEdit={editingRecord}
         recordDates={recordDateSet}
+        voiceFormPrefill={voiceFormPrefill}
+        voiceFormPrefillKey={voiceFormPrefillKey}
       />
 
       <ReconcileModal
@@ -389,6 +688,26 @@ export function HomePage() {
   )
 }
 
+function HomeMiniMicGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <line x1="12" y1="19" x2="12" y2="23" />
+      <line x1="8" y1="23" x2="16" y2="23" />
+    </svg>
+  )
+}
+
 function groupRecordsByPlate(
   list: LedgerRecord[],
   fields: FieldDef[],
@@ -411,6 +730,11 @@ function groupRecordsByPlate(
     const bEmpty = isEmptyBuyerBucketKey(b, fields)
     if (aEmpty && !bEmpty) return 1
     if (bEmpty && !aEmpty) return -1
+    const aRecs = m.get(a)!
+    const bRecs = m.get(b)!
+    const aLatest = Math.max(...aRecs.map((r) => r.createdAt))
+    const bLatest = Math.max(...bRecs.map((r) => r.createdAt))
+    if (bLatest !== aLatest) return bLatest - aLatest
     return a.localeCompare(b, 'zh-CN')
   })
   return order.map((p) => [p, m.get(p)!])

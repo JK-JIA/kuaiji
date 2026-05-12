@@ -1,16 +1,35 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import { useHoldVolcTranscript } from '../hooks/useHoldVolcTranscript'
 import { useAuth } from '../context/AuthContext'
 import type { DoubaoParseResult, DoubaoProductLine } from '../utils/doubaoParser'
 import { isDoubaoConfigured, parseWithDoubao } from '../utils/doubaoParser'
+import {
+  applyVoiceParsedToDraft,
+  createEmptyLineForm,
+  emptyLedgerFieldValues,
+  getLedgerFormLayout,
+  type LedgerLineForm,
+} from '../utils/ledgerRecordDraft'
 import { messageIfPremiumFeatureBlocked } from '../utils/premiumGate'
-import { startVolcAsrSession } from '../utils/volcAsrClient'
-import type { FieldDef } from '../types'
+import { applyVoiceHistoryFuzzyMatch } from '../utils/voiceHistoryFuzzy'
+import type { FieldDef, LedgerRecord } from '../types'
 
-/** 按住超过此时长后开始录音，避免误触 */
-const LONG_PRESS_MS = 320
+function lineFormsToDoubaoLines(lines: LedgerLineForm[]): DoubaoProductLine[] {
+  return lines
+    .filter((l) => l.product.trim() || l.quantity.trim())
+    .map((l) => ({
+      product: l.product.trim(),
+      quantity: l.quantity.trim(),
+      unitPrice: l.unitPrice.trim() || undefined,
+      lineAmount: l.lineAmount.trim() || undefined,
+    }))
+}
 
 type Props = {
   fields: FieldDef[]
+  records: LedgerRecord[]
+  /** 与首页长按一致：近期账本词作 ASR 热词 */
+  asrHotwords?: string[]
   onApplyParsed: (
     data: Record<string, string>,
     productLines?: DoubaoProductLine[],
@@ -20,6 +39,8 @@ type Props = {
 
 export function VoiceInputSection({
   fields,
+  records,
+  asrHotwords,
   onApplyParsed,
   onFillFirstLine,
 }: Props) {
@@ -35,175 +56,23 @@ export function VoiceInputSection({
   )
   const canUseVoice = premiumBlocked === null
 
-  const [recording, setRecording] = useState(false)
-  const [transcript, setTranscript] = useState('')
   const [busy, setBusy] = useState(false)
-  const [hint, setHint] = useState<string | null>(null)
-  const sessionRef = useRef<Awaited<
-    ReturnType<typeof startVolcAsrSession>
-  > | null>(null)
 
-  const pressDownRef = useRef(false)
-  const holdArmedRef = useRef(false)
-  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pointerIdRef = useRef<number | null>(null)
-  const pointerTypeRef = useRef<string>('touch')
-  /** 递增以作废尚未 resolve 的 startRecording（松手或打断长按） */
-  const holdEpochRef = useRef(0)
-  const globalPointerEndHandlerRef = useRef<((e: PointerEvent) => void) | null>(
-    null,
-  )
-  const micBtnRef = useRef<HTMLButtonElement>(null)
-
-  const clearLongPressTimer = useCallback(() => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current)
-      longPressTimerRef.current = null
-    }
-  }, [])
-
-  const detachGlobalPointerEnd = useCallback(() => {
-    const fn = globalPointerEndHandlerRef.current
-    if (!fn) return
-    window.removeEventListener('pointerup', fn, true)
-    window.removeEventListener('pointercancel', fn, true)
-    globalPointerEndHandlerRef.current = null
-  }, [])
-
-  const stopRecording = useCallback(() => {
-    sessionRef.current?.stop()
-    sessionRef.current = null
-    setRecording(false)
-  }, [])
-
-  const endHoldGesture = useCallback(() => {
-    detachGlobalPointerEnd()
-    clearLongPressTimer()
-    const wasArmed = holdArmedRef.current
-    holdArmedRef.current = false
-    pressDownRef.current = false
-    if (wasArmed) {
-      holdEpochRef.current += 1
-    }
-    const el = micBtnRef.current
-    const pid = pointerIdRef.current
-    if (el && pid != null) {
-      try {
-        if (el.hasPointerCapture(pid)) el.releasePointerCapture(pid)
-      } catch {
-        /* ignore */
-      }
-    }
-    pointerIdRef.current = null
-    if (wasArmed) stopRecording()
-  }, [clearLongPressTimer, detachGlobalPointerEnd, stopRecording])
-
-  const endHoldGestureRef = useRef(endHoldGesture)
-  endHoldGestureRef.current = endHoldGesture
-
-  const startRecording = useCallback(
-    async (epochAtStart: number) => {
-      if (
-        messageIfPremiumFeatureBlocked({
-          apiBase,
-          token,
-          membershipActive,
-        })
-      ) {
-        return
-      }
-      if (!apiBase?.trim() || !token) return
-      setHint(null)
-      setRecording(true)
-      try {
-        const session = await startVolcAsrSession(apiBase, token, {
-          onText: (text) => setTranscript(text),
-          onError: (msg) => {
-            stopRecording()
-            setHint(msg)
-          },
-        })
-        if (epochAtStart !== holdEpochRef.current) {
-          session.stop()
-          setRecording(false)
-          return
-        }
-        setTranscript('')
-        sessionRef.current = session
-      } catch (e) {
-        if (epochAtStart !== holdEpochRef.current) {
-          setRecording(false)
-          return
-        }
-        setRecording(false)
-        setHint(e instanceof Error ? e.message : '无法开始录音')
-      }
-    },
-    [apiBase, token, membershipActive, stopRecording],
-  )
-
-  useEffect(() => {
-    return () => {
-      detachGlobalPointerEnd()
-      clearLongPressTimer()
-      sessionRef.current?.stop()
-    }
-  }, [clearLongPressTimer, detachGlobalPointerEnd])
-
-  const handleMicPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return
-    if (recording) return
-
-    if (premiumBlocked) {
-      setHint(premiumBlocked)
-      return
-    }
-
-    pointerIdRef.current = e.pointerId
-    pointerTypeRef.current = e.pointerType
-    pressDownRef.current = true
-    detachGlobalPointerEnd()
-    const onWinEnd = (ev: PointerEvent) => {
-      if (
-        pointerIdRef.current !== null &&
-        ev.pointerId !== pointerIdRef.current
-      ) {
-        return
-      }
-      endHoldGestureRef.current()
-    }
-    globalPointerEndHandlerRef.current = onWinEnd
-    window.addEventListener('pointerup', onWinEnd, true)
-    window.addEventListener('pointercancel', onWinEnd, true)
-    clearLongPressTimer()
-    longPressTimerRef.current = setTimeout(() => {
-      longPressTimerRef.current = null
-      if (!pressDownRef.current) return
-      holdArmedRef.current = true
-      const btn = micBtnRef.current
-      const pid = pointerIdRef.current
-      if (
-        pointerTypeRef.current === 'mouse' &&
-        btn &&
-        pid != null
-      ) {
-        try {
-          btn.setPointerCapture(pid)
-        } catch {
-          /* ignore */
-        }
-      }
-      const epochAtStart = holdEpochRef.current
-      void startRecording(epochAtStart)
-    }, LONG_PRESS_MS)
-  }
-
-  const handleMicPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
-    if (pointerIdRef.current !== null && e.pointerId !== pointerIdRef.current) {
-      return
-    }
-    endHoldGesture()
-  }
+  const {
+    micBtnRef,
+    transcript,
+    setTranscript,
+    recording,
+    hint,
+    setHint,
+    handleMicPointerDown,
+    handleMicPointerUp,
+  } = useHoldVolcTranscript({
+    apiBase,
+    token,
+    membershipActive,
+    asrHotwords,
+  })
 
   const handleParse = useCallback(async () => {
     const text = transcript.trim()
@@ -233,18 +102,44 @@ export function VoiceInputSection({
         setHint(r.error ?? '解析失败')
         return
       }
-      onApplyParsed(r.data, r.productLines)
+      const layout = getLedgerFormLayout(fields)
+      const emptyVals = emptyLedgerFieldValues(layout.sortedFields)
+      const emptyLines = [createEmptyLineForm()]
+      let { values, lines } = applyVoiceParsedToDraft(
+        layout,
+        emptyVals,
+        emptyLines,
+        r.data,
+        r.productLines,
+      )
+      const fuzzy = applyVoiceHistoryFuzzyMatch({
+        layout,
+        values,
+        lines,
+        records,
+        fields,
+      })
+      const overlay: Record<string, string> = {}
+      for (const k of Object.keys(r.data)) {
+        if (fuzzy.values[k] !== undefined) overlay[k] = fuzzy.values[k]
+      }
+      onApplyParsed(overlay, lineFormsToDoubaoLines(fuzzy.lines))
+      if (fuzzy.needConfirm) {
+        setHint(fuzzy.confirmHint ?? '请核对购买方与商品后再保存')
+      }
     } finally {
       setBusy(false)
     }
   }, [
     transcript,
     fields,
+    records,
     onApplyParsed,
     onFillFirstLine,
     apiBase,
     token,
     membershipActive,
+    setHint,
   ])
 
   const micIdle = !recording
