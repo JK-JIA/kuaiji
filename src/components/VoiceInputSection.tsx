@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import type { DoubaoParseResult, DoubaoProductLine } from '../utils/doubaoParser'
 import { isDoubaoConfigured, parseWithDoubao } from '../utils/doubaoParser'
+import { messageIfPremiumFeatureBlocked } from '../utils/premiumGate'
 import { startVolcAsrSession } from '../utils/volcAsrClient'
 import type { FieldDef } from '../types'
 
@@ -22,8 +23,17 @@ export function VoiceInputSection({
   onApplyParsed,
   onFillFirstLine,
 }: Props) {
-  const { apiBase, token } = useAuth()
-  const canUseVoice = Boolean(apiBase && token)
+  const { apiBase, token, membershipActive } = useAuth()
+  const premiumBlocked = useMemo(
+    () =>
+      messageIfPremiumFeatureBlocked({
+        apiBase,
+        token,
+        membershipActive,
+      }),
+    [apiBase, token, membershipActive],
+  )
+  const canUseVoice = premiumBlocked === null
 
   const [recording, setRecording] = useState(false)
   const [transcript, setTranscript] = useState('')
@@ -93,7 +103,16 @@ export function VoiceInputSection({
 
   const startRecording = useCallback(
     async (epochAtStart: number) => {
-      if (!apiBase || !token) return
+      if (
+        messageIfPremiumFeatureBlocked({
+          apiBase,
+          token,
+          membershipActive,
+        })
+      ) {
+        return
+      }
+      if (!apiBase?.trim() || !token) return
       setHint(null)
       setRecording(true)
       try {
@@ -120,7 +139,7 @@ export function VoiceInputSection({
         setHint(e instanceof Error ? e.message : '无法开始录音')
       }
     },
-    [apiBase, token, stopRecording],
+    [apiBase, token, membershipActive, stopRecording],
   )
 
   useEffect(() => {
@@ -135,12 +154,8 @@ export function VoiceInputSection({
     if (e.pointerType === 'mouse' && e.button !== 0) return
     if (recording) return
 
-    if (!canUseVoice) {
-      setHint(
-        !apiBase
-          ? '未配置 VITE_API_URL，无法使用语音'
-          : '请先登录后再使用语音',
-      )
+    if (premiumBlocked) {
+      setHint(premiumBlocked)
       return
     }
 
@@ -193,12 +208,21 @@ export function VoiceInputSection({
   const handleParse = useCallback(async () => {
     const text = transcript.trim()
     if (!text) {
-      setHint('请先完成语音识别')
+      setHint('请先完成语音识别或输入文字')
       return
     }
     if (!isDoubaoConfigured()) {
       onFillFirstLine(text, '')
       setHint(null)
+      return
+    }
+    const block = messageIfPremiumFeatureBlocked({
+      apiBase,
+      token,
+      membershipActive,
+    })
+    if (block) {
+      setHint(block)
       return
     }
     setBusy(true)
@@ -213,7 +237,15 @@ export function VoiceInputSection({
     } finally {
       setBusy(false)
     }
-  }, [transcript, fields, onApplyParsed, onFillFirstLine])
+  }, [
+    transcript,
+    fields,
+    onApplyParsed,
+    onFillFirstLine,
+    apiBase,
+    token,
+    membershipActive,
+  ])
 
   const micIdle = !recording
   const micEnabled = canUseVoice

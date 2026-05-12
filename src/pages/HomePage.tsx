@@ -226,7 +226,7 @@ export function HomePage() {
             <span className="font-semibold text-amber-900">未开通云备份会员</span>
             <span className="text-amber-900/90">
               {' '}
-              已登录但需兑换会员码后才会同步账本至服务器。请打开{' '}
+              已登录但需兑换会员码后才会同步账本至服务器；语音识别与智能识别亦需有效会员。请打开{' '}
             </span>
             <Link
               to="/settings"
@@ -246,7 +246,7 @@ export function HomePage() {
             <span className="font-semibold text-[#1a7f4c]">提示：</span>
             <span className="font-normal text-[#2d6a4f]">
               {apiBase
-                ? '数据仅保存在本机，卸载或清理存储会丢失；请定期在设置导出 CSV 备份。更推荐登录并兑换会员开启云端同步。'
+                ? '数据仅保存在本机，卸载或清理存储会丢失；请定期在设置导出 CSV 备份。登录并开通会员后可使用云端同步、语音识别与智能识别。'
                 : '当前为离线使用，数据仅存本机。点击账单可编辑，向左滑删除前会二次确认。'}
             </span>
           </div>
