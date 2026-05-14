@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { messageIfPremiumFeatureBlocked } from '../utils/premiumGate'
+import { formatAsrUserFacingError } from '../utils/asrUserFacingError'
 import { startVolcAsrSession } from '../utils/volcAsrClient'
 
 /** 按住超过此时长后开始录音，避免误触 */
@@ -181,7 +182,11 @@ export function useHoldVolcTranscript({
           return
         }
         setRecording(false)
-        setHint(e instanceof Error ? e.message : '无法开始录音')
+        setHint(
+          formatAsrUserFacingError(
+            e instanceof Error ? e.message : '无法开始录音',
+          ),
+        )
       }
     },
     [

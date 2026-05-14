@@ -200,10 +200,10 @@ export function StatsCustomSection({
     <section className="mx-4 mb-10">
       <h2 className="text-sm font-semibold text-neutral-900">自定义统计</h2>
       <p className="mb-3 mt-1 text-[11px] leading-relaxed text-[#666666]">
-        选择分组维度与指标；饼图与矩形树图仅展示前 {CUSTOM_STATS_CHART_TOP_N} 项，其余并入「其他」。
+        选维度与指标。图只显示前 {CUSTOM_STATS_CHART_TOP_N} 项，其余合并为「其他」。
         {lineMode
-          ? ' 当前维度为「商品」且存在数量列时，按商品行统计；数字列优先读行内值，仅主单有值时只计入首行，避免重复。'
-          : ' 非商品维度按每笔订单一条统计。'}
+          ? ' 按商品行统计；数字优先读行内。'
+          : ' 非商品维度按单计。'}
       </p>
 
       <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-stone-200/90 bg-white p-3 shadow-sm sm:flex-row sm:flex-wrap sm:items-end">
@@ -262,20 +262,20 @@ export function StatsCustomSection({
 
       {(noAmount || noNumberForSum) && (
         <div className="mb-4 rounded-xl border border-amber-200/80 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          {noAmount && '未识别到金额列，请在字段中加入「金额」或切换指标。'}
-          {noNumberForSum && '没有数字类型字段，无法按数字列求和。'}
+          {noAmount && '无金额列，请添加或换指标。'}
+          {noNumberForSum && '无数字列，无法求和。'}
         </div>
       )}
 
       {records.length === 0 && (
         <div className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-stone-300 bg-white py-10 text-sm text-[#666666]">
-          本周期内暂无记录
+          暂无数据
         </div>
       )}
 
       {records.length > 0 && rows.length === 0 && (
         <div className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-stone-300 bg-white py-10 text-sm text-[#666666]">
-          暂无汇总结果
+          无汇总
         </div>
       )}
 
@@ -283,10 +283,10 @@ export function StatsCustomSection({
         <>
           <div className="mb-4 overflow-hidden rounded-2xl border border-stone-200/90 bg-white px-2 shadow-sm sm:px-3">
             <div className="border-b border-stone-100 bg-white px-3 py-2 text-xs text-[#666666]">
-              按「{dimField?.name ?? '?'}」· {measureLabel}
+              {dimField?.name ?? '?'} · {measureLabel}
               <span className="tabular-nums text-neutral-800">
                 {' '}
-                · 合计 {formatValue(total)}
+                · {formatValue(total)}
               </span>
             </div>
             <div className="max-h-[min(55vh,420px)] overflow-auto">
@@ -339,7 +339,7 @@ export function StatsCustomSection({
           <div className="mb-4 grid gap-4 lg:grid-cols-2">
             <div className="rounded-2xl border border-stone-200/90 bg-white p-3 shadow-sm">
               <p className="mb-2 text-center text-xs font-medium text-[#666666]">
-                占比 · 饼图（前 {CUSTOM_STATS_CHART_TOP_N} 项）
+                饼图（前 {CUSTOM_STATS_CHART_TOP_N} 项）
               </p>
               <div className="h-[260px] w-full min-h-[220px]">
                 <ResponsiveContainer width="100%" height="100%">
@@ -380,7 +380,7 @@ export function StatsCustomSection({
 
             <div className="rounded-2xl border border-stone-200/90 bg-white p-3 shadow-sm">
               <p className="mb-2 text-center text-xs font-medium text-[#666666]">
-                占比 · 矩形树图（Treemap）
+                树图
               </p>
               <div className="h-[260px] w-full min-h-[220px]">
                 <ResponsiveContainer width="100%" height="100%">

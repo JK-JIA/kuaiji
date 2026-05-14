@@ -148,6 +148,12 @@ export function buildAsrInitPayload(clientHotwords: string[]): Record<string, un
     result_type: 'single',
   }
 
+  const vadRaw = process.env.VOLC_ASR_VAD_SEGMENT_DURATION_MS?.trim() ?? '5000'
+  const vadMs = parseInt(vadRaw, 10)
+  if (!Number.isNaN(vadMs) && vadMs >= 1000 && vadMs <= 60000) {
+    request.vad_segment_duration = vadMs
+  }
+
   const corpus: Record<string, string> = {}
   if (boostingId) corpus.boosting_table_id = boostingId
   if (merged.length) {

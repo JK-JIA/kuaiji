@@ -50,3 +50,12 @@ export type ReconcilePayload = {
   cumulativeReceived: number
   markSettled?: boolean
 }
+
+/** 商品维护目录：名称 + 计量单位（展示/语音优先；数量仍存纯数字） */
+export interface ProductCatalogEntry {
+  id: string
+  name: string
+  /** 如 斤、包、箱 */
+  unit: string
+  source: 'manual' | 'auto'
+}

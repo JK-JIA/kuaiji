@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto'
 import type { IncomingMessage, Server } from 'http'
 import WebSocket, { type RawData, WebSocketServer } from 'ws'
+import { formatAsrUserFacingError } from './asrUserFacingError.js'
 import {
   buildAsrInitPayload,
   buildAudioOnlyRequest,
@@ -213,7 +214,7 @@ function runAsrSession(clientWs: WebSocket, verifyToken: VerifyToken): void {
     const reportVolcFailure = (message: string) => {
       if (volcFailReported) return
       volcFailReported = true
-      safeSendClient({ type: 'error', message })
+      safeSendClient({ type: 'error', message: formatAsrUserFacingError(message) })
       try {
         volcWs?.terminate()
       } catch {
@@ -274,7 +275,9 @@ function runAsrSession(clientWs: WebSocket, verifyToken: VerifyToken): void {
       } catch (e) {
         safeSendClient({
           type: 'error',
-          message: e instanceof Error ? e.message : '初始化识别失败',
+          message: formatAsrUserFacingError(
+            e instanceof Error ? e.message : '初始化识别失败',
+          ),
         })
         clientWs.close()
       }
@@ -291,7 +294,7 @@ function runAsrSession(clientWs: WebSocket, verifyToken: VerifyToken): void {
       if (parsed.kind === 'error') {
         safeSendClient({
           type: 'error',
-          message: parsed.message,
+          message: formatAsrUserFacingError(parsed.message),
           code: parsed.code,
         })
         return

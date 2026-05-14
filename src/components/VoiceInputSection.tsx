@@ -12,7 +12,7 @@ import {
 } from '../utils/ledgerRecordDraft'
 import { messageIfPremiumFeatureBlocked } from '../utils/premiumGate'
 import { applyVoiceHistoryFuzzyMatch } from '../utils/voiceHistoryFuzzy'
-import type { FieldDef, LedgerRecord } from '../types'
+import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
 
 function lineFormsToDoubaoLines(lines: LedgerLineForm[]): DoubaoProductLine[] {
   return lines
@@ -28,6 +28,7 @@ function lineFormsToDoubaoLines(lines: LedgerLineForm[]): DoubaoProductLine[] {
 type Props = {
   fields: FieldDef[]
   records: LedgerRecord[]
+  productCatalog?: ProductCatalogEntry[]
   /** 与首页长按一致：近期账本词作 ASR 热词 */
   asrHotwords?: string[]
   onApplyParsed: (
@@ -40,6 +41,7 @@ type Props = {
 export function VoiceInputSection({
   fields,
   records,
+  productCatalog = [],
   asrHotwords,
   onApplyParsed,
   onFillFirstLine,
@@ -118,6 +120,7 @@ export function VoiceInputSection({
         lines,
         records,
         fields,
+        productCatalog,
       })
       const overlay: Record<string, string> = {}
       for (const k of Object.keys(r.data)) {
@@ -134,6 +137,7 @@ export function VoiceInputSection({
     transcript,
     fields,
     records,
+    productCatalog,
     onApplyParsed,
     onFillFirstLine,
     apiBase,

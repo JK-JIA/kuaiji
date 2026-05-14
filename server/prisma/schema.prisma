@@ -19,12 +19,14 @@ model User {
 }
 
 model Ledger {
-  id          String   @id @default(cuid())
-  userId      String   @unique
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  fieldsJson  Json     @default("[]")
-  recordsJson Json     @default("[]")
-  updatedAt   DateTime @updatedAt
+  id                           String   @id @default(cuid())
+  userId                       String   @unique
+  user                         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fieldsJson                   Json     @default("[]")
+  recordsJson                  Json     @default("[]")
+  productCatalogJson           Json     @default("[]")
+  productCatalogSuppressedJson Json     @default("[]")
+  updatedAt                    DateTime @updatedAt
 }
 
 model RedeemCode {

@@ -1,4 +1,5 @@
-import type { FieldDef, LedgerRecord } from '../types'
+import { pinyin } from 'pinyin-pro'
+import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
 import type { LedgerFormLayout, LedgerLineForm } from './ledgerRecordDraft'
 import { getPlateValue } from './recordHelpers'
 
@@ -13,8 +14,16 @@ const AMBIGUOUS_GAP = 0.038
 const MIN_DISTINCT_BUYERS = 3
 const MIN_DISTINCT_PRODUCTS = 4
 const MAX_CANDIDATES = 400
+/** 拼音纠错词库：全量去重后保留的上限（偏新优先，与计划软上限一致） */
+const LEXICON_SOFT_CAP = 5000
+/** 拼音层：冠亚军分差过小视为歧义，不自动替换 */
+const PY_AMBIGUOUS_GAP = 0.04
+/** 拼音层：达到此相似度才允许替换为账本用语 */
+const PY_MIN_REPLACE_SCORE = 0.94
+/** 与记一笔「最近常用」一致：按出现频次取前 N 个购买方 */
+const FREQUENT_BUYER_TOP_N = 3
 
-function normalizeToken(s: string): string {
+export function normalizeToken(s: string): string {
   return s.normalize('NFKC').trim().replace(/\s+/g, '')
 }
 
@@ -71,6 +80,65 @@ function bestMatch(
   return { best: top.c, score: top.score, ambiguous }
 }
 
+const CATALOG_MATCH_BOOST = 0.006
+
+function catalogNormSet(catalog: ProductCatalogEntry[]): Set<string> {
+  const s = new Set<string>()
+  for (const e of catalog) {
+    const k = normalizeToken(e.name)
+    if (k) s.add(k)
+  }
+  return s
+}
+
+function mergeProductNamesCatalogFirst(
+  catalog: ProductCatalogEntry[],
+  fromRecords: string[],
+): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const e of catalog) {
+    const k = normalizeToken(e.name)
+    if (!k || seen.has(k)) continue
+    seen.add(k)
+    out.push(e.name)
+  }
+  for (const p of fromRecords) {
+    const k = normalizeToken(p)
+    if (!k || seen.has(k)) continue
+    seen.add(k)
+    out.push(p)
+  }
+  return out
+}
+
+function bestMatchWithCatalog(
+  input: string,
+  candidates: string[],
+  catalogNorms: Set<string>,
+): { best: string | null; score: number; ambiguous: boolean } {
+  const t = normalizeToken(input)
+  if (!t || !candidates.length)
+    return { best: null, score: 0, ambiguous: false }
+  const scored = candidates.map((c) => ({
+    c,
+    score:
+      fuzzyScore(t, c) +
+      (catalogNorms.has(normalizeToken(c)) ? CATALOG_MATCH_BOOST : 0),
+  }))
+  scored.sort(
+    (a, b) => b.score - a.score || a.c.localeCompare(b.c, 'zh-CN'),
+  )
+  const top = scored[0]
+  const second = scored[1]
+  if (!top) return { best: null, score: 0, ambiguous: false }
+  const ambiguous =
+    Boolean(second) &&
+    top.score < 0.985 &&
+    top.score - second.score < AMBIGUOUS_GAP
+  return { best: top.c, score: top.score, ambiguous }
+}
+
 export function collectDistinctBuyers(
   records: LedgerRecord[],
   fields: FieldDef[],
@@ -86,6 +154,37 @@ export function collectDistinctBuyers(
     if (out.length >= MAX_CANDIDATES) break
   }
   return out
+}
+
+/** 账本中出现最多的购买方名称（与 AddRecordModal 最近常用同源逻辑） */
+function topFrequentBuyerNames(
+  records: LedgerRecord[],
+  fields: FieldDef[],
+  limit: number,
+): Set<string> {
+  if (limit <= 0) return new Set()
+  const freq = new Map<string, number>()
+  for (const r of records) {
+    const t = getPlateValue(r, fields).trim()
+    if (!t) continue
+    freq.set(t, (freq.get(t) ?? 0) + 1)
+  }
+  const names = [...freq.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-CN'))
+    .slice(0, limit)
+    .map(([n]) => n)
+  return new Set(names)
+}
+
+/** 解析前原文或纠正后的购买方是否落在「最近常用」内（仅此时强制进表单核对购买方） */
+function plateTouchesFrequentBuyer(
+  frequent: Set<string>,
+  raw: string,
+  plateAfter: string,
+): boolean {
+  const r = raw.trim()
+  const p = plateAfter.trim()
+  return (r !== '' && frequent.has(r)) || (p !== '' && frequent.has(p))
 }
 
 export function collectDistinctProducts(
@@ -117,6 +216,153 @@ export function collectDistinctProducts(
   return out
 }
 
+/** 全量购买方词库（去重，偏新优先，软上限 {@link LEXICON_SOFT_CAP}） */
+export function collectFullLexiconBuyers(
+  records: LedgerRecord[],
+  fields: FieldDef[],
+): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  const sorted = [...records].sort((a, b) => b.createdAt - a.createdAt)
+  for (const r of sorted) {
+    if (out.length >= LEXICON_SOFT_CAP) break
+    const v = getPlateValue(r, fields).trim()
+    if (!v || seen.has(v)) continue
+    seen.add(v)
+    out.push(v)
+  }
+  return out
+}
+
+/** 全量商品名词库（去重，偏新优先，软上限 {@link LEXICON_SOFT_CAP}） */
+export function collectFullLexiconProducts(
+  records: LedgerRecord[],
+  prodId: string | undefined,
+): string[] {
+  if (!prodId) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  const sorted = [...records].sort((a, b) => b.createdAt - a.createdAt)
+  for (const r of sorted) {
+    if (out.length >= LEXICON_SOFT_CAP) break
+    if (r.lineItems?.length) {
+      for (const li of r.lineItems) {
+        if (out.length >= LEXICON_SOFT_CAP) break
+        const p = String(li.values[prodId] ?? '').trim()
+        if (!p || seen.has(p)) continue
+        seen.add(p)
+        out.push(p)
+      }
+    } else {
+      const p = String(r.values[prodId] ?? '').trim()
+      if (p && !seen.has(p)) {
+        seen.add(p)
+        out.push(p)
+      }
+    }
+  }
+  return out
+}
+
+type PinyinSig = { full: string; init: string }
+
+function stripAsciiKey(s: string): string {
+  return s.replace(/[^a-z0-9]/gi, '').toLowerCase()
+}
+
+/** 含至少一个 CJK 才参与拼音纠错（纯数字/字母留给汉字 fuzzy） */
+function pinyinSig(text: string): PinyinSig | null {
+  const t = normalizeToken(text)
+  if (!t || !/[\u4e00-\u9fff]/.test(t)) return null
+  const fullRaw = pinyin(t, {
+    toneType: 'none',
+    type: 'string',
+    separator: '',
+    nonZh: 'removed',
+    v: true,
+  })
+  const full = stripAsciiKey(fullRaw)
+  if (!full) return null
+  const initRaw = pinyin(t, {
+    pattern: 'first',
+    toneType: 'none',
+    type: 'string',
+    separator: '',
+    nonZh: 'removed',
+    v: true,
+  })
+  const init = stripAsciiKey(initRaw)
+  if (!init) return null
+  return { full, init }
+}
+
+function getPinyinSigCached(
+  term: string,
+  cache: Map<string, PinyinSig | null>,
+): PinyinSig | null {
+  const key = normalizeToken(term)
+  if (!key) return null
+  if (cache.has(key)) return cache.get(key)!
+  const sig = pinyinSig(term)
+  cache.set(key, sig)
+  return sig
+}
+
+function bestPinyinLexiconMatch(
+  rawInput: string,
+  lexicon: string[],
+  sigCache: Map<string, PinyinSig | null>,
+): { best: string | null; score: number; ambiguous: boolean } {
+  const raw = normalizeToken(rawInput)
+  if (!raw || !lexicon.length) return { best: null, score: 0, ambiguous: false }
+
+  const normLex = new Set(lexicon.map((x) => normalizeToken(x)))
+  if (normLex.has(raw)) return { best: null, score: 0, ambiguous: false }
+
+  const inputSig = pinyinSig(raw)
+  if (!inputSig) return { best: null, score: 0, ambiguous: false }
+
+  const scored: { term: string; score: number }[] = []
+  for (const term of lexicon) {
+    if (normalizeToken(term) === raw) continue
+    const sig = getPinyinSigCached(term, sigCache)
+    if (!sig) continue
+    let score = 0
+    if (sig.full === inputSig.full) score = 1
+    else if (sig.init === inputSig.init) {
+      const maxL = Math.max(sig.full.length, inputSig.full.length, 1)
+      score = 1 - levenshtein(sig.full, inputSig.full) / maxL
+      if (score < 0.82) continue
+    } else {
+      const maxL = Math.max(sig.full.length, inputSig.full.length, 1)
+      const sc = 1 - levenshtein(sig.full, inputSig.full) / maxL
+      if (sc < 0.88) continue
+      score = sc
+    }
+    scored.push({ term, score })
+  }
+
+  scored.sort(
+    (a, b) => b.score - a.score || a.term.localeCompare(b.term, 'zh-CN'),
+  )
+  const top = scored[0]
+  const second = scored[1]
+  if (!top) return { best: null, score: 0, ambiguous: false }
+
+  const tiedTop = scored.filter((x) => x.score >= top.score - 1e-9)
+  const ambiguous =
+    tiedTop.length > 1 ||
+    (Boolean(second) &&
+      top.score < 0.999 &&
+      top.score - second.score < PY_AMBIGUOUS_GAP)
+
+  return {
+    best: ambiguous ? null : top.term,
+    score: top.score,
+    ambiguous,
+  }
+}
+
 export type VoiceHistoryFuzzyResult = {
   values: Record<string, string>
   lines: LedgerLineForm[]
@@ -125,7 +371,9 @@ export type VoiceHistoryFuzzyResult = {
 }
 
 /**
- * 将解析结果中的购买方、商品名与历史账单做模糊对齐；低置信度时标记 needConfirm（应打开表单核对）。
+ * 将解析结果中的购买方、商品名与历史账单做模糊对齐（汉字相似度 + 全量词库拼音相似度）；
+ * 低置信度时标记 needConfirm（应打开表单核对）。
+ * 购买方：仅当解析原文或纠正结果落在「最近常用 top3 购买方」内时，才因购买方歧义/低置信/自动替换而 needConfirm；非常用购买方直接保存。
  */
 export function applyVoiceHistoryFuzzyMatch(input: {
   layout: LedgerFormLayout
@@ -133,36 +381,68 @@ export function applyVoiceHistoryFuzzyMatch(input: {
   lines: LedgerLineForm[]
   records: LedgerRecord[]
   fields: FieldDef[]
+  productCatalog?: ProductCatalogEntry[]
 }): VoiceHistoryFuzzyResult {
-  const { layout, values, lines, records, fields } = input
+  const { layout, values, lines, records, fields, productCatalog = [] } = input
   const plateId = fields.find((f) => f.key === 'plate')?.id
   const prodId = layout.prodId
 
   const buyers = collectDistinctBuyers(records, fields)
-  const products = collectDistinctProducts(records, prodId)
+  const productsDistinct = collectDistinctProducts(records, prodId)
+  const productsMerged = mergeProductNamesCatalogFirst(
+    productCatalog,
+    productsDistinct,
+  )
+  const buyersLexicon = collectFullLexiconBuyers(records, fields)
+  const productsLexicon = collectFullLexiconProducts(records, prodId)
+  const productsLexiconMerged = mergeProductNamesCatalogFirst(
+    productCatalog,
+    productsLexicon,
+  )
+  const preferredCatalogNorms = catalogNormSet(productCatalog)
+  const catalogByNorm = new Map<string, ProductCatalogEntry>()
+  for (const e of productCatalog) {
+    const k = normalizeToken(e.name)
+    if (k && !catalogByNorm.has(k)) catalogByNorm.set(k, e)
+  }
+  const pinyinSigCache = new Map<string, PinyinSig | null>()
+  const frequentBuyers = topFrequentBuyerNames(
+    records,
+    fields,
+    FREQUENT_BUYER_TOP_N,
+  )
 
   let needConfirm = false
   const hints: string[] = []
 
   const nextValues = { ...values }
   const nextLines = lines.map((l) => ({ ...l }))
+  const skipProductFuzzyPinyin = new Set<number>()
 
   if (plateId) {
     const raw = (nextValues[plateId] ?? '').trim()
     if (raw) {
       const { best, score, ambiguous } = bestMatch(raw, buyers)
       if (ambiguous) {
-        needConfirm = true
-        hints.push('购买方识别结果存在多个相近账本名称，请核对')
+        if (plateTouchesFrequentBuyer(frequentBuyers, raw, raw)) {
+          needConfirm = true
+          hints.push('购买方识别结果存在多个相近账本名称，请核对')
+        }
       }
       if (buyers.length >= MIN_DISTINCT_BUYERS) {
         if (score >= HIGH_REPLACE && best && best !== raw && !ambiguous) {
           nextValues[plateId] = best
-          if (score < REPLACE_CONFIRM_BELOW) {
+          if (
+            score < REPLACE_CONFIRM_BELOW &&
+            plateTouchesFrequentBuyer(frequentBuyers, raw, best)
+          ) {
             needConfirm = true
             hints.push('购买方已按账本用语修正，请确认')
           }
-        } else if (score < LOW_CONFIDENCE) {
+        } else if (
+          score < LOW_CONFIDENCE &&
+          plateTouchesFrequentBuyer(frequentBuyers, raw, raw)
+        ) {
           needConfirm = true
           hints.push('购买方与账本常用名差异较大，请核对')
         }
@@ -173,7 +453,10 @@ export function applyVoiceHistoryFuzzyMatch(input: {
         !ambiguous
       ) {
         nextValues[plateId] = best
-        if (score < REPLACE_CONFIRM_BELOW) {
+        if (
+          score < REPLACE_CONFIRM_BELOW &&
+          plateTouchesFrequentBuyer(frequentBuyers, raw, best)
+        ) {
           needConfirm = true
           hints.push('购买方已按账本用语修正，请确认')
         }
@@ -191,12 +474,28 @@ export function applyVoiceHistoryFuzzyMatch(input: {
     for (let i = 0; i < nextLines.length; i++) {
       const raw = nextLines[i]!.product.trim()
       if (!raw) continue
-      const { best, score, ambiguous } = bestMatch(raw, products)
+      const hit = catalogByNorm.get(normalizeToken(raw))
+      if (hit) {
+        nextLines[i]!.product = hit.name
+        if (i === 0) nextValues[prodId] = hit.name
+        skipProductFuzzyPinyin.add(i)
+      }
+    }
+
+    for (let i = 0; i < nextLines.length; i++) {
+      if (skipProductFuzzyPinyin.has(i)) continue
+      const raw = nextLines[i]!.product.trim()
+      if (!raw) continue
+      const { best, score, ambiguous } = bestMatchWithCatalog(
+        raw,
+        productsMerged,
+        preferredCatalogNorms,
+      )
       if (ambiguous) {
         needConfirm = true
         hints.push(`第 ${i + 1} 行商品识别存在多个相近名称，请核对`)
       }
-      if (products.length >= MIN_DISTINCT_PRODUCTS) {
+      if (productsMerged.length >= MIN_DISTINCT_PRODUCTS) {
         if (score >= HIGH_REPLACE && best && best !== raw && !ambiguous) {
           nextLines[i]!.product = best
           if (i === 0) nextValues[prodId] = best
@@ -219,6 +518,69 @@ export function applyVoiceHistoryFuzzyMatch(input: {
         if (score < REPLACE_CONFIRM_BELOW) {
           needConfirm = true
           hints.push(`第 ${i + 1} 行商品已按账本用语修正，请确认`)
+        }
+      }
+    }
+  }
+
+  /** 拼音层：全量词库 + 读音对齐（在汉字 fuzzy 之后执行） */
+  if (plateId) {
+    const raw = (nextValues[plateId] ?? '').trim()
+    if (raw && buyersLexicon.length > 0) {
+      const { best, score, ambiguous } = bestPinyinLexiconMatch(
+        raw,
+        buyersLexicon,
+        pinyinSigCache,
+      )
+      if (ambiguous) {
+        needConfirm = true
+        hints.push('购买方在历史账单中存在多个读音相同的名称，请核对')
+      } else if (
+        best &&
+        normalizeToken(best) !== normalizeToken(raw) &&
+        score >= PY_MIN_REPLACE_SCORE
+      ) {
+        nextValues[plateId] = best
+        hints.push('购买方已按历史账单读音相近用语修正')
+        if (
+          score < 0.999 &&
+          plateTouchesFrequentBuyer(frequentBuyers, raw, best)
+        ) {
+          needConfirm = true
+          hints.push('请确认购买方是否正确')
+        }
+      }
+    }
+  }
+
+  if (prodId && productsLexiconMerged.length > 0) {
+    for (let i = 0; i < nextLines.length; i++) {
+      if (skipProductFuzzyPinyin.has(i)) continue
+      const raw = nextLines[i]!.product.trim()
+      if (!raw) continue
+      const { best, score, ambiguous } = bestPinyinLexiconMatch(
+        raw,
+        productsLexiconMerged,
+        pinyinSigCache,
+      )
+      if (ambiguous) {
+        needConfirm = true
+        hints.push(
+          `第 ${i + 1} 行商品在历史账单中有多个读音相同的名称，请核对`,
+        )
+        continue
+      }
+      if (
+        best &&
+        normalizeToken(best) !== normalizeToken(raw) &&
+        score >= PY_MIN_REPLACE_SCORE
+      ) {
+        nextLines[i]!.product = best
+        if (i === 0) nextValues[prodId] = best
+        hints.push(`第 ${i + 1} 行商品已按历史账单读音相近用语修正`)
+        if (score < 0.999) {
+          needConfirm = true
+          hints.push(`请确认第 ${i + 1} 行商品名称`)
         }
       }
     }

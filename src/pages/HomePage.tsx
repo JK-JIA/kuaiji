@@ -7,6 +7,7 @@ import {
   type VoiceFormPrefillPayload,
 } from '../components/AddRecordModal'
 import { CalendarPickerModal } from '../components/CalendarPickerModal'
+import { HomeSearchDateRangeBlock } from '../components/HomeSearchDateRangeBlock'
 import { HomeFilterSheet } from '../components/HomeFilterSheet'
 import { ReconcileModal } from '../components/ReconcileModal'
 import { RecordCard } from '../components/RecordCard'
@@ -25,6 +26,7 @@ import {
   recordMatchesHomeFilters,
   type HomeFilterState,
 } from '../utils/homeFilters'
+import { recordMatchesHomeSearch } from '../utils/homeRecordSearch'
 import { collectAsrHotwordsFromLedger } from '../utils/asrHotwordsFromLedger'
 import { isDoubaoConfigured, parseWithDoubao } from '../utils/doubaoParser'
 import { applyVoiceHistoryFuzzyMatch } from '../utils/voiceHistoryFuzzy'
@@ -48,7 +50,7 @@ export function HomePage() {
     token,
     membershipActive,
   } = useAuth()
-  const { ready, fields, records, saveRecord, removeRecord, setRecordPayment } =
+  const { ready, fields, records, saveRecord, removeRecord, setRecordPayment, productCatalog } =
     useLedger()
   const [modalOpen, setModalOpen] = useState(false)
   const [editingRecord, setEditingRecord] = useState<LedgerRecord | null>(null)
@@ -62,12 +64,29 @@ export function HomePage() {
   const [filterState, setFilterState] = useState<HomeFilterState>(
     defaultHomeFilter,
   )
+  const [homeSearchOpen, setHomeSearchOpen] = useState(false)
+  const [homeSearchQuery, setHomeSearchQuery] = useState('')
+  const [homeSearchDateFrom, setHomeSearchDateFrom] = useState('')
+  const [homeSearchDateTo, setHomeSearchDateTo] = useState('')
+  const [homeSearchAdvancedOpen, setHomeSearchAdvancedOpen] = useState(false)
+  const homeSearchInputRef = useRef<HTMLInputElement>(null)
   const [showTopBtn, setShowTopBtn] = useState(false)
   const [voiceParsing, setVoiceParsing] = useState(false)
   const [voiceBanner, setVoiceBanner] = useState<string | null>(null)
   const [voiceFormPrefill, setVoiceFormPrefill] =
     useState<VoiceFormPrefillPayload | null>(null)
   const [voiceFormPrefillKey, setVoiceFormPrefillKey] = useState(0)
+  /** 首页长按语音：列表首行占位（语音识别 → 智能解析） */
+  const [homeVoiceSlot, setHomeVoiceSlot] = useState<{
+    id: string
+    phase: 'asr' | 'parse'
+    rawText: string
+  } | null>(null)
+  /** 语音录入刚保存的账单：绿色 New，下一条语音新增前一直保留 */
+  const [voiceNewHighlightId, setVoiceNewHighlightId] = useState<string | null>(
+    null,
+  )
+  const expectVoicePrefillHighlightRef = useRef(false)
 
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
 
@@ -76,22 +95,39 @@ export function HomePage() {
   const ledgerLayout = useMemo(() => getLedgerFormLayout(fields), [fields])
 
   const voiceAsrHotwords = useMemo(
-    () => collectAsrHotwordsFromLedger(records, fields),
-    [records, fields],
+    () =>
+      collectAsrHotwordsFromLedger(records, fields, {
+        productCatalog,
+      }),
+    [records, fields, productCatalog],
   )
 
   const openAddRecordModal = useCallback(() => {
+    expectVoicePrefillHighlightRef.current = false
     setVoiceFormPrefill(null)
     setEditingRecord(null)
     setModalOpen(true)
   }, [])
 
+  const handleModalSave = useCallback(
+    async (rec: LedgerRecord) => {
+      await saveRecord(rec)
+      if (expectVoicePrefillHighlightRef.current) {
+        setVoiceNewHighlightId(rec.id)
+        expectVoicePrefillHighlightRef.current = false
+      }
+    },
+    [saveRecord],
+  )
+
   const emptySpeechToastRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const runVoicePipeline = useCallback(
     async (rawText: string) => {
+      const clearVoiceSlot = () => setHomeVoiceSlot(null)
       const text = rawText.trim()
       if (!text) {
+        clearVoiceSlot()
         if (emptySpeechToastRef.current) {
           clearTimeout(emptySpeechToastRef.current)
           emptySpeechToastRef.current = null
@@ -110,11 +146,13 @@ export function HomePage() {
         membershipActive,
       })
       if (block) {
+        clearVoiceSlot()
         setVoiceBanner(`${block}\n\n请重新语音录入`)
         return
       }
 
       if (!isDoubaoConfigured()) {
+        clearVoiceSlot()
         setVoiceBanner(
           '未配置豆包智能解析，无法在首页自动入账。请在 .env 设置 VITE_DOUBAO_API_KEY 与 VITE_DOUBAO_MODEL，或使用「记一笔」手动录入。\n\n请重新语音录入',
         )
@@ -123,6 +161,15 @@ export function HomePage() {
 
       setVoiceParsing(true)
       setVoiceBanner('正在识别中…')
+      setHomeVoiceSlot((s) =>
+        s
+          ? { ...s, phase: 'parse', rawText: text }
+          : {
+              id: crypto.randomUUID(),
+              phase: 'parse',
+              rawText: text,
+            },
+      )
       try {
         const r = await parseWithDoubao(text, ledgerLayout.sortedFields)
         if (!r.success || !r.data) {
@@ -146,6 +193,7 @@ export function HomePage() {
           lines,
           records,
           fields,
+          productCatalog,
         })
         values = fuzzy.values
         lines = fuzzy.lines
@@ -161,6 +209,7 @@ export function HomePage() {
         )
 
         const openVoicePrefillModal = () => {
+          expectVoicePrefillHighlightRef.current = true
           setVoiceFormPrefill({
             values,
             lines: lines.map((l) => ({
@@ -198,6 +247,7 @@ export function HomePage() {
             recordToEdit: null,
           })
           await saveRecord(rec)
+          setVoiceNewHighlightId(rec.id)
           setVoiceBanner(null)
           return
         }
@@ -209,6 +259,7 @@ export function HomePage() {
         )
       } finally {
         setVoiceParsing(false)
+        clearVoiceSlot()
       }
     },
     [
@@ -220,6 +271,7 @@ export function HomePage() {
       saveRecord,
       records,
       fields,
+      productCatalog,
     ],
   )
 
@@ -241,6 +293,11 @@ export function HomePage() {
     membershipActive,
     asrHotwords: voiceAsrHotwords,
     onSessionFinalized: (t) => {
+      setHomeVoiceSlot({
+        id: crypto.randomUUID(),
+        phase: 'asr',
+        rawText: t,
+      })
       void voicePipelineRef.current(t)
     },
     onHoldReleased: () => {
@@ -270,9 +327,44 @@ export function HomePage() {
 
   const filterActive = countActiveFilters(filterState) > 0
 
+  const homeSearchLower = useMemo(
+    () => homeSearchQuery.trim().toLowerCase(),
+    [homeSearchQuery],
+  )
+
+  const { searchDateFrom, searchDateTo } = useMemo(() => {
+    let f = homeSearchDateFrom.trim()
+    let t = homeSearchDateTo.trim()
+    if (f && t && f > t) [f, t] = [t, f]
+    return { searchDateFrom: f, searchDateTo: t }
+  }, [homeSearchDateFrom, homeSearchDateTo])
+
+  const homeSearchModeActive =
+    Boolean(homeSearchLower) || Boolean(searchDateFrom || searchDateTo)
+
+  const recordsForHomeTimeline = useMemo(() => {
+    const hasDateRange = Boolean(searchDateFrom || searchDateTo)
+    if (!homeSearchLower && !hasDateRange) return filteredRecords
+    let list = filteredRecords
+    if (homeSearchLower) {
+      list = list.filter((r) =>
+        recordMatchesHomeSearch(r, fields, homeSearchLower),
+      )
+    }
+    if (searchDateFrom || searchDateTo) {
+      list = list.filter((r) => {
+        const d = r.date
+        if (searchDateFrom && d < searchDateFrom) return false
+        if (searchDateTo && d > searchDateTo) return false
+        return true
+      })
+    }
+    return list
+  }, [filteredRecords, fields, homeSearchLower, searchDateFrom, searchDateTo])
+
   const grouped = useMemo(() => {
     const map = new Map<string, typeof records>()
-    for (const r of filteredRecords) {
+    for (const r of recordsForHomeTimeline) {
       const arr = map.get(r.date) || []
       arr.push(r)
       map.set(r.date, arr)
@@ -282,7 +374,7 @@ export function HomePage() {
     }
     const dates = [...map.keys()].sort((a, b) => b.localeCompare(a))
     return { map, dates }
-  }, [filteredRecords])
+  }, [recordsForHomeTimeline])
 
   const visibleTimelineDates = useMemo(() => {
     const s = new Set<string>(grouped.dates)
@@ -290,9 +382,41 @@ export function HomePage() {
     return [...s].sort((a, b) => b.localeCompare(a))
   }, [grouped.dates, pinnedDates])
 
+  /** 语音占位时若「今天」尚无分组，也渲染今天区块；搜索时仅展示有结果的日期（日期仍按新→旧） */
+  const displayTimelineDates = useMemo(() => {
+    const base = homeSearchModeActive
+      ? [...grouped.dates]
+      : [...visibleTimelineDates]
+    if (homeVoiceSlot && !base.includes(todayStr)) {
+      return [todayStr, ...base]
+    }
+    return base
+  }, [
+    homeSearchModeActive,
+    grouped.dates,
+    visibleTimelineDates,
+    homeVoiceSlot,
+    todayStr,
+  ])
+
   const todayRecords = filteredRecords.filter((r) => r.date === todayStr)
   const amountId = getAmountFieldId(fields) ?? findFieldIdByName(fields, '金额')
   const todaySum = sumAmount(todayRecords, amountId)
+  const searchResultCount = recordsForHomeTimeline.length
+  const searchResultSum = amountId
+    ? sumAmount(recordsForHomeTimeline, amountId)
+    : 0
+
+  const ledgerDateBounds = useMemo(() => {
+    if (records.length === 0) return { min: '', max: '' }
+    let minD = records[0].date
+    let maxD = records[0].date
+    for (const r of records) {
+      if (r.date < minD) minD = r.date
+      if (r.date > maxD) maxD = r.date
+    }
+    return { min: minD, max: maxD }
+  }, [records])
 
   const recordDateSet = useMemo(
     () => new Set(records.map((r) => r.date)),
@@ -337,6 +461,34 @@ export function HomePage() {
     }
   }, [])
 
+  /** 若带 New 的账单已被删除，清除高亮 id */
+  useEffect(() => {
+    if (!voiceNewHighlightId) return
+    if (!records.some((r) => r.id === voiceNewHighlightId)) {
+      setVoiceNewHighlightId(null)
+    }
+  }, [records, voiceNewHighlightId])
+
+  useEffect(() => {
+    if (!voiceNewHighlightId) return
+    if (!records.some((r) => r.id === voiceNewHighlightId)) return
+    const id = voiceNewHighlightId
+    const t = window.setTimeout(() => {
+      document
+        .querySelector(`[data-home-record-id="${id}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 80)
+    return () => clearTimeout(t)
+  }, [voiceNewHighlightId, records])
+
+  useEffect(() => {
+    if (homeSearchOpen) homeSearchInputRef.current?.focus()
+  }, [homeSearchOpen])
+
+  useEffect(() => {
+    if (!homeSearchOpen) setHomeSearchAdvancedOpen(false)
+  }, [homeSearchOpen])
+
   const scrollTop = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -358,7 +510,15 @@ export function HomePage() {
   }
 
   return (
-    <div className="min-h-dvh bg-[#f8f9fa] pb-24 pt-12">
+    <div
+      className={`min-h-dvh bg-[#f8f9fa] pt-12 ${
+        homeSearchOpen
+          ? homeSearchAdvancedOpen
+            ? 'pb-52'
+            : 'pb-36'
+          : 'pb-24'
+      }`}
+    >
       <header className="mb-4 flex flex-wrap items-center justify-between gap-2 px-4">
         <div className="min-w-0">
           <h1
@@ -403,25 +563,49 @@ export function HomePage() {
       </header>
 
       <section className="mx-4 mb-3 rounded-2xl border border-stone-200/90 bg-white p-4 text-left shadow-sm">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-[#2ecc71]">
-            <WalletGlyph className="h-[18px] w-[18px]" />
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-[#2ecc71]">
+              <WalletGlyph className="h-[18px] w-[18px]" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-neutral-900">
+                {homeSearchModeActive ? '结果概况' : '今日概况'}
+              </p>
+              {homeSearchModeActive ? (
+                <p className="mt-1 max-w-[min(100%,22rem)] text-xs leading-relaxed text-[#888888]">
+                  {[
+                    homeSearchLower
+                      ? `关键词「${homeSearchQuery.trim().slice(0, 48)}${homeSearchQuery.trim().length > 48 ? '…' : ''}」`
+                      : null,
+                    searchDateFrom || searchDateTo
+                      ? `记账日 ${searchDateFrom || '不限'}～${searchDateTo || '不限'}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </p>
+              ) : null}
+            </div>
           </div>
-          <p className="text-sm font-medium text-neutral-900">今日概况</p>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-6">
           <div>
             <p className="text-2xl font-bold tabular-nums text-neutral-900">
-              {todayRecords.length}
+              {homeSearchModeActive ? searchResultCount : todayRecords.length}
             </p>
-            <p className="mt-0.5 text-xs text-[#666666]">今日笔数</p>
+            <p className="mt-0.5 text-xs text-[#666666]">
+              {homeSearchModeActive ? '匹配笔数' : '今日笔数'}
+            </p>
           </div>
           {amountId && (
             <div>
               <p className="text-2xl font-bold tabular-nums text-neutral-900">
-                {todaySum}
+                {homeSearchModeActive ? searchResultSum : todaySum}
               </p>
-              <p className="mt-0.5 text-xs text-[#666666]">今日金额合计</p>
+              <p className="mt-0.5 text-xs text-[#666666]">
+                {homeSearchModeActive ? '匹配金额合计' : '今日金额合计'}
+              </p>
             </div>
           )}
         </div>
@@ -491,14 +675,27 @@ export function HomePage() {
             </p>
           )}
 
-        {visibleTimelineDates.length === 0 && records.length === 0 && (
+        {records.length > 0 &&
+          homeSearchModeActive &&
+          filteredRecords.length > 0 &&
+          recordsForHomeTimeline.length === 0 && (
+            <p className="mb-4 rounded-2xl border border-dashed border-stone-300 bg-white py-10 text-center text-sm text-[#666666]">
+              无匹配结果，请调整关键词或日期区间。
+            </p>
+          )}
+
+        {visibleTimelineDates.length === 0 &&
+          records.length === 0 &&
+          !homeVoiceSlot && (
           <p className="rounded-2xl border border-dashed border-stone-200 bg-white py-12 text-center text-stone-400">
             暂无记录，轻点下方记一笔手动录入，长按同按钮语音识别。
           </p>
         )}
 
-        {visibleTimelineDates.map((dateKey) => {
+        {displayTimelineDates.map((dateKey) => {
           const list = grouped.map.get(dateKey) || []
+          const showVoiceSlot =
+            dateKey === todayStr && homeVoiceSlot !== null
           return (
             <section
               key={dateKey}
@@ -511,39 +708,53 @@ export function HomePage() {
                 {headerDayLabel(dateKey)}{' '}
                 <span className="font-normal text-[#999999]">{dateKey}</span>
               </h2>
-              {list.length === 0 ? (
+              {list.length === 0 && !showVoiceSlot ? (
                 <div className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-stone-300 bg-white py-8 text-sm text-[#666666]">
                   <ClipboardGlyph className="h-5 w-5 shrink-0 text-[#999999]" />
                   <span>当日暂无账单</span>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {groupRecordsByPlate(list, fields).map(([plate, recs]) => (
-                    <div key={`${dateKey}-${plate}`}>
-                      <p className="mb-2 text-xs font-semibold tracking-wide text-stone-500">
-                        {plateGroupHeading(plate, fields)}
-                      </p>
-                      <ul className="space-y-2.5">
-                        {recs.map((r) => (
-                          <li key={r.id}>
+                  {showVoiceSlot && homeVoiceSlot && (
+                    <HomeVoicePipelineSlot
+                      key={homeVoiceSlot.id}
+                      phase={homeVoiceSlot.phase}
+                      rawText={homeVoiceSlot.rawText}
+                    />
+                  )}
+                  {list.length > 0 &&
+                    groupRecordsByPlate(list, fields).map(([plate, recs]) => (
+                      <div key={`${dateKey}-${plate}`}>
+                        <p className="mb-2 text-xs font-semibold tracking-wide text-stone-500">
+                          {plateGroupHeading(plate, fields)}
+                        </p>
+                        <ul className="space-y-2.5">
+                          {recs.map((r) => (
+                          <li
+                            key={r.id}
+                            data-home-record-id={r.id}
+                          >
                             <RecordCard
                               record={r}
                               fields={fields}
+                              productCatalog={productCatalog}
+                              showVoiceNewBadge={r.id === voiceNewHighlightId}
                               onEdit={(rec) => {
+                                expectVoicePrefillHighlightRef.current = false
                                 setVoiceFormPrefill(null)
                                 setEditingRecord(rec)
                                 setModalOpen(true)
                               }}
-                              onDelete={(id) => {
-                                void removeRecord(id)
-                              }}
-                              onReconcile={(rec) => setReconcileId(rec.id)}
-                            />
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
+                                onDelete={(id) => {
+                                  void removeRecord(id)
+                                }}
+                                onReconcile={(rec) => setReconcileId(rec.id)}
+                              />
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
                 </div>
               )}
             </section>
@@ -574,69 +785,160 @@ export function HomePage() {
         </div>
       )}
 
+      {homeSearchOpen && (
+        <button
+          type="button"
+          className="fixed inset-0 z-[25] cursor-default bg-transparent"
+          aria-label="关闭搜索"
+          onPointerDown={() => {
+            setHomeSearchOpen(false)
+            setHomeSearchAdvancedOpen(false)
+          }}
+        />
+      )}
+
       <div className="pointer-events-none fixed bottom-20 left-1/2 z-30 w-full max-w-lg -translate-x-1/2 px-4">
-        <div className="pointer-events-auto mx-auto w-[60%] min-w-0 max-w-full">
-          <button
-            ref={homeRecordBarRef}
-            type="button"
-            style={{ touchAction: 'none' }}
-            onPointerDown={homeRecordBarPointerDown}
-            onPointerUp={homeRecordBarPointerUp}
-            onPointerCancel={homeRecordBarPointerUp}
-            onClick={onRecordBarClick}
-            className={
-              voiceRecording
-                ? 'flex min-h-11 w-full select-none items-center justify-center gap-3 rounded-full bg-neutral-500 py-2.5 pl-4 pr-4 text-sm font-semibold tracking-wide text-white shadow-lg'
-                : homeVoiceEnabled
-                  ? 'flex min-h-11 w-full select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-white shadow-lg active:bg-neutral-500'
-                  : 'flex min-h-11 w-full select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-neutral-500 shadow-lg'
-            }
-            title={
-              voiceRecording
-                ? undefined
-                : '轻点：手动记账；长按：语音识别并保存'
-            }
-            aria-label={
-              voiceRecording
-                ? '录音中，松手结束'
-                : '记一笔：轻点手动记账，长按语音识别'
-            }
-          >
-            {voiceRecording ? (
-              <>
-                <span className="shrink-0">收音中</span>
-                <span
-                  className="flex h-5 items-end gap-0.5"
-                  aria-hidden
+        {homeSearchOpen && (
+          <div className="pointer-events-auto mb-2 rounded-2xl border border-stone-200/90 bg-white/95 px-3 py-2.5 shadow-md backdrop-blur-md">
+            <div className="flex items-center gap-2">
+              <SearchGlyph className="h-4 w-4 shrink-0 text-stone-400" aria-hidden />
+              <input
+                ref={homeSearchInputRef}
+                type="search"
+                enterKeyHint="search"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                value={homeSearchQuery}
+                onChange={(e) => setHomeSearchQuery(e.target.value)}
+                placeholder="搜索全部字段…"
+                className="min-w-0 flex-1 bg-transparent text-sm text-neutral-900 outline-none placeholder:text-stone-400"
+                aria-label="搜索账单"
+              />
+              {homeSearchQuery.trim() ? (
+                <button
+                  type="button"
+                  onClick={() => setHomeSearchQuery('')}
+                  className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800"
                 >
-                  {[0, 1, 2, 3].map((i) => (
-                    <span
-                      key={i}
-                      className="recording-wave-bar inline-block w-1 rounded-sm bg-white"
-                      style={{
-                        height: '1rem',
-                        animationDelay: `${i * 0.12}s`,
-                      }}
-                    />
-                  ))}
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="min-w-0 flex-1 text-center">记一笔</span>
-                <span
-                  className={
-                    homeVoiceEnabled
-                      ? 'shrink-0 text-white/75'
-                      : 'shrink-0 text-neutral-500'
-                  }
-                  aria-hidden
-                >
-                  <HomeMiniMicGlyph className="h-5 w-5" />
-                </span>
-              </>
+                  清除
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setHomeSearchAdvancedOpen((v) => !v)}
+                className={`relative shrink-0 rounded-lg p-2 text-stone-600 transition-colors hover:bg-stone-100 ${
+                  homeSearchAdvancedOpen
+                    ? 'bg-stone-100 text-stone-900 ring-1 ring-stone-300/90'
+                    : homeSearchDateFrom || homeSearchDateTo
+                      ? 'ring-1 ring-stone-300/60'
+                      : ''
+                }`}
+                aria-expanded={homeSearchAdvancedOpen}
+                aria-label="日期与快捷筛选"
+                title="日期与快捷筛选"
+              >
+                <SearchOptionsBarsGlyph className="h-5 w-5" />
+              </button>
+            </div>
+            {homeSearchAdvancedOpen && (
+              <div className="mt-2 border-t border-stone-200/80 pt-2">
+                <HomeSearchDateRangeBlock
+                  dateFrom={homeSearchDateFrom}
+                  dateTo={homeSearchDateTo}
+                  minDate={ledgerDateBounds.min || todayStr}
+                  maxDate={ledgerDateBounds.max || todayStr}
+                  onChange={(from, to) => {
+                    setHomeSearchDateFrom(from)
+                    setHomeSearchDateTo(to)
+                  }}
+                />
+              </div>
             )}
+          </div>
+        )}
+        <div className="pointer-events-auto mx-auto flex w-full max-w-full items-center justify-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setHomeSearchOpen((o) => {
+                const next = !o
+                if (next) setHomeSearchAdvancedOpen(false)
+                return next
+              })
+            }}
+            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black text-white shadow-lg transition-colors active:bg-neutral-500 ${
+              homeSearchOpen || homeSearchModeActive ? 'ring-2 ring-white/20' : ''
+            }`}
+            aria-pressed={homeSearchOpen || homeSearchModeActive}
+            aria-label={homeSearchOpen ? '关闭搜索' : '搜索账单'}
+            title="搜索"
+          >
+            <SearchGlyph className="h-5 w-5" aria-hidden />
           </button>
+          <div className="w-[60%] min-w-0 max-w-full">
+            <button
+              ref={homeRecordBarRef}
+              type="button"
+              style={{ touchAction: 'none' }}
+              onPointerDown={homeRecordBarPointerDown}
+              onPointerUp={homeRecordBarPointerUp}
+              onPointerCancel={homeRecordBarPointerUp}
+              onClick={onRecordBarClick}
+              className={
+                voiceRecording
+                  ? 'flex min-h-11 w-full select-none items-center justify-center gap-3 rounded-full bg-neutral-500 py-2.5 pl-4 pr-4 text-sm font-semibold tracking-wide text-white shadow-lg'
+                  : homeVoiceEnabled
+                    ? 'flex min-h-11 w-full select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-white shadow-lg active:bg-neutral-500'
+                    : 'flex min-h-11 w-full select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-neutral-500 shadow-lg'
+              }
+              title={
+                voiceRecording
+                  ? undefined
+                  : '轻点：手动记账；长按：语音识别并保存'
+              }
+              aria-label={
+                voiceRecording
+                  ? '录音中，松手结束'
+                  : '记一笔：轻点手动记账，长按语音识别'
+              }
+            >
+              {voiceRecording ? (
+                <>
+                  <span className="shrink-0">收音中</span>
+                  <span
+                    className="flex h-5 items-end gap-0.5"
+                    aria-hidden
+                  >
+                    {[0, 1, 2, 3].map((i) => (
+                      <span
+                        key={i}
+                        className="recording-wave-bar inline-block w-1 rounded-sm bg-white"
+                        style={{
+                          height: '1rem',
+                          animationDelay: `${i * 0.12}s`,
+                        }}
+                      />
+                    ))}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="min-w-0 flex-1 text-center">记一笔</span>
+                  <span
+                    className={
+                      homeVoiceEnabled
+                        ? 'shrink-0 text-white/75'
+                        : 'shrink-0 text-neutral-500'
+                    }
+                    aria-hidden
+                  >
+                    <HomeMiniMicGlyph className="h-5 w-5" />
+                  </span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -653,9 +955,10 @@ export function HomePage() {
           setModalOpen(false)
           setEditingRecord(null)
           setVoiceFormPrefill(null)
+          expectVoicePrefillHighlightRef.current = false
         }}
         fields={fields}
-        onSave={saveRecord}
+        onSave={handleModalSave}
         recordToEdit={editingRecord}
         recordDates={recordDateSet}
         voiceFormPrefill={voiceFormPrefill}
@@ -688,6 +991,45 @@ export function HomePage() {
   )
 }
 
+function SearchOptionsBarsGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <line x1="4" x2="20" y1="7" y2="7" />
+      <line x1="4" x2="20" y1="12" y2="12" />
+      <line x1="4" x2="20" y1="17" y2="17" />
+    </svg>
+  )
+}
+
+function SearchGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={1.75}
+      stroke="currentColor"
+      className={className}
+      aria-hidden
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
+      />
+    </svg>
+  )
+}
+
 function HomeMiniMicGlyph({ className }: { className?: string }) {
   return (
     <svg
@@ -704,6 +1046,61 @@ function HomeMiniMicGlyph({ className }: { className?: string }) {
       <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
       <line x1="12" y1="19" x2="12" y2="23" />
       <line x1="8" y1="23" x2="16" y2="23" />
+    </svg>
+  )
+}
+
+function HomeVoicePipelineSlot({
+  phase,
+  rawText,
+}: {
+  phase: 'asr' | 'parse'
+  rawText: string
+}) {
+  const label =
+    phase === 'asr' ? '语音识别中…' : '智能识别中，正在写入账单…'
+  const snippet = rawText.trim().slice(0, 200)
+  return (
+    <div
+      className="relative overflow-hidden rounded-2xl border border-dashed border-emerald-300/80 bg-gradient-to-br from-white to-emerald-50/40 p-4 shadow-sm"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <div className="pointer-events-none absolute inset-0 animate-pulse bg-emerald-500/[0.04]" />
+      <div className="relative flex items-start gap-3">
+        <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-[#1a7f4c]">
+          <HomeVoiceSlotGlyph className="h-[18px] w-[18px]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-emerald-900">{label}</p>
+          {snippet ? (
+            <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-stone-500">
+              「{snippet}」
+            </p>
+          ) : (
+            <p className="mt-1.5 text-xs text-stone-400">请稍候…</p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function HomeVoiceSlotGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
     </svg>
   )
 }

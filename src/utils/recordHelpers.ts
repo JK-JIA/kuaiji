@@ -1,16 +1,40 @@
-import type { FieldDef, LedgerRecord, LineItemRow } from '../types'
+import type {
+  FieldDef,
+  LedgerRecord,
+  LineItemRow,
+  ProductCatalogEntry,
+} from '../types'
+import { defaultUnitForProduct } from './productCatalogHelpers'
 
 const MONEY_RE = /(\d+(?:\.\d+)?)/
 
 /** 从「500」「500元」「1,200.5」中解析金额 */
-/** 列表展示：数量后默认带「斤」（已有斤/kg 等单位则不重复加） */
-export function formatQuantityWithJin(raw: string): string {
+/** 列表展示：数量后带计量单位（目录优先，否则默认斤；已有斤/kg 等单位则不重复加） */
+export function formatQuantityWithUnit(
+  raw: string,
+  productName: string,
+  catalog: ProductCatalogEntry[] | undefined,
+): string {
   const s = String(raw).trim()
   if (!s) return '—'
   if (/斤|千克|公斤|吨|包|箱|袋|个|两|[kK][gG]|[Gg]\b/.test(s)) {
     return s
   }
-  return `${s}斤`
+  const unit = defaultUnitForProduct(productName, catalog ?? [])
+  return `${s}${unit}`
+}
+
+/** 无商品名上下文时等价于「数量 + 斤」 */
+export function formatQuantityWithJin(raw: string): string {
+  return formatQuantityWithUnit(raw, '', [])
+}
+
+/** 表头/列标题：去掉「数量 (斤)」「数量（斤）」等后缀，单位由各商品与单元格展示 */
+export function displayQuantityFieldName(name: string): string {
+  const t = String(name ?? '')
+    .replace(/\s*[\(（]\s*斤\s*[\)）]\s*$/u, '')
+    .trim()
+  return t || '数量'
 }
 
 /** 购买方（内置 key plate）列为空时的分组键；随字段改名，如「（未填客户）」 */

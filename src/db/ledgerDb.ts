@@ -1,12 +1,20 @@
 import Dexie, { type Table } from 'dexie'
 import { getDefaultFieldDefs } from '../constants/defaultLedgerFields'
 import { mergeMissingDefaultFields } from '../constants/mergeBuiltinFields'
-import type { FieldDef, LedgerRecord } from '../types'
+import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
 import { DEFAULT_FIELD_KEYS } from '../types'
+import { normalizeCatalogEntry } from '../utils/productCatalogHelpers'
+
+export type ProductCatalogSettingsRow = {
+  id: 'singleton'
+  suppressedNormalizedNames: string[]
+}
 
 export class LedgerDatabase extends Dexie {
   fields!: Table<FieldDef>
   records!: Table<LedgerRecord>
+  productCatalog!: Table<ProductCatalogEntry>
+  productCatalogSettings!: Table<ProductCatalogSettingsRow>
 
   constructor() {
     super('personal_ledger_db')
@@ -40,6 +48,12 @@ export class LedgerDatabase extends Dexie {
         await tx.table('fields').clear()
         await tx.table('fields').bulkPut(merged)
       })
+    this.version(4).stores({
+      fields: '&id, order',
+      records: '&id, date, createdAt',
+      productCatalog: '&id, name',
+      productCatalogSettings: '&id',
+    })
   }
 }
 
@@ -86,5 +100,38 @@ export async function replaceAllData(
     await db.records.clear()
     if (fields.length > 0) await db.fields.bulkAdd(fields)
     if (records.length > 0) await db.records.bulkPut(records)
+  })
+}
+
+const CATALOG_SETTINGS_ID = 'singleton' as const
+
+export async function getProductCatalogFromDb(): Promise<ProductCatalogEntry[]> {
+  const rows = await db.productCatalog.toArray()
+  const out: ProductCatalogEntry[] = []
+  for (const r of rows) {
+    const n = normalizeCatalogEntry(r as ProductCatalogEntry)
+    if (n) out.push(n)
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+}
+
+export async function getProductCatalogSuppressedFromDb(): Promise<string[]> {
+  const row = await db.productCatalogSettings.get(CATALOG_SETTINGS_ID)
+  return row?.suppressedNormalizedNames?.length
+    ? [...row.suppressedNormalizedNames]
+    : []
+}
+
+export async function replaceProductCatalogInDb(
+  entries: ProductCatalogEntry[],
+  suppressedNormalizedNames: string[],
+): Promise<void> {
+  await db.transaction('rw', db.productCatalog, db.productCatalogSettings, async () => {
+    await db.productCatalog.clear()
+    if (entries.length) await db.productCatalog.bulkPut(entries)
+    await db.productCatalogSettings.put({
+      id: CATALOG_SETTINGS_ID,
+      suppressedNormalizedNames: [...suppressedNormalizedNames],
+    })
   })
 }

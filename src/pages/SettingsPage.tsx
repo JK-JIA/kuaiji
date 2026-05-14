@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { FieldDef } from '../types'
+import type { FieldDef, ProductCatalogEntry } from '../types'
 import { getApiBase } from '../api/ledgerClient'
 import { useAuth } from '../context/AuthContext'
 import { useLedger } from '../context/LedgerContext'
@@ -18,10 +18,22 @@ import {
   persistReceiptExportHd,
   readReceiptExportHd,
 } from '../utils/receiptExport'
+import { normalizeToken } from '../utils/voiceHistoryFuzzy'
 import {
   SETTINGS_CARD_CLASS,
   SettingsSection,
 } from './settings/SettingsSection'
+
+function newCatalogEntryId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID()
+    }
+  } catch {
+    /* ignore */
+  }
+  return `cat_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+}
 
 export function SettingsPage() {
   const {
@@ -52,15 +64,34 @@ export function SettingsPage() {
   const [receiptExportHd, setReceiptExportHd] = useState(() =>
     readReceiptExportHd(),
   )
-  const { ready, fields, records, saveFields, restoreFullBackup } =
-    useLedger()
+  const {
+    ready,
+    fields,
+    records,
+    saveFields,
+    restoreFullBackup,
+    productCatalog,
+    productCatalogSuppressed,
+    saveProductCatalog,
+  } = useLedger()
   const importInputRef = useRef<HTMLInputElement>(null)
   const [name, setName] = useState('')
   const [type, setType] = useState<'text' | 'number'>('text')
   const [busy, setBusy] = useState(false)
+  const [ledgerFieldsSubOpen, setLedgerFieldsSubOpen] = useState(false)
+  const [newProductName, setNewProductName] = useState('')
+  const [newProductUnit, setNewProductUnit] = useState('斤')
   const sorted = useMemo(
     () => [...fields].sort((a, b) => a.order - b.order),
     [fields],
+  )
+
+  const sortedProductCatalog = useMemo(
+    () =>
+      [...productCatalog].sort((a, b) =>
+        a.name.localeCompare(b.name, 'zh-CN'),
+      ),
+    [productCatalog],
   )
 
   const addField = async () => {
@@ -107,6 +138,101 @@ export function SettingsPage() {
     await saveFields(next)
   }
 
+  const addProductCatalogEntry = async () => {
+    const n = newProductName.trim()
+    const u = newProductUnit.trim() || '斤'
+    if (!n) {
+      alert('请输入商品名称')
+      return
+    }
+    const nk = normalizeToken(n)
+    const dupIdx = productCatalog.findIndex((e) => normalizeToken(e.name) === nk)
+
+    if (dupIdx >= 0) {
+      const dup = productCatalog[dupIdx]!
+      if (dup.source === 'manual') {
+        alert('已有同名商品（忽略空格后相同）')
+        return
+      }
+      setBusy(true)
+      try {
+        await saveProductCatalog(
+          productCatalog.map((e) =>
+            e.id === dup.id
+              ? { ...dup, name: n, unit: u, source: 'manual' as const }
+              : e,
+          ),
+          productCatalogSuppressed,
+        )
+        setNewProductName('')
+        setNewProductUnit('斤')
+      } catch (err) {
+        console.error(err)
+        alert(err instanceof Error ? err.message : '保存失败')
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+
+    setBusy(true)
+    try {
+      await saveProductCatalog(
+        [
+          ...productCatalog,
+          {
+            id: newCatalogEntryId(),
+            name: n,
+            unit: u,
+            source: 'manual',
+          },
+        ],
+        productCatalogSuppressed,
+      )
+      setNewProductName('')
+      setNewProductUnit('斤')
+    } catch (err) {
+      console.error(err)
+      alert(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const removeProductCatalogEntry = async (e: ProductCatalogEntry) => {
+    setBusy(true)
+    try {
+      const next = productCatalog.filter((x) => x.id !== e.id)
+      let suppressed = productCatalogSuppressed
+      if (e.source === 'auto') {
+        const k = normalizeToken(e.name)
+        if (k && !suppressed.includes(k)) suppressed = [...suppressed, k]
+      }
+      await saveProductCatalog(next, suppressed)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const updateProductCatalogUnit = async (id: string, unitRaw: string) => {
+    const u = unitRaw.trim() || '斤'
+    setBusy(true)
+    try {
+      const next = productCatalog.map((x) =>
+        x.id === id
+          ? {
+              ...x,
+              unit: u,
+              source: x.source === 'auto' ? ('manual' as const) : x.source,
+            }
+          : x,
+      )
+      await saveProductCatalog(next, productCatalogSuppressed)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   useEffect(() => {
     if (smsWaitSec <= 0) return
     const id = window.setTimeout(() => setSmsWaitSec((s) => s - 1), 1000)
@@ -133,6 +259,24 @@ export function SettingsPage() {
     )
   }
 
+  if (ledgerFieldsSubOpen) {
+    return (
+      <LedgerFieldsSubScreen
+        onBack={() => setLedgerFieldsSubOpen(false)}
+        sorted={sorted}
+        name={name}
+        setName={setName}
+        type={type}
+        setType={setType}
+        busy={busy}
+        addField={addField}
+        renameField={renameField}
+        setFieldRequired={setFieldRequired}
+        removeField={removeField}
+      />
+    )
+  }
+
   return (
     <div className="min-h-dvh bg-[#f8f9fa] pb-28 pt-12">
       <header className="mb-6 px-4">
@@ -140,7 +284,7 @@ export function SettingsPage() {
           设置
         </h1>
         <p className="mt-0.5 text-xs leading-relaxed text-[#666666]">
-          管理账号、显示、备份与字段。
+          账号、显示、备份与字段。
         </p>
       </header>
 
@@ -150,22 +294,18 @@ export function SettingsPage() {
           {!apiBase && (
             <>
               <p className="rounded-xl border border-amber-200/90 bg-amber-50/90 px-3 py-2.5 text-xs leading-relaxed text-amber-900">
-                当前构建未包含可用的 API 地址，无法登录云端；数据仅存本机。
+                未配置云端 API，数据仅在本机。
               </p>
               <details className="mt-3 rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2 text-[11px] leading-relaxed text-neutral-800">
                 <summary className="cursor-pointer font-medium text-neutral-900 select-none">
                   如何配置 API（开发者）
                 </summary>
                 <p className="mt-2 text-amber-900">
-                  请在源码根目录配置{' '}
+                  根目录配置{' '}
                   <code className="rounded-md bg-amber-100/90 px-1.5 py-0.5 font-mono text-[11px]">
                     VITE_API_URL
-                  </code>{' '}
-                  后重新执行{' '}
-                  <code className="rounded-md bg-amber-100/90 px-1.5 py-0.5 font-mono text-[11px]">
-                    npm run build
-                  </code>{' '}
-                  再打 APK。
+                  </code>
+                  ，再 <code className="rounded-md bg-amber-100/90 px-1.5 py-0.5 font-mono text-[11px]">npm run build</code> 打包。
                 </p>
               </details>
             </>
@@ -181,7 +321,7 @@ export function SettingsPage() {
               {useRemoteLedger ? (
                 <div className="flex flex-col gap-3">
                   <p className="text-sm text-neutral-900">
-                    已登录且云备份已开通：
+                    已登录
                     <span className="font-medium"> {cloudEmail ?? '—'}</span>
                   </p>
                   <button
@@ -199,23 +339,15 @@ export function SettingsPage() {
                     <span className="font-medium">{cloudEmail ?? '—'}</span>
                   </p>
                   <p className="text-[11px] leading-relaxed text-amber-900">
-                    当前账号尚未兑换会员，云端账本不会同步。请在下方输入兑换码。
+                    未开通会员，不同步云端。下方兑换。
                   </p>
                   <details className="rounded-xl border border-stone-200 bg-stone-50/80 px-3 py-2 text-[11px] leading-relaxed text-neutral-800">
                     <summary className="cursor-pointer font-medium text-neutral-900 select-none">
                       部署与兑换码说明（Docker）
                     </summary>
                     <p className="mt-2 text-amber-900">
-                      部署时由{' '}
-                      <code className="rounded bg-amber-100 px-1 font-mono text-[10px]">
-                        redeem-daily
-                      </code>{' '}
-                      每日刷新 5
-                      档码（7天/30天/半年/1年/永久），并覆盖写入服务器上的{' '}
-                      <code className="rounded bg-amber-100 px-1 font-mono text-[10px]">
-                        server/data/redeem-codes/redeem-codes.txt
-                      </code>
-                      ，也可查看该服务日志。
+                      <code className="rounded bg-amber-100 px-1 font-mono text-[10px]">redeem-daily</code> 每日写入{' '}
+                      <code className="rounded bg-amber-100 px-1 font-mono text-[10px]">redeem-codes.txt</code>。
                     </p>
                   </details>
                   <div className="flex flex-col gap-2 sm:flex-row">
@@ -259,10 +391,10 @@ export function SettingsPage() {
               ) : (
                 <div className="space-y-4">
                   <p className="text-[11px] leading-relaxed text-[#666666]">
-                    登录后可兑换会员并开启云端备份。默认账号{' '}
+                    Docker 默认{' '}
                     <span className="font-mono text-neutral-800">admin</span> /{' '}
                     <span className="font-mono text-neutral-800">123456</span>
-                    （docker 首次启动）。手机号登录由服务端通过阿里云发送短信验证码。
+                    。手机号为短信验证码登录。
                   </p>
                   <div className="flex gap-2">
                     <button
@@ -452,7 +584,7 @@ export function SettingsPage() {
         <div className="overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-sm">
           <div className="p-4">
             <p className="mb-3 text-xs leading-relaxed text-[#666666]">
-              仅影响本应用界面，与系统「显示大小」无关；调节后全页立即生效。
+              仅本应用内生效，拖动即更新。
             </p>
             <div className="mb-3 flex items-center justify-between gap-3">
               <span className="text-xs tabular-nums text-neutral-600">
@@ -510,7 +642,7 @@ export function SettingsPage() {
           <div className="border-t border-stone-100 p-4">
             <p className="mb-1 text-sm font-semibold text-neutral-900">小票导出</p>
             <p className="mb-3 text-xs leading-relaxed text-[#666666]">
-              默认以较快清晰度导出 JPEG；开启高清后像素更高、更清晰，保存耗时更长。
+              小票图：默认较快；高清更清晰、更慢。
             </p>
             <label className="flex cursor-pointer items-start gap-3 text-sm text-neutral-900">
               <input
@@ -526,7 +658,7 @@ export function SettingsPage() {
               <span>
                 <span className="font-medium">高清导出</span>
                 <span className="mt-0.5 block text-xs font-normal text-[#666666]">
-                  关闭时优先速度（约 1 秒内完成更常见）；开启时接近原 2× 清晰度。
+                  开：更清晰，保存更久。
                 </span>
               </span>
             </label>
@@ -541,11 +673,10 @@ export function SettingsPage() {
           </p>
           <p className="mb-3 text-[11px] leading-relaxed text-[#666666]">
             {useRemoteLedger
-              ? '当前已开通云备份，账单保存在服务器。可导出 CSV 作离线存档；从 CSV 恢复会按当前字段设置写入云端当前账号的全部账单。'
+              ? '已同步云端。导出 CSV 仅含账单；「商品维护」目录随账号云端同步，不含在 CSV 内。导入会替换当前全部账单。'
               : token && apiBase && !membershipActive
-                ? '已登录但未开通云备份，数据仍仅存本机；兑换会员后才会同步到服务器。请定期导出 CSV。'
-                : '数据保存在本机（IndexedDB）。卸载 App、清理数据或换设备会清空本地库，请定期导出 CSV。'}
-            导入时使用当前字段配置，表头需与本应用导出的 CSV 一致（列名与字段名对应）。
+                ? '未开会员，数据在本机。CSV 仅账单；商品目录存本机 IndexedDB。导入规则同上。'
+                : '数据在本机，换机前请导出。CSV 仅账单；商品目录在本机库。导入须与当前字段、列名一致。'}
           </p>
           <div className="flex flex-wrap gap-2">
             <button
@@ -581,7 +712,7 @@ export function SettingsPage() {
                     }
                     const { records: r } = parsed
                     const ok = window.confirm(
-                      `将用 CSV 替换当前全部账单（共 ${r.length} 条）。字段仍使用当前设置，此操作不可撤销，确定继续？`,
+                      `用 CSV 替换全部 ${r.length} 条账单，不可撤销，继续？`,
                     )
                     if (!ok) return
                     await restoreFullBackup(fields, r)
@@ -600,75 +731,102 @@ export function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection
-        title="新增字段"
-        description="默认含商品、单价、斤数、购买方、金额（数字）；明细行金额为单价×斤数自动计算。可新增备注等自定义字段。可为字段勾选「必填」，记账时将标红星并校验。"
+        title="商品维护"
+        description="维护商品名与计量单位（斤、包等）。语音与录入会优先匹配此处；常用账单商品可自动生成条目（默认斤）。删除自动条目后不会再自动加入同名。"
       >
         <div className={SETTINGS_CARD_CLASS}>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="字段名称，例如：金额"
-              className="min-h-[44px] flex-1 rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
-            />
-            <select
-              value={type}
-              onChange={(e) => setType(e.target.value as 'text' | 'number')}
-              className="min-h-[44px] rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 sm:w-28"
-            >
-              <option value="text">文本</option>
-              <option value="number">数字</option>
-            </select>
+          <div className="mb-4 flex flex-wrap items-end gap-2">
+            <label className="min-w-[8rem] flex-1 text-left text-xs font-medium text-[#666666]">
+              商品名称
+              <input
+                value={newProductName}
+                onChange={(e) => setNewProductName(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2 text-sm text-neutral-900"
+                placeholder="如 圆紫薯"
+                autoComplete="off"
+              />
+            </label>
+            <label className="w-[5.5rem] text-left text-xs font-medium text-[#666666]">
+              单位
+              <input
+                value={newProductUnit}
+                onChange={(e) => setNewProductUnit(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-stone-200 bg-[#fafafa] px-2 py-2 text-center text-sm text-neutral-900"
+                placeholder="斤"
+                autoComplete="off"
+              />
+            </label>
             <button
               type="button"
-              disabled={busy || !name.trim()}
-              onClick={() => void addField()}
-              className="min-h-[44px] shrink-0 rounded-xl bg-[#2ecc71] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#27ae60] disabled:opacity-50"
+              disabled={busy}
+              onClick={() => void addProductCatalogEntry()}
+              className="shrink-0 rounded-xl border border-[#2ecc71] bg-[#2ecc71] px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
             >
               添加
             </button>
           </div>
-          <ul className="mt-4 space-y-3 border-t border-stone-100 pt-4">
-            {sorted.map((f) => (
-              <li
-                key={f.id}
-                className="flex flex-wrap items-center gap-3 rounded-xl border border-stone-100 bg-[#fafafa] px-3 py-3"
-              >
-                <EditableName
-                  initial={f.name}
-                  onSave={(v) => void renameField(f.id, v)}
-                />
-                <span className="rounded-lg bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800">
-                  {f.type === 'number' ? '数字' : '文本'}
-                </span>
-                <label className="flex cursor-pointer items-center gap-1.5 text-xs text-neutral-800">
-                  <input
-                    type="checkbox"
-                    checked={f.required === true}
-                    disabled={busy}
-                    onChange={(e) =>
-                      void setFieldRequired(f.id, e.target.checked)
+          {sortedProductCatalog.length === 0 ? (
+            <p className="text-xs text-[#999999]">暂无条目；记几笔或在此添加后会显示。</p>
+          ) : (
+            <ul className="max-h-[min(22rem,50vh)] space-y-2 overflow-y-auto pr-1">
+              {sortedProductCatalog.map((row) => (
+                <li
+                  key={row.id}
+                  className="flex flex-wrap items-center gap-2 rounded-xl border border-stone-100 bg-[#fafafa] px-3 py-2 text-sm"
+                >
+                  <span className="min-w-0 flex-1 truncate font-medium text-neutral-900">
+                    {row.name}
+                  </span>
+                  <label className="flex w-[4.5rem] shrink-0 items-center gap-1 text-xs text-[#666666]">
+                    <span className="shrink-0">单位</span>
+                    <input
+                      defaultValue={row.unit}
+                      key={`${row.id}-${row.unit}`}
+                      onBlur={(e) => {
+                        if (e.target.value.trim() === row.unit) return
+                        void updateProductCatalogUnit(row.id, e.target.value)
+                      }}
+                      className="w-full rounded-lg border border-stone-200 bg-white px-1.5 py-1 text-center text-sm text-neutral-900"
+                    />
+                  </label>
+                  <span
+                    className={
+                      row.source === 'auto'
+                        ? 'shrink-0 text-[10px] text-[#999999]'
+                        : 'shrink-0 text-[10px] text-[#666666]'
                     }
-                    className="rounded border-stone-300 text-[#2ecc71] focus:ring-[#2ecc71]"
-                  />
-                  必填
-                </label>
-                {f.key && (
-                  <span className="text-xs text-[#999999]">系统默认</span>
-                )}
-                {!f.key && (
+                  >
+                    {row.source === 'auto' ? '自动' : '手动'}
+                  </span>
                   <button
                     type="button"
-                    onClick={() => void removeField(f.id)}
-                    className="ml-auto text-sm font-medium text-[#999999] transition-colors hover:text-rose-600"
+                    disabled={busy}
+                    onClick={() => void removeProductCatalogEntry(row)}
+                    className="ml-auto shrink-0 text-xs font-medium text-rose-600 hover:underline disabled:opacity-50"
                   >
                     删除
                   </button>
-                )}
-              </li>
-            ))}
-          </ul>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
+      </SettingsSection>
+
+      <SettingsSection title="账本字段">
+        <button
+          type="button"
+          onClick={() => setLedgerFieldsSubOpen(true)}
+          className={`${SETTINGS_CARD_CLASS} flex w-full max-w-full items-center justify-between gap-3 text-left transition-colors hover:bg-stone-50/80 active:bg-stone-50`}
+        >
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-neutral-900">管理字段</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-[#666666]">
+              加列、改名、必填、删自定义列
+            </p>
+          </div>
+          <SettingsChevronRight className="h-5 w-5 shrink-0 text-[#bbbbbb]" />
+        </button>
       </SettingsSection>
 
       <SettingsSection title="关于">
@@ -684,11 +842,183 @@ export function SettingsPage() {
             检查更新（Android）
           </button>
           <p className="mt-1.5 text-[11px] leading-relaxed text-[#666666]">
-            本版为<strong className="font-medium text-neutral-800">纯手动录入</strong>
-            ：在记账页逐项填写或粘贴；无应用内语音解析。云端登录与同步见上方「账号」。
+            记账以手动填写为主；同步见「账号」。
           </p>
         </footer>
       </SettingsSection>
+    </div>
+  )
+}
+
+function SettingsChevronRight({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      strokeWidth={2}
+      stroke="currentColor"
+      className={className}
+      aria-hidden
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+    </svg>
+  )
+}
+
+function LedgerFieldsSubScreen({
+  onBack,
+  sorted,
+  name,
+  setName,
+  type,
+  setType,
+  busy,
+  addField,
+  renameField,
+  setFieldRequired,
+  removeField,
+}: {
+  onBack: () => void
+  sorted: FieldDef[]
+  name: string
+  setName: (v: string) => void
+  type: 'text' | 'number'
+  setType: (t: 'text' | 'number') => void
+  busy: boolean
+  addField: () => Promise<void>
+  renameField: (id: string, newName: string) => Promise<void>
+  setFieldRequired: (id: string, required: boolean) => Promise<void>
+  removeField: (id: string) => Promise<void>
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onBack()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onBack])
+
+  return (
+    <div className="min-h-dvh bg-[#f8f9fa] pb-28 pt-12">
+      <header className="mb-4 px-4">
+        <div className="flex items-start gap-2">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="返回设置"
+            className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-stone-200 bg-white text-[#666666] shadow-sm transition-colors hover:bg-stone-50"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              strokeWidth={2}
+              stroke="currentColor"
+              className="h-5 w-5"
+              aria-hidden
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M15 19l-7-7 7-7"
+              />
+            </svg>
+          </button>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-[22px] font-bold tracking-tight text-neutral-900">
+              账本字段
+            </h1>
+            <p className="mt-1 text-xs leading-relaxed text-[#666666]">
+              含商品、单价、斤数、购买方、金额等内置列；可加自定义列。「必填」在记账页标星并校验。
+            </p>
+          </div>
+        </div>
+      </header>
+
+      <div className="mx-4 space-y-6">
+        <section>
+          <h2 className="mb-2 text-sm font-semibold text-neutral-900">
+            添加字段
+          </h2>
+          <div className={SETTINGS_CARD_CLASS}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="字段名称，例如：备注"
+                className="min-h-[44px] flex-1 rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
+              />
+              <select
+                value={type}
+                onChange={(e) =>
+                  setType(e.target.value as 'text' | 'number')
+                }
+                className="min-h-[44px] rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 sm:w-28"
+              >
+                <option value="text">文本</option>
+                <option value="number">数字</option>
+              </select>
+              <button
+                type="button"
+                disabled={busy || !name.trim()}
+                onClick={() => void addField()}
+                className="min-h-[44px] shrink-0 rounded-xl bg-[#2ecc71] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#27ae60] disabled:opacity-50"
+              >
+                添加
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <h2 className="mb-2 text-sm font-semibold text-neutral-900">
+            当前字段
+          </h2>
+          <div className={SETTINGS_CARD_CLASS}>
+            <ul className="space-y-3">
+              {sorted.map((f) => (
+                <li
+                  key={f.id}
+                  className="flex flex-wrap items-center gap-3 rounded-xl border border-stone-100 bg-[#fafafa] px-3 py-3"
+                >
+                  <EditableName
+                    initial={f.name}
+                    onSave={(v) => void renameField(f.id, v)}
+                  />
+                  <span className="rounded-lg bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                    {f.type === 'number' ? '数字' : '文本'}
+                  </span>
+                  <label className="flex cursor-pointer items-center gap-1.5 text-xs text-neutral-800">
+                    <input
+                      type="checkbox"
+                      checked={f.required === true}
+                      disabled={busy}
+                      onChange={(e) =>
+                        void setFieldRequired(f.id, e.target.checked)
+                      }
+                      className="rounded border-stone-300 text-[#2ecc71] focus:ring-[#2ecc71]"
+                    />
+                    必填
+                  </label>
+                  {f.key && (
+                    <span className="text-xs text-[#999999]">系统默认</span>
+                  )}
+                  {!f.key && (
+                    <button
+                      type="button"
+                      onClick={() => void removeField(f.id)}
+                      className="ml-auto text-sm font-medium text-[#999999] transition-colors hover:text-rose-600"
+                    >
+                      删除
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      </div>
     </div>
   )
 }

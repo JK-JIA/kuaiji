@@ -1,4 +1,4 @@
-import type { FieldDef, LedgerRecord } from '../types'
+import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
 
 const TOKEN_KEY = 'ledger_auth_token'
 const EMAIL_KEY = 'ledger_auth_email'
@@ -161,6 +161,8 @@ export async function apiSmsLogin(
 export type LedgerPayload = {
   fields: FieldDef[]
   records: LedgerRecord[]
+  productCatalog?: ProductCatalogEntry[]
+  productCatalogSuppressed?: string[]
 }
 
 export type LedgerApiResponse = LedgerPayload & {

@@ -35,7 +35,18 @@ const LoginSchema = z.object({
 const LedgerPutSchema = z.object({
   fields: z.array(z.unknown()),
   records: z.array(z.unknown()),
+  productCatalog: z.array(z.unknown()).optional(),
+  productCatalogSuppressed: z.array(z.string()).optional(),
 })
+
+function jsonArrayUnknown(raw: unknown): unknown[] {
+  return Array.isArray(raw) ? raw : []
+}
+
+function jsonStringArray(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return raw.filter((x): x is string => typeof x === 'string')
+}
 
 const SmsSendSchema = z.object({
   phone: z.string().min(10).max(20),
@@ -414,6 +425,10 @@ app.get('/api/ledger', async (req, res) => {
   res.json({
     fields: ledger.fieldsJson,
     records: ledger.recordsJson,
+    productCatalog: jsonArrayUnknown(ledger.productCatalogJson),
+    productCatalogSuppressed: jsonStringArray(
+      ledger.productCatalogSuppressedJson,
+    ),
     updatedAt: ledger.updatedAt.toISOString(),
   })
 })
@@ -442,17 +457,34 @@ app.put('/api/ledger', async (req, res) => {
     res.status(400).json({ error: '请求体须包含 fields、records 数组' })
     return
   }
-  const { fields, records } = parsed.data
+  const { fields, records, productCatalog, productCatalogSuppressed } =
+    parsed.data
+  const data: {
+    fieldsJson: object[]
+    recordsJson: object[]
+    productCatalogJson?: object[]
+    productCatalogSuppressedJson?: string[]
+  } = {
+    fieldsJson: fields as object[],
+    recordsJson: records as object[],
+  }
+  if (productCatalog !== undefined) {
+    data.productCatalogJson = productCatalog as object[]
+  }
+  if (productCatalogSuppressed !== undefined) {
+    data.productCatalogSuppressedJson = productCatalogSuppressed
+  }
   const ledger = await prisma.ledger.update({
     where: { userId },
-    data: {
-      fieldsJson: fields as object[],
-      recordsJson: records as object[],
-    },
+    data,
   })
   res.json({
     fields: ledger.fieldsJson,
     records: ledger.recordsJson,
+    productCatalog: jsonArrayUnknown(ledger.productCatalogJson),
+    productCatalogSuppressed: jsonStringArray(
+      ledger.productCatalogSuppressedJson,
+    ),
     updatedAt: ledger.updatedAt.toISOString(),
   })
 })

@@ -1,6 +1,7 @@
 import { getAsrWebSocketUrl } from '../api/ledgerClient'
 import { APP_VERSION } from '../version'
 import { asrDiagLog } from './asrDiagLog'
+import { formatAsrUserFacingError } from './asrUserFacingError'
 
 function floatTo16BitPCM(float32: Float32Array): Int16Array {
   const out = new Int16Array(float32.length)
@@ -148,7 +149,7 @@ export function startVolcAsrSession(
         } catch {
           /* ignore */
         }
-        reject(new Error(message))
+        reject(new Error(formatAsrUserFacingError(message)))
       }
 
       const startMicPipeline = async () => {
@@ -264,8 +265,8 @@ export function startVolcAsrSession(
             message?: string
           }
           if (msg.type === 'error') {
-            const m = msg.message || '语音识别失败'
-            asrDiagLog(`服务端 error 帧: ${m.slice(0, 400)}`)
+            const m = formatAsrUserFacingError(msg.message || '语音识别失败')
+            asrDiagLog(`服务端 error 帧: ${(msg.message ?? '').slice(0, 400)}`)
             if (!micStarted) failEarly(m)
             else handlers.onError(m)
             return

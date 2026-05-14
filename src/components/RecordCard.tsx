@@ -1,9 +1,10 @@
 import { useCallback, useRef, useState } from 'react'
-import type { FieldDef, LedgerRecord } from '../types'
+import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
 import { ReceiptModal } from './ReceiptModal'
 import {
   expandProductLines,
-  formatQuantityWithJin,
+  formatQuantityWithUnit,
+  displayQuantityFieldName,
   getAmountFieldId,
   getExpectedAmount,
   getOutstanding,
@@ -25,17 +26,22 @@ const RECORD_LINE_GRID_4 =
 type Props = {
   record: LedgerRecord
   fields: FieldDef[]
+  productCatalog?: ProductCatalogEntry[]
   onEdit?: (record: LedgerRecord) => void
   onDelete?: (id: string) => void
   onReconcile?: (record: LedgerRecord) => void
+  /** 首页语音刚写入：绿色 New 与描边 */
+  showVoiceNewBadge?: boolean
 }
 
 export function RecordCard({
   record,
   fields,
+  productCatalog,
   onEdit,
   onDelete,
   onReconcile,
+  showVoiceNewBadge,
 }: Props) {
   const amountId = getAmountFieldId(fields)
   const exp = getExpectedAmount(record, amountId)
@@ -52,8 +58,9 @@ export function RecordCard({
   const plateField = ordered.find((f) => f.key === 'plate')
   const unitPriceColLabel =
     ordered.find((f) => f.key === 'unitPrice')?.name ?? '单价'
-  const quantityColLabel =
-    ordered.find((f) => f.key === 'quantity')?.name ?? '数量'
+  const quantityColLabel = displayQuantityFieldName(
+    ordered.find((f) => f.key === 'quantity')?.name ?? '数量',
+  )
   const plateDisplay = getPlateValue(record, fields)
 
   const extraFields = ordered.filter(
@@ -209,9 +216,11 @@ export function RecordCard({
         className={`relative z-10 rounded-2xl border text-left ${
           dragActive ? '' : 'transition-[transform] duration-200 ease-out'
         } ${
-          fullyPaid
-            ? 'border-stone-200 bg-stone-100'
-            : 'border-stone-200 bg-white'
+          showVoiceNewBadge
+            ? 'border-[#2ecc71]/55 bg-emerald-50 ring-2 ring-[#2ecc71]/45'
+            : fullyPaid
+              ? 'border-stone-200 bg-stone-100'
+              : 'border-stone-200 bg-white'
         } ${
           onEdit
             ? 'cursor-pointer'
@@ -257,17 +266,27 @@ export function RecordCard({
                     out={out}
                     settled={record.settled === true}
                   />
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setReceiptOpen(true)
-                    }}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    className="ml-auto shrink-0 rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-semibold text-[#666666] hover:bg-stone-50"
-                  >
-                    发票
-                  </button>
+                  <div className="ml-auto flex shrink-0 items-center gap-2">
+                    {showVoiceNewBadge && (
+                      <span
+                        className="rounded-md bg-[#2ecc71] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm"
+                        aria-label="新录入"
+                      >
+                        New
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setReceiptOpen(true)
+                      }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      className="shrink-0 rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-semibold text-[#666666] hover:bg-stone-50"
+                    >
+                      发票
+                    </button>
+                  </div>
                 </div>
                 {amountResolvedId &&
                   (exp > 0.005 || rec > 0.005 || fullyPaid) && (
@@ -318,7 +337,11 @@ export function RecordCard({
                               key={`${k}-q`}
                               className="whitespace-nowrap py-2 text-right text-sm tabular-nums leading-snug text-[#444444]"
                             >
-                              {formatQuantityWithJin(line.quantity)}
+                              {formatQuantityWithUnit(
+                                line.quantity,
+                                line.product,
+                                productCatalog,
+                              )}
                             </span>,
                             <span
                               key={`${k}-a`}
@@ -419,17 +442,27 @@ export function RecordCard({
                     out={out}
                     settled={record.settled === true}
                   />
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setReceiptOpen(true)
-                    }}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    className="ml-auto shrink-0 rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-semibold text-[#666666] hover:bg-stone-50"
-                  >
-                    发票
-                  </button>
+                  <div className="ml-auto flex shrink-0 items-center gap-2">
+                    {showVoiceNewBadge && (
+                      <span
+                        className="rounded-md bg-[#2ecc71] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm"
+                        aria-label="新录入"
+                      >
+                        New
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setReceiptOpen(true)
+                      }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      className="shrink-0 rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-semibold text-[#666666] hover:bg-stone-50"
+                    >
+                      发票
+                    </button>
+                  </div>
                 </div>
                 {amountResolvedId &&
                   (exp > 0.005 || rec > 0.005 || fullyPaid) && (
@@ -443,7 +476,11 @@ export function RecordCard({
                       <div key={`${record.id}-ln-${i}`} className="min-w-0 break-words">
                         <span className="font-medium">{line.product || '—'}</span>
                         <span className="ml-2 tabular-nums text-[#666666]">
-                          {formatQuantityWithJin(line.quantity)}
+                          {formatQuantityWithUnit(
+                                line.quantity,
+                                line.product,
+                                productCatalog,
+                              )}
                         </span>
                       </div>
                     ))}

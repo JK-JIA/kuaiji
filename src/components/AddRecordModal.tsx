@@ -6,13 +6,16 @@ import {
   computedLineAmountFromUnitAndQty,
   deriveUnitPriceFromAmountAndQty,
   emptyLineTripleTouched,
+  getPlateValue,
   parseMoney,
   parseNonNegativeMoney,
   reconcileLineTripleByLastEdited,
   sanitizeUnsignedDecimalInput,
+  displayQuantityFieldName,
   type LineTripleLastEdited,
   type LineTripleTouched,
 } from '../utils/recordHelpers'
+import { defaultUnitForProduct } from '../utils/productCatalogHelpers'
 import {
   applyVoiceFillFirstLine,
   buildLedgerRecordForSave,
@@ -81,7 +84,12 @@ export function AddRecordModal({
   } = layout
   const amountField = sortedFields.find((f) => f.key === 'amount')
 
-  const { records } = useLedger()
+  const qtyFieldDisplayName = useMemo(
+    () => (qtyField ? displayQuantityFieldName(qtyField.name) : '数量'),
+    [qtyField],
+  )
+
+  const { records, productCatalog } = useLedger()
 
   const [recordDate, setRecordDate] = useState(() =>
     format(new Date(), 'yyyy-MM-dd'),
@@ -113,14 +121,35 @@ export function AddRecordModal({
     return d > 0.005 ? Math.round(d * 100) / 100 : 0
   }, [lineSubtotal, dealNum])
 
-  const recentProductNames = useMemo(
-    () => recentProductNamesFromRecords(records, prodId, 14),
-    [records, prodId],
+  const recentProductNames = useMemo(() => {
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const e of productCatalog) {
+      const t = e.name.trim()
+      if (!t || seen.has(t)) continue
+      seen.add(t)
+      out.push(t)
+    }
+    for (const n of recentProductNamesFromRecords(records, prodId, 14)) {
+      if (!n || seen.has(n)) continue
+      seen.add(n)
+      out.push(n)
+    }
+    return out.slice(0, 24)
+  }, [records, prodId, productCatalog])
+
+  const plateFieldId = sortedFields.find((f) => f.key === 'plate')?.id
+  const recentBuyerNames = useMemo(
+    () => recentTopBuyersFromRecords(records, fields, 3),
+    [records, fields],
   )
 
   const modalAsrHotwords = useMemo(
-    () => collectAsrHotwordsFromLedger(records, fields),
-    [records, fields],
+    () =>
+      collectAsrHotwordsFromLedger(records, fields, {
+        productCatalog,
+      }),
+    [records, fields, productCatalog],
   )
 
   const dateCompactLabel = useMemo(() => {
@@ -130,6 +159,12 @@ export function AddRecordModal({
       return recordDate
     }
   }, [recordDate])
+
+  const applyRecentBuyer = useCallback((name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed || !plateFieldId) return
+    setValues((v) => ({ ...v, [plateFieldId]: trimmed }))
+  }, [plateFieldId])
 
   const applyRecentProduct = useCallback((name: string) => {
     const trimmed = name.trim()
@@ -378,6 +413,7 @@ export function AddRecordModal({
             <VoiceInputSection
             fields={sortedFields}
             records={records}
+            productCatalog={productCatalog}
             asrHotwords={modalAsrHotwords}
             onApplyParsed={(data, productLines) => {
               setValues((v) => mergeVoiceParsedIntoValues(sortedFields, v, data))
@@ -406,6 +442,25 @@ export function AddRecordModal({
                         </span>
                       )}
                     </span>
+                    {f.key === 'plate' && recentBuyerNames.length > 0 && (
+                      <div className="mt-2 mb-1">
+                        <p className="mb-1.5 text-xs font-medium text-[#666666]">
+                          最近常用
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {recentBuyerNames.map((name) => (
+                            <button
+                              key={name}
+                              type="button"
+                              onClick={() => applyRecentBuyer(name)}
+                              className="max-w-full truncate rounded-full border border-stone-200/90 bg-stone-100/90 px-3 py-1.5 text-xs font-medium text-neutral-800 active:bg-stone-200"
+                            >
+                              {name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <input
                       type="text"
                       inputMode={f.type === 'number' ? 'decimal' : 'text'}
@@ -465,7 +520,12 @@ export function AddRecordModal({
               <div className="rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm">
                 {!showDetailAmounts || !canonicalAmountId ? (
                   <div className="space-y-3 pt-2">
-                    {lines.map((line, idx) => (
+                    {lines.map((line, idx) => {
+                      const lineUnit = defaultUnitForProduct(
+                        line.product,
+                        productCatalog,
+                      )
+                      return (
                       <div
                         key={line.id}
                         className="flex flex-wrap items-end gap-2 rounded-xl border border-stone-100 bg-[#fafafa] p-3"
@@ -493,7 +553,7 @@ export function AddRecordModal({
                           />
                         </label>
                         <label className="w-[6.5rem] shrink-0 text-left text-xs font-medium text-[#666666]">
-                          {qtyField.name}
+                          {qtyFieldDisplayName}
                           {qtyField.required && (
                             <span className="text-rose-500" aria-hidden>
                               *
@@ -514,7 +574,7 @@ export function AddRecordModal({
                               )
                             }}
                             className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-2 py-2.5 text-center text-base tabular-nums text-neutral-900"
-                            placeholder={qtyField.name}
+                            placeholder={lineUnit}
                             autoComplete="off"
                             spellCheck={false}
                           />
@@ -529,13 +589,14 @@ export function AddRecordModal({
                           </button>
                         )}
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 ) : (
                   <div className="min-w-0 overflow-x-auto overscroll-x-contain pt-2">
-                    <div className="min-w-[17.5rem]">
+                    <div className="min-w-[20.25rem]">
                       <div
-                        className="grid grid-cols-[minmax(0,1fr)_3.25rem_3.25rem_4rem_2.25rem] gap-x-2 border-b border-stone-100 pb-2 text-xs font-medium text-[#666666]"
+                        className="grid grid-cols-[minmax(7.5rem,1fr)_2.75rem_2.75rem_3.25rem_2rem] gap-x-2 border-b border-stone-100 pb-2 text-xs font-medium text-[#666666]"
                       >
                         <span className="min-w-0 break-words">
                           {prodField.name}
@@ -543,17 +604,22 @@ export function AddRecordModal({
                         <span className="text-center">
                           {unitPriceField?.name ?? '单价'}
                         </span>
-                        <span className="text-center">{qtyField.name}</span>
+                        <span className="text-center">{qtyFieldDisplayName}</span>
                         <span className="text-right">
                           {amountField?.name ?? '金额'}
                         </span>
                         <span aria-hidden className="w-2 shrink-0" />
                       </div>
                   <div className="divide-y divide-stone-100">
-                    {lines.map((line, idx) => (
+                    {lines.map((line, idx) => {
+                      const lineUnit = defaultUnitForProduct(
+                        line.product,
+                        productCatalog,
+                      )
+                      return (
                       <div
                         key={line.id}
-                        className="grid grid-cols-[minmax(0,1fr)_3.25rem_3.25rem_4rem_2.25rem] items-center gap-x-2 py-2.5 first:pt-0"
+                        className="grid grid-cols-[minmax(7.5rem,1fr)_2.75rem_2.75rem_3.25rem_2rem] items-center gap-x-2 py-2.5 first:pt-0"
                       >
                         <input
                           value={line.product}
@@ -566,7 +632,7 @@ export function AddRecordModal({
                               ),
                             )
                           }
-                          className="min-w-0 rounded-xl border border-stone-200 bg-[#fafafa] px-2.5 py-2 text-sm text-neutral-900 placeholder:text-[#999999]"
+                          className="w-full min-w-[7.5rem] rounded-xl border border-stone-200 bg-[#fafafa] px-2.5 py-2 text-sm text-neutral-900 placeholder:text-[#999999]"
                           placeholder="商品名称"
                           aria-label={prodField.name}
                         />
@@ -602,7 +668,7 @@ export function AddRecordModal({
                             )
                           }}
                           className="rounded-xl border border-stone-200 bg-[#fafafa] px-1.5 py-2 text-center text-sm tabular-nums text-neutral-900 placeholder:text-[#999999]"
-                          placeholder="元/斤"
+                          placeholder={`元/${lineUnit}`}
                           aria-label={unitPriceField?.name ?? '单价'}
                           autoComplete="off"
                           spellCheck={false}
@@ -639,8 +705,8 @@ export function AddRecordModal({
                             )
                           }}
                           className="rounded-xl border border-stone-200 bg-[#fafafa] px-1.5 py-2 text-center text-sm tabular-nums text-neutral-900 placeholder:text-[#999999]"
-                          placeholder="斤"
-                          aria-label={qtyField.name}
+                          placeholder={lineUnit}
+                          aria-label={qtyFieldDisplayName}
                           autoComplete="off"
                           spellCheck={false}
                         />
@@ -697,7 +763,8 @@ export function AddRecordModal({
                           )}
                         </div>
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
                     </div>
                   </div>
@@ -717,7 +784,7 @@ export function AddRecordModal({
                         </span>
                       </div>
                       <p className="mt-1 text-xs leading-tight text-[#999999]">
-                        各行：单价、{qtyField.name}、金额任填两项，自动算第三项并合计为应收
+                        各行：单价、{qtyFieldDisplayName}、金额任填两项，自动算第三项并合计为应收
                       </p>
                     </div>
                     <div className="mt-4 rounded-xl border border-stone-100 bg-[#f8f9fa] p-3">
@@ -844,6 +911,24 @@ function CloseGlyph({ className }: { className?: string }) {
       <path d="M18 6L6 18M6 6l12 12" />
     </svg>
   )
+}
+
+function recentTopBuyersFromRecords(
+  list: LedgerRecord[],
+  fieldDefs: FieldDef[],
+  limit: number,
+): string[] {
+  if (limit <= 0) return []
+  const freq = new Map<string, number>()
+  for (const r of list) {
+    const t = getPlateValue(r, fieldDefs).trim()
+    if (!t) continue
+    freq.set(t, (freq.get(t) ?? 0) + 1)
+  }
+  return [...freq.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-CN'))
+    .slice(0, limit)
+    .map(([name]) => name)
 }
 
 function recentProductNamesFromRecords(
