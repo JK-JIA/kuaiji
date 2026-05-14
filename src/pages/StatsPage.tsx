@@ -1,4 +1,4 @@
-import { format } from 'date-fns'
+import { differenceInCalendarDays, format, parse, subDays } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import {
   useCallback,
@@ -111,11 +111,16 @@ function compareBuyerOutstandingRows(
   return a.buyer.localeCompare(b.buyer, 'zh-CN')
 }
 
+type StatsRangeMode = 'preset' | 'custom'
+
 export function StatsPage() {
   const { ready, fields, records } = useLedger()
   const [kind, setKind] = useState<ReportKind>('month')
   /** 0=当前周期，-1=上一周期，不可大于 0（不向未来空周期） */
   const [periodOffset, setPeriodOffset] = useState(0)
+  const [rangeMode, setRangeMode] = useState<StatsRangeMode>('preset')
+  const [customStartStr, setCustomStartStr] = useState('')
+  const [customEndStr, setCustomEndStr] = useState('')
   const [customStatsOpen, setCustomStatsOpen] = useState(false)
   const [statsDetailModal, setStatsDetailModal] = useState<
     null | 'product' | 'buyerProduct' | 'buyerOutstanding'
@@ -147,17 +152,75 @@ export function StatsPage() {
     () => getCurrentReportRange(kind, anchorDate),
     [kind, anchorDate],
   )
-  const prevBounds = useMemo(
-    () => getPreviousReportRange(kind, anchorDate),
-    [kind, anchorDate],
-  )
 
   const curStart = toDateStr(currentBounds.start)
   const curEnd = toDateStr(currentBounds.end)
+
+  const customRangeSorted = useMemo(() => {
+    if (!customStartStr || !customEndStr) return null
+    if (customStartStr <= customEndStr)
+      return { startStr: customStartStr, endStr: customEndStr }
+    return { startStr: customEndStr, endStr: customStartStr }
+  }, [customStartStr, customEndStr])
+
+  /** 自定义但未选全日期时不用预设区间，避免界面与数据不一致 */
+  const emptyRangeAnchor = useMemo(
+    () => parse('2099-01-01', 'yyyy-MM-dd', new Date()),
+    [],
+  )
+
+  const activeStartStr =
+    rangeMode === 'custom'
+      ? customRangeSorted
+        ? customRangeSorted.startStr
+        : toDateStr(emptyRangeAnchor)
+      : curStart
+  const activeEndStr =
+    rangeMode === 'custom'
+      ? customRangeSorted
+        ? customRangeSorted.endStr
+        : toDateStr(emptyRangeAnchor)
+      : curEnd
+
+  const prevBounds = useMemo(() => {
+    if (rangeMode === 'custom') {
+      if (!customRangeSorted)
+        return { start: emptyRangeAnchor, end: emptyRangeAnchor }
+      const s = parse(customRangeSorted.startStr, 'yyyy-MM-dd', new Date())
+      const e = parse(customRangeSorted.endStr, 'yyyy-MM-dd', new Date())
+      const days = differenceInCalendarDays(e, s) + 1
+      if (days < 1) return { start: emptyRangeAnchor, end: emptyRangeAnchor }
+      const prevEnd = subDays(s, 1)
+      const prevStart = subDays(prevEnd, days - 1)
+      return { start: prevStart, end: prevEnd }
+    }
+    return getPreviousReportRange(kind, anchorDate)
+  }, [
+    rangeMode,
+    customRangeSorted,
+    kind,
+    anchorDate,
+    emptyRangeAnchor,
+  ])
+
   const prevStart = toDateStr(prevBounds.start)
   const prevEnd = toDateStr(prevBounds.end)
 
   const rangeTitle = useMemo(() => {
+    if (rangeMode === 'custom') {
+      if (!customRangeSorted) return '请选择开始与结束日期'
+      const a = format(
+        parse(customRangeSorted.startStr, 'yyyy-MM-dd', new Date()),
+        'yyyy年M月d日',
+        { locale: zhCN },
+      )
+      const b = format(
+        parse(customRangeSorted.endStr, 'yyyy-MM-dd', new Date()),
+        'yyyy年M月d日',
+        { locale: zhCN },
+      )
+      return `${a} — ${b}（自定义）`
+    }
     const a = format(currentBounds.start, 'yyyy年M月d日', { locale: zhCN })
     const b = format(currentBounds.end, 'yyyy年M月d日', { locale: zhCN })
     let tag: string
@@ -180,14 +243,20 @@ export function StatsPage() {
             : `${n} 年前`
     }
     return `${a} — ${b}（${tag}）`
-  }, [kind, currentBounds, periodOffset])
+  }, [rangeMode, customRangeSorted, kind, currentBounds, periodOffset])
 
   const compareLabel =
-    kind === 'week' ? '较上周' : kind === 'month' ? '较上月' : '较去年'
+    rangeMode === 'custom'
+      ? '较上一等长时段'
+      : kind === 'week'
+        ? '较上周'
+        : kind === 'month'
+          ? '较上月'
+          : '较去年'
 
   const currentRecords = useMemo(
-    () => filterByRange(records, curStart, curEnd),
-    [records, curStart, curEnd],
+    () => filterByRange(records, activeStartStr, activeEndStr),
+    [records, activeStartStr, activeEndStr],
   )
   const prevRecords = useMemo(
     () => filterByRange(records, prevStart, prevEnd),
@@ -197,7 +266,7 @@ export function StatsPage() {
   useEffect(() => {
     setStatsFilterBuyer('')
     setStatsFilterProduct('')
-  }, [curStart, curEnd])
+  }, [activeStartStr, activeEndStr])
 
   const totalAmount = sumAmount(currentRecords, amountId)
   const totalOutstanding = useMemo(
@@ -369,7 +438,7 @@ export function StatsPage() {
           统计分析
         </h1>
         <p className="mt-0.5 text-xs leading-relaxed text-[#666666]">
-          按周/月/年查看，可与上期对比。
+          按周/月/年或自定义起止日期查看，可与上期对比。
         </p>
       </header>
 
@@ -384,9 +453,12 @@ export function StatsPage() {
           <button
             key={k}
             type="button"
-            onClick={() => setKind(k)}
+            onClick={() => {
+              setRangeMode('preset')
+              setKind(k)
+            }}
             className={`rounded-xl px-4 py-2 text-sm font-semibold shadow-sm transition-colors ${
-              kind === k
+              rangeMode === 'preset' && kind === k
                 ? 'bg-[#2ecc71] text-white hover:bg-[#27ae60]'
                 : 'border border-stone-200/90 bg-white text-[#666666] hover:bg-stone-50'
             }`}
@@ -394,36 +466,87 @@ export function StatsPage() {
             {label}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => {
+            setRangeMode('custom')
+            setCustomStartStr(curStart)
+            setCustomEndStr(curEnd)
+          }}
+          className={`rounded-xl px-4 py-2 text-sm font-semibold shadow-sm transition-colors ${
+            rangeMode === 'custom'
+              ? 'bg-[#2ecc71] text-white hover:bg-[#27ae60]'
+              : 'border border-stone-200/90 bg-white text-[#666666] hover:bg-stone-50'
+          }`}
+        >
+          自定义
+        </button>
       </div>
 
+      {rangeMode === 'custom' && (
+        <div className="mx-4 mb-4 flex flex-col gap-3 rounded-2xl border border-stone-200/90 bg-white p-3 shadow-sm sm:flex-row sm:flex-wrap sm:items-end">
+          <label className="flex min-w-[140px] flex-1 flex-col gap-1.5">
+            <span className="text-xs font-medium text-[#666666]">开始日期</span>
+            <input
+              type="date"
+              value={customStartStr}
+              onChange={(e) => setCustomStartStr(e.target.value)}
+              className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900"
+            />
+          </label>
+          <label className="flex min-w-[140px] flex-1 flex-col gap-1.5">
+            <span className="text-xs font-medium text-[#666666]">结束日期</span>
+            <input
+              type="date"
+              value={customEndStr}
+              onChange={(e) => setCustomEndStr(e.target.value)}
+              className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900"
+            />
+          </label>
+          <p className="text-[11px] leading-relaxed text-[#999999] sm:pb-2">
+            含起止两天；环比为紧邻上一段等长日历区间。
+          </p>
+        </div>
+      )}
+
       <div className="mx-4 mb-4 flex items-center gap-2 rounded-2xl border border-stone-200/90 bg-white px-2 py-2 shadow-sm">
-        <button
-          type="button"
-          aria-label="上一周期"
-          onClick={() => setPeriodOffset((o) => o - 1)}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-stone-200 bg-[#fafafa] text-[#666666] transition-colors hover:bg-stone-100"
-        >
-          <StatsChevronLeft className="h-5 w-5" />
-        </button>
-        <p className="min-w-0 flex-1 px-1 text-center text-xs leading-relaxed text-[#666666]">
-          {rangeTitle}
-        </p>
-        <button
-          type="button"
-          aria-label="下一周期"
-          disabled={periodOffset >= 0}
-          onClick={() => setPeriodOffset((o) => Math.min(0, o + 1))}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-stone-200 bg-[#fafafa] text-[#666666] transition-colors hover:bg-stone-100 disabled:pointer-events-none disabled:opacity-35"
-        >
-          <StatsChevronRight className="h-5 w-5" />
-        </button>
+        {rangeMode === 'preset' ? (
+          <>
+            <button
+              type="button"
+              aria-label="上一周期"
+              onClick={() => setPeriodOffset((o) => o - 1)}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-stone-200 bg-[#fafafa] text-[#666666] transition-colors hover:bg-stone-100"
+            >
+              <StatsChevronLeft className="h-5 w-5" />
+            </button>
+            <p className="min-w-0 flex-1 px-1 text-center text-xs leading-relaxed text-[#666666]">
+              {rangeTitle}
+            </p>
+            <button
+              type="button"
+              aria-label="下一周期"
+              disabled={periodOffset >= 0}
+              onClick={() => setPeriodOffset((o) => Math.min(0, o + 1))}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-stone-200 bg-[#fafafa] text-[#666666] transition-colors hover:bg-stone-100 disabled:pointer-events-none disabled:opacity-35"
+            >
+              <StatsChevronRight className="h-5 w-5" />
+            </button>
+          </>
+        ) : (
+          <p className="min-w-0 flex-1 px-1 py-2 text-center text-xs leading-relaxed text-[#666666]">
+            {rangeTitle}
+          </p>
+        )}
       </div>
 
       <section className="mx-4 mb-6 rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm sm:p-5">
         <p className="text-xs font-medium text-[#666666]">
-          {periodOffset === 0
-            ? `${kind === 'week' ? '本周' : kind === 'month' ? '本月' : '本年'}汇总`
-            : '该周期汇总'}
+          {rangeMode === 'custom'
+            ? '该时段汇总'
+            : periodOffset === 0
+              ? `${kind === 'week' ? '本周' : kind === 'month' ? '本月' : '本年'}汇总`
+              : '该周期汇总'}
         </p>
         <div className="mt-4 grid gap-6 sm:grid-cols-2">
           <div>
@@ -486,7 +609,9 @@ export function StatsPage() {
 
       {currentRecords.length === 0 && (
         <div className="mx-4 mb-6 flex items-center justify-center gap-2 rounded-2xl border border-dashed border-stone-300 bg-white py-10 text-sm text-[#666666]">
-          <span>本周期暂无账单</span>
+          <span>
+            {rangeMode === 'custom' ? '该时段暂无账单' : '本周期暂无账单'}
+          </span>
         </div>
       )}
 
@@ -639,7 +764,9 @@ export function StatsPage() {
               </div>
             ) : buyerOutstandingRows.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-stone-300 bg-white py-8 text-center text-sm text-[#666666]">
-                本周期内暂无未核账金额
+                {rangeMode === 'custom'
+                  ? '该时段内暂无未核账金额'
+                  : '本周期内暂无未核账金额'}
               </div>
             ) : (
               <div className="overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-sm">
