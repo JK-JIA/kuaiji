@@ -842,6 +842,9 @@ export function SettingsPage() {
             检查更新（Android）
           </button>
           <p className="mt-1.5 text-[11px] leading-relaxed text-[#666666]">
+            若下载站配置了网页 zip（见官网说明），将优先热更新并保留登录；仅壳版本不足时才需整包 APK。
+          </p>
+          <p className="mt-1.5 text-[11px] leading-relaxed text-[#666666]">
             记账以手动填写为主；同步见「账号」。
           </p>
         </footer>

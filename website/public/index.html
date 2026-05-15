@@ -12,7 +12,8 @@
         <p class="eyebrow">批发记账</p>
         <h1>记账本</h1>
         <p class="lede">
-          公开下载各版本 Android 安装包。管理员请在下方的<strong>管理后台</strong>登录后上传或删除版本。
+          公开下载各版本 Android 安装包与网页热更新包。管理员请在下方的<strong>管理后台</strong>登录后上传或删除版本（APK
+          整包安装 / zip 热更新由扩展名自动识别）。
         </p>
       </header>
 
@@ -55,17 +56,49 @@
 
           <form id="upload-form" class="stack-form upload-form-inner">
             <label class="field">
-              <span class="label">APK 文件</span>
+              <span class="label">安装包（.apk）或热更新包（.zip）</span>
               <input
                 name="file"
                 type="file"
-                accept=".apk,application/vnd.android.package-archive"
+                accept=".apk,application/vnd.android.package-archive,.zip,application/zip"
                 required
               />
             </label>
+            <p class="upload-hint">
+              上传 <code>.zip</code> 时写入 <code>bundle</code> 字段，App 内热更新；上传
+              <code>.apk</code> 时写入 <code>file</code> 字段，整包安装替换。
+            </p>
             <label class="field">
               <span class="label">版本号</span>
               <input name="version" type="text" placeholder="例如 1.0.5" required />
+            </label>
+            <label class="field">
+              <span class="label">热更新包版本（选填，仅 zip）</span>
+              <input
+                name="bundleVersion"
+                type="text"
+                placeholder="默认同上「版本号」；与 App 内比对 semver"
+              />
+            </label>
+            <label class="field">
+              <span class="label">原生 versionCode（选填，仅 apk）</span>
+              <input
+                name="versionCode"
+                type="number"
+                min="1"
+                step="1"
+                placeholder="与 build.gradle 一致时便于客户端比较"
+              />
+            </label>
+            <label class="field">
+              <span class="label">最低原生 versionCode（选填，仅 zip）</span>
+              <input
+                name="minNativeVersionCode"
+                type="number"
+                min="1"
+                step="1"
+                placeholder="低于此壳版本时 App 只提示整包 APK"
+              />
             </label>
             <label class="field">
               <span class="label">日期</span>

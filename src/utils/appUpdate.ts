@@ -15,7 +15,14 @@ export type AndroidLatestEnabled = {
   /** 来自 manifest 的 versionCode；未填则为 0，此时用 versionName 做 semver 比较 */
   versionCode: number
   versionName: string
+  /** 整包 APK 下载地址；无 file 时为空串 */
   apkUrl: string
+  /** 热更新 zip（与 APK 同目录 downloads/）；与 apkUrl 可同时存在 */
+  bundleUrl?: string
+  /** 热更新包版本号（传给 Capgo），默认同 versionName */
+  bundleVersion?: string
+  /** 最低原生 versionCode；当前壳低于此值时只走 APK、不发热更 */
+  minNativeVersionCode?: number
   releaseNotes: string
   /** 与首条 release 对应，写入 localStorage 跳过 */
   skipTag: string
@@ -25,6 +32,12 @@ export type AndroidLatestResponse = AndroidLatestDisabled | AndroidLatestEnabled
 export type ReleaseManifestItem = {
   version?: string
   file?: string
+  /** 可选：Web 资源 zip（放 downloads/），与 file 可同时存在；有热更插件时优先热更 */
+  bundle?: string
+  /** 可选：热更新版本标识，默认同 version */
+  bundleVersion?: string
+  /** 可选：最低原生 versionCode，低于此值必须整包安装 APK */
+  minNativeVersionCode?: number
   notes?: string
   channel?: string
   date?: string
@@ -42,10 +55,11 @@ export function getReleasesManifestUrl(): string | undefined {
 
 function releaseItemTag(item: ReleaseManifestItem): string {
   const vc = item.versionCode
+  const b = String(item.bundle ?? '').trim()
   if (typeof vc === 'number' && Number.isFinite(vc) && vc > 0) {
-    return `vc:${vc}`
+    return b ? `vc:${vc}|b:${b}` : `vc:${vc}`
   }
-  return `v:${String(item.version ?? '').trim()}|f:${String(item.file ?? '').trim()}`
+  return `v:${String(item.version ?? '').trim()}|f:${String(item.file ?? '').trim()}|b:${b}`
 }
 
 /** a > b 返回正数；用于 manifest 仅有 version 字符串时 */
@@ -106,28 +120,48 @@ export async function fetchLatestFromReleasesManifest(
   }
   const items = Array.isArray(data.items) ? data.items : []
   const item = items[0]
-  if (!item?.file) return { enabled: false }
+  const fileRaw = String(item?.file ?? '').trim()
+  const bundleRaw = String(item?.bundle ?? '').trim()
+  if (!fileRaw && !bundleRaw) return { enabled: false }
 
   const base = new URL(manifestUrl)
-  const file = String(item.file).replace(/^\/+/, '')
-  const apkUrl = `${base.origin}/downloads/${encodeURIComponent(file)}`
+  const file = fileRaw.replace(/^\/+/, '')
+  const apkUrl = file
+    ? `${base.origin}/downloads/${encodeURIComponent(file)}`
+    : ''
+  const bundleUrl = bundleRaw
+    ? `${base.origin}/downloads/${encodeURIComponent(bundleRaw)}`
+    : undefined
 
-  const versionName = String(item.version ?? '').trim()
-  const notes = String(item.notes ?? '').trim()
+  const versionName = String(item?.version ?? '').trim()
+  const notes = String(item?.notes ?? '').trim()
   const versionCode =
-    typeof item.versionCode === 'number' &&
+    typeof item?.versionCode === 'number' &&
     Number.isFinite(item.versionCode) &&
     item.versionCode > 0
       ? item.versionCode
       : 0
+
+  const minNative =
+    typeof item?.minNativeVersionCode === 'number' &&
+    Number.isFinite(item.minNativeVersionCode) &&
+    item.minNativeVersionCode > 0
+      ? item.minNativeVersionCode
+      : undefined
+
+  const bv = String(item?.bundleVersion ?? '').trim()
+  const bundleVersion = bv || versionName || undefined
 
   return {
     enabled: true,
     versionCode,
     versionName,
     apkUrl,
+    bundleUrl,
+    bundleVersion,
+    minNativeVersionCode: minNative,
     releaseNotes: notes,
-    skipTag: releaseItemTag(item),
+    skipTag: releaseItemTag(item ?? {}),
   }
 }
 
@@ -173,6 +207,33 @@ export function isRemoteNewerThanInstalled(
     return compareSemver(latest.versionName, localVersionName) > 0
   }
   return false
+}
+
+/** 热更新版本比较：remote 比 local 新则 true；local 为空视为可更新 */
+export function isRemoteBundleNewerThanLocal(
+  remoteVersion: string,
+  localVersion: string,
+): boolean {
+  const r = String(remoteVersion || '').trim()
+  const l = String(localVersion || '').trim()
+  if (!r) return false
+  if (!l) return true
+  return compareSemver(r, l) > 0
+}
+
+/** 当前生效的 Web 包版本（Capgo）；无插件或非内置时返回空串 */
+export async function getLocalWebBundleVersion(): Promise<string> {
+  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
+    return ''
+  }
+  if (!Capacitor.isPluginAvailable('CapacitorUpdater')) return ''
+  const { CapacitorUpdater } = await import('@capgo/capacitor-updater')
+  const cur = await CapacitorUpdater.current()
+  if (cur.bundle.id === 'builtin') {
+    const bv = await CapacitorUpdater.getBuiltinVersion()
+    return String(bv.version || '').trim()
+  }
+  return String(cur.bundle.version || '').trim()
 }
 
 /** 将 APK ArrayBuffer 转为 base64，分块避免单次参数过大 */

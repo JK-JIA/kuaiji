@@ -12,20 +12,25 @@ const RELEASES_PATH =
 const app = express()
 app.use(express.json({ limit: '1mb' }))
 
-function safeBasename(name) {
-  const base = path.basename(name || '').replace(/[^\w.\-()+ ]/g, '_')
+/** 上传文件名：仅允许 .apk / .zip，返回类型与净化后的 basename */
+function safeReleaseBasename(originalName) {
+  const base = path.basename(originalName || '').replace(/[^\w.\-()+ ]/g, '_')
   if (!base || base === '.' || base === '..') return null
-  if (!/\.apk$/i.test(base)) return null
-  return base
+  const lower = base.toLowerCase()
+  if (lower.endsWith('.apk')) return { kind: 'apk', name: base }
+  if (lower.endsWith('.zip')) return { kind: 'zip', name: base }
+  return null
 }
 
-/** 删除列表项时按「basename + 忽略大小写」匹配，避免与 JSON 里文件名略有出入时误报 404 */
-function apkBasenameForMatch(ref) {
+/** 删除接口：解析要删的 basename（apk 或 zip） */
+function releaseAssetBasenameForDelete(ref) {
   const s = String(ref ?? '').trim()
-  if (!s || s.includes('..')) return ''
+  if (!s || s.includes('..')) return null
   const b = path.basename(s)
-  if (!/\.apk$/i.test(b)) return ''
-  return b
+  const lower = b.toLowerCase()
+  if (lower.endsWith('.apk')) return { kind: 'apk', name: b }
+  if (lower.endsWith('.zip')) return { kind: 'zip', name: b }
+  return null
 }
 
 function tokenOk(req) {
@@ -40,14 +45,21 @@ function tokenOk(req) {
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, DOWNLOADS_DIR),
   filename: (_req, file, cb) => {
-    const s = safeBasename(file.originalname)
-    cb(null, s || `kuaiji-${Date.now()}.apk`)
+    const s = safeReleaseBasename(file.originalname)
+    cb(null, s?.name || `kuaiji-${Date.now()}.apk`)
   },
 })
 
 const upload = multer({
   storage,
   limits: { fileSize: 200 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (safeReleaseBasename(file.originalname)) {
+      cb(null, true)
+      return
+    }
+    cb(new Error('只支持 .apk 安装包或 .zip 热更新包'))
+  },
 })
 
 app.get('/api/health', (_req, res) => {
@@ -85,7 +97,13 @@ app.post('/api/upload', (req, res) => {
       return
     }
     if (!req.file) {
-      res.status(400).json({ error: '请选择 APK 文件' })
+      res.status(400).json({ error: '请选择 APK 或 zip 热更新包' })
+      return
+    }
+    const kind = safeReleaseBasename(req.file.originalname)?.kind
+    if (!kind) {
+      await fs.unlink(req.file.path).catch(() => {})
+      res.status(400).json({ error: '不支持的文件类型' })
       return
     }
     const version = String(req.body.version || '').trim()
@@ -99,6 +117,15 @@ app.post('/api/upload', (req, res) => {
       new Date().toISOString().slice(0, 10)
     const notes = String(req.body.notes || '').trim()
     const channel = String(req.body.channel || '').trim() || 'release'
+
+    const parseOptInt = (v) => {
+      const n = parseInt(String(v ?? '').trim(), 10)
+      return Number.isFinite(n) && n > 0 ? n : undefined
+    }
+    const versionCode = parseOptInt(req.body.versionCode)
+    const minNativeVersionCode = parseOptInt(req.body.minNativeVersionCode)
+    const bundleVersionRaw = String(req.body.bundleVersion || '').trim()
+    const bundleVersion = bundleVersionRaw || version
 
     try {
       let raw
@@ -115,15 +142,40 @@ app.post('/api/upload', (req, res) => {
       }
       if (!Array.isArray(data.items)) data.items = []
 
-      const file = path.basename(req.file.path)
-      const entry = { version, file, date, channel, notes }
-      data.items = [entry, ...data.items.filter((x) => x?.file !== file)]
+      const uploadedName = path.basename(req.file.path)
+      /** @type {Record<string, unknown>} */
+      let entry
+      if (kind === 'apk') {
+        entry = { version, file: uploadedName, date, channel, notes }
+        if (versionCode != null) entry.versionCode = versionCode
+      } else {
+        entry = {
+          version,
+          bundle: uploadedName,
+          bundleVersion,
+          date,
+          channel,
+          notes,
+        }
+        if (minNativeVersionCode != null) {
+          entry.minNativeVersionCode = minNativeVersionCode
+        }
+      }
+
+      data.items = [
+        entry,
+        ...data.items.filter((x) => {
+          if (kind === 'apk' && x?.file === uploadedName) return false
+          if (kind === 'zip' && x?.bundle === uploadedName) return false
+          return true
+        }),
+      ]
 
       const tmp = `${RELEASES_PATH}.${process.pid}.tmp`
       await fs.writeFile(tmp, JSON.stringify(data, null, 2), 'utf8')
       await fs.rename(tmp, RELEASES_PATH)
 
-      res.json({ ok: true, entry })
+      res.json({ ok: true, entry, kind })
     } catch (e) {
       console.error(e)
       await fs.unlink(req.file.path).catch(() => {})
@@ -143,12 +195,14 @@ app.post('/api/release/delete', async (req, res) => {
     res.status(401).json({ error: '无效或缺少上传令牌' })
     return
   }
-  const target = apkBasenameForMatch(req.body?.file)
-  if (!target) {
-    res.status(400).json({ error: '无效的 APK 文件名' })
+  const rawTarget =
+    req.body?.target ?? req.body?.file ?? req.body?.bundle ?? ''
+  const parsed = releaseAssetBasenameForDelete(rawTarget)
+  if (!parsed) {
+    res.status(400).json({ error: '无效的 APK 或 zip 文件名' })
     return
   }
-  const targetLower = target.toLowerCase()
+  const targetLower = parsed.name.toLowerCase()
   try {
     let raw
     try {
@@ -164,19 +218,22 @@ app.post('/api/release/delete', async (req, res) => {
     }
     if (!Array.isArray(data.items)) data.items = []
 
-    const removedNames = []
+    const removedRows = []
     data.items = data.items.filter((x) => {
-      const bn = apkBasenameForMatch(x?.file)
-      if (bn && bn.toLowerCase() === targetLower) {
-        removedNames.push(bn)
+      const f = String(x?.file ?? '').trim()
+      const b = String(x?.bundle ?? '').trim()
+      const fbn = f ? path.basename(f).toLowerCase() : ''
+      const bbn = b ? path.basename(b).toLowerCase() : ''
+      if (fbn === targetLower || bbn === targetLower) {
+        removedRows.push(x)
         return false
       }
       return true
     })
 
-    if (removedNames.length === 0) {
+    if (removedRows.length === 0) {
       res.status(404).json({
-        error: `列表中找不到「${target}」。请刷新页面后重试；若服务端未重建镜像，请在 website 目录执行 docker compose up -d --build。`,
+        error: `列表中找不到「${parsed.name}」。请刷新页面后重试；若服务端未重建镜像，请在 website 目录执行 docker compose up -d --build。`,
       })
       return
     }
@@ -185,11 +242,18 @@ app.post('/api/release/delete', async (req, res) => {
     await fs.writeFile(tmp, JSON.stringify(data, null, 2), 'utf8')
     await fs.rename(tmp, RELEASES_PATH)
 
-    for (const n of removedNames) {
+    const toUnlink = new Set()
+    for (const row of removedRows) {
+      const f = String(row?.file ?? '').trim()
+      const b = String(row?.bundle ?? '').trim()
+      if (f) toUnlink.add(path.basename(f))
+      if (b) toUnlink.add(path.basename(b))
+    }
+    for (const n of toUnlink) {
       await fs.unlink(path.join(DOWNLOADS_DIR, n)).catch(() => {})
     }
 
-    res.json({ ok: true, removed: removedNames })
+    res.json({ ok: true, removed: [...toUnlink] })
   } catch (e) {
     console.error(e)
     res.status(500).json({

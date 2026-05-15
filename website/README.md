@@ -29,32 +29,61 @@ docker compose up -d --build
 
 1. 在 **`website/.env`** 中设置 **`UPLOAD_TOKEN`**。
 2. 打开首页 → **管理后台** → 输入令牌 → **登录**（令牌保存在浏览器 `sessionStorage`，关闭浏览器后需重新登录）。
-3. 登录后出现 **版本管理**：可**连续上传**多个 APK；下方 **版本列表** 中每条在登录状态下显示 **删除**（同步更新 `releases.json` 并删除 `downloads/` 中文件）。
+3. 登录后出现 **版本管理**：可**连续上传**多个 **APK（整包安装）** 或 **zip（网页热更新）**；下方 **版本列表** 中每条在登录状态下显示 **删除**（同步更新 `releases.json` 并删除 `downloads/` 中对应文件）。
 4. **退出登录** 后访客仅可下载，看不到删除按钮，也无法调用需鉴权的接口。
 
-限制：单文件最大 **200MB**；仅接受扩展名为 **`.apk`** 的文件名。
+限制：单文件最大 **200MB**；上传接口接受 **`.apk`** 与 **`.zip`**（由扩展名自动识别：apk 写入 `file` 字段，zip 写入 `bundle` 等字段，与 App 端逻辑一致）。
 
 API 摘要：
 
 - `POST /api/auth/login` — JSON `{ "token": "…" }` 校验令牌。
-- `POST /api/upload` — `multipart/form-data`，头 `Authorization: Bearer <UPLOAD_TOKEN>`。
-- `POST /api/release/delete` — JSON `{ "file": "xxx.apk" }`，头 `Authorization: Bearer <UPLOAD_TOKEN>`。
+- `POST /api/upload` — `multipart/form-data`，字段 **`file`**（安装包），**`version`**（必填），可选 **`date`**、**`channel`**、**`notes`**、**`versionCode`**（仅 apk，写入 `releases.json` 的 `versionCode`）、**`bundleVersion`** / **`minNativeVersionCode`**（仅 zip）。头 `Authorization: Bearer <UPLOAD_TOKEN>`。响应含 **`kind`**: `"apk"` | `"zip"`。
+- `POST /api/release/delete` — JSON **`{ "target": "xxx.apk" }`** 或 **`{ "target": "xxx.zip" }`**（兼容旧字段 **`file`** / **`bundle`**）。头 `Authorization: Bearer <UPLOAD_TOKEN>`。
 
 ## 手动发布（不上传服务）
 
 1. 将 APK 放到 **`downloads/`**。
 2. 编辑 **`public/releases.json`**，在 `items` 数组靠前位置增加一条（展示顺序从上到下）。
 
+### 热更新（网页包，无需重装 APK）
+
+自 **1.0.38** 起，App 内置 Capgo 热更新：用户只需下载 **zip 网页包** 并重启即可，**不会清空本地数据与登录状态**；仅当修改了原生层（新插件、Android 权限等）时才需要发布整包 APK。
+
+1. 在**主项目**根目录执行 **`npm run bundle:ota`**（会先 `vite build`，再生成 zip；默认输出形如 **`com.ledgernotes.app_<版本>.zip`**，见终端提示）。
+2. 将该 zip 上传到服务器的 **`downloads/`**：可在**管理后台**直接上传 zip，或通过 SFTP/手动放入（与 APK 同目录）。
+3. 若不用管理后台，可在 **`releases.json`** 首条中增加字段，例如：
+
+```json
+{
+  "version": "1.0.40",
+  "versionCode": 38,
+  "bundle": "com.ledgernotes.app_1.0.40.zip",
+  "bundleVersion": "1.0.40",
+  "minNativeVersionCode": 38,
+  "file": "ledger-1.0.38.apk",
+  "notes": "修统计；热更"
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `bundle` | 热更新 zip 在 `downloads/` 下的文件名（必填才走热更）。 |
+| `bundleVersion` | 可选；与本地网页包比 semver，默认用 `version`。 |
+| `minNativeVersionCode` | 可选；用户当前 **versionCode** 低于此值时**只提示整包 APK**，忽略热更。 |
+| `file` | 可选；整包 APK；可与 `bundle` 并存，壳过旧时仍走 APK。 |
+
+仅发小版本时，可只填 `bundle` + `version` / `bundleVersion`，不必每次上传 APK。
+
 ## 目录说明
 
 | 路径 | 作用 |
 |------|------|
 | `public/` | 首页、`releases.json`、静态资源 |
-| `downloads/` | APK 文件（默认不提交到 Git） |
+| `downloads/` | APK / zip 热更包（默认不提交到 Git） |
 | `nginx/default.conf` | Nginx；`/api/` 反代到 `uploader`；`/downloads/` 走只读挂载 |
 | `uploader/` | Node 上传服务镜像构建上下文 |
 
-`public` 对 Nginx 只读挂载；`downloads` 单独挂到 `/var/www/downloads`，避免只读冲突。上传服务对 `public`、`downloads` 读写挂载以更新 `releases.json` 与保存 APK。
+`public` 对 Nginx 只读挂载；`downloads` 单独挂到 `/var/www/downloads`，避免只读冲突。上传服务对 `public`、`downloads` 读写挂载以更新 `releases.json` 并保存 **APK 与 zip**。
 
 ## 与主项目关系
 

@@ -623,7 +623,7 @@ export function HomePage() {
             <span className="font-semibold text-sky-800">云端已同步</span>
             <span className="font-normal text-sky-900/90">
               {' '}
-              账单数据已上云，换机登录同一账号可恢复。点击账单可编辑，左滑删除需确认。
+              数据已存储云端。点击账单可编辑，左滑删除需确认。
               {homeVoiceEnabled
                 ? ' 长按底部「记一笔」可语音说话识别，松手后保存。'
                 : ''}

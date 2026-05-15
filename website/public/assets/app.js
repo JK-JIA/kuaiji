@@ -29,6 +29,40 @@ function isAdminLoggedIn() {
   return Boolean(getStoredToken())
 }
 
+function escapeHtml(s) {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/** @param {Record<string, unknown>} row */
+function rowKind(row) {
+  const hasB = Boolean(row?.bundle && String(row.bundle).trim())
+  const hasF = Boolean(row?.file && String(row.file).trim())
+  if (hasB && hasF) return 'both'
+  if (hasB) return 'hot'
+  return 'apk'
+}
+
+/** @param {Record<string, unknown>} row */
+function deleteTargetForRow(row) {
+  return String(row.file || row.bundle || '').trim()
+}
+
+/** @param {Record<string, unknown>} row */
+function kindBadgeHtml(row) {
+  const k = rowKind(row)
+  if (k === 'both') {
+    return '<span class="item-kind item-kind--both">整包+热更</span>'
+  }
+  if (k === 'hot') {
+    return '<span class="item-kind item-kind--hot">热更新 zip</span>'
+  }
+  return '<span class="item-kind item-kind--apk">整包 APK</span>'
+}
+
 async function loadReleases() {
   const loading = document.getElementById('loading')
   const errEl = document.getElementById('error')
@@ -53,7 +87,7 @@ async function loadReleases() {
         (uploadEnabled
           ? '登录管理后台后可上传；或在服务器上维护 <code>downloads/</code> 与 <code>releases.json</code>。'
           : '请在服务器上向 <code>downloads/</code> 放 APK 并编辑 <code>releases.json</code>。') +
-        '<br /><span class="hint-muted">仅删除 APK 文件不会更新列表，需改 JSON 或使用管理后台「删除」。</span>'
+        '<br /><span class="hint-muted">仅删除磁盘上的文件不会更新列表，需改 JSON 或使用管理后台「删除」。</span>'
       errEl.classList.remove('hidden')
       return
     }
@@ -66,22 +100,44 @@ async function loadReleases() {
         const date = escapeHtml(row.date ?? '')
         const channel = row.channel ? escapeHtml(String(row.channel)) : ''
         const notes = row.notes ? escapeHtml(String(row.notes)) : ''
-        const file = String(row.file ?? '')
-        const fileEsc = escapeHtml(file)
-        const href = `/downloads/${encodeURIComponent(file)}`
+        const file = String(row.file ?? '').trim()
+        const bundle = String(row.bundle ?? '').trim()
+        const fileEsc = file ? escapeHtml(file) : ''
+        const bundleEsc = bundle ? escapeHtml(bundle) : ''
         const meta = [date, channel].filter(Boolean).join(' · ')
-        const deleteBtn = showDel
-          ? `<button type="button" class="btn-del" data-file="${encodeURIComponent(file)}">删除</button>`
+        const delTarget = deleteTargetForRow(row)
+        const deleteBtn = showDel && delTarget
+          ? `<button type="button" class="btn-del" data-target="${encodeURIComponent(delTarget)}">删除</button>`
           : ''
+        const fileLines = [
+          file
+            ? `<p class="file-line"><span class="file-tag">APK</span> <code>${fileEsc}</code></p>`
+            : '',
+          bundle
+            ? `<p class="file-line"><span class="file-tag">zip</span> <code>${bundleEsc}</code></p>`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('')
+        const dlBtns = [
+          file
+            ? `<a class="btn" href="/downloads/${encodeURIComponent(file)}" download>下载 APK</a>`
+            : '',
+          bundle
+            ? `<a class="btn btn-secondary" href="/downloads/${encodeURIComponent(bundle)}" download>下载热更包</a>`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('')
         return `<li class="item">
           <div class="item-top">
-            <span class="ver">v${ver}</span>
+            <span class="ver">v${ver}</span>${kindBadgeHtml(row)}
             ${meta ? `<span class="meta">${meta}</span>` : ''}
           </div>
-          <p class="file-line"><code>${fileEsc}</code></p>
+          ${fileLines || '<p class="file-line hint-muted">（无文件字段，请检查 JSON）</p>'}
           ${notes ? `<p class="notes">${notes}</p>` : ''}
           <div class="item-actions">
-            <a class="btn" href="${href}" download>下载 APK</a>
+            ${dlBtns || '<span class="hint-muted">无下载链接</span>'}
             ${deleteBtn}
           </div>
         </li>`
@@ -90,7 +146,7 @@ async function loadReleases() {
 
     list.querySelectorAll('.btn-del').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const raw = btn.getAttribute('data-file')
+        const raw = btn.getAttribute('data-target')
         const f = raw ? decodeURIComponent(raw) : ''
         if (f) void deleteRelease(f)
       })
@@ -104,22 +160,14 @@ async function loadReleases() {
   }
 }
 
-function escapeHtml(s) {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
-
-async function deleteRelease(file) {
+async function deleteRelease(target) {
   if (!isAdminLoggedIn()) {
     window.alert('请先登录管理后台。')
     return
   }
   if (
     !window.confirm(
-      `确定删除「${file}」？\n将从列表移除，并删除服务器上的 APK（若仍存在）。`,
+      `确定删除「${target}」？\n将从列表移除，并删除服务器上对应 APK / zip（若仍存在）。`,
     )
   ) {
     return
@@ -131,7 +179,7 @@ async function deleteRelease(file) {
         'Content-Type': 'application/json',
         ...authHeader(),
       },
-      body: JSON.stringify({ file }),
+      body: JSON.stringify({ target }),
     })
     const text = await res.text()
     let j = {}
@@ -309,14 +357,25 @@ async function setupAdmin() {
         uploadMsg.classList.add('err')
         return
       }
-      uploadMsg.textContent = '已发布，可继续上传下一版。'
+      uploadMsg.textContent =
+        j.kind === 'zip'
+          ? '热更新 zip 已发布并写入列表，可继续上传下一版。'
+          : j.kind === 'apk'
+            ? '整包 APK 已发布并写入列表，可继续上传下一版。'
+            : '已发布，可继续上传下一版。'
       uploadMsg.classList.add('ok')
       const v = uploadForm.querySelector('[name="version"]')
       const f = uploadForm.querySelector('[name="file"]')
       const n = uploadForm.querySelector('[name="notes"]')
+      const bv = uploadForm.querySelector('[name="bundleVersion"]')
+      const vc = uploadForm.querySelector('[name="versionCode"]')
+      const mnc = uploadForm.querySelector('[name="minNativeVersionCode"]')
       if (f) f.value = ''
       if (v) v.value = ''
       if (n) n.value = ''
+      if (bv) bv.value = ''
+      if (vc) vc.value = ''
+      if (mnc) mnc.value = ''
       dateInput.value = new Date().toISOString().slice(0, 10)
       await loadReleases()
     } catch (e) {

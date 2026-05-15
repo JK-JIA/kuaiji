@@ -8,6 +8,12 @@ import { applyFontSizePercentToHtml, readFontSizePercent } from './utils/appFont
 
 applyFontSizePercentToHtml(readFontSizePercent())
 
+if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+  void import('@capgo/capacitor-updater').then(({ CapacitorUpdater }) => {
+    void CapacitorUpdater.notifyAppReady()
+  })
+}
+
 /** 生产构建仅在 Android APK（Capacitor 原生壳）中展示完整应用；浏览器打开 static 仅见提示。开发：npm run dev 仍可调试。 */
 const showFullApp =
   Capacitor.isNativePlatform() ||

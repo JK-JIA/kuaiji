@@ -26,3 +26,6 @@ dist-ssr
 
 # 每日兑换码导出（保留目录见 server/data/redeem-codes/.gitkeep）
 server/data/redeem-codes/redeem-codes.txt
+
+# Capgo CLI 生成的网页热更包（根目录）
+com.ledgernotes.app_*.zip
