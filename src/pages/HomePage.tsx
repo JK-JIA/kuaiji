@@ -826,7 +826,7 @@ export function HomePage() {
             <span className="font-semibold text-[#1a7f4c]">提示：</span>
             <span className="font-normal text-[#2d6a4f]">
               {apiBase
-                ? '数据仅保存在本机，卸载或清理存储会丢失；请定期在设置导出 CSV 备份。登录并开通会员后可使用云端同步、语音识别与智能识别。'
+                ? '数据仅保存在本机，卸载或清理存储会丢失；请定期在「设置 → 导入导出」备份账单（CSV）。登录并开通会员后可使用云端同步、语音识别与智能识别。'
                 : '当前为离线使用，数据仅存本机。点击账单可编辑，向左滑删除前会二次确认。'}
             </span>
           </div>

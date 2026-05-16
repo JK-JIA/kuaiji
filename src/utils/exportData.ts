@@ -1,12 +1,85 @@
+import { Capacitor } from '@capacitor/core'
+import { Directory, Filesystem } from '@capacitor/filesystem'
+import { Share } from '@capacitor/share'
 import type { FieldDef, LedgerRecord } from '../types'
 import { expandProductLines, getAmountFieldId } from './recordHelpers'
+import { isShareDismissedByUser } from './shareDismissed'
 
 function downloadBlob(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
+  a.href = url
   a.download = filename
+  a.rel = 'noopener'
+  a.style.display = 'none'
+  document.body.appendChild(a)
   a.click()
-  URL.revokeObjectURL(a.href)
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const s = reader.result as string
+      const i = s.indexOf(',')
+      resolve(i >= 0 ? s.slice(i + 1) : s)
+    }
+    reader.onerror = () => reject(new Error('读取导出内容失败'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+/** 桌面用 <a download>；手机 WebView 常无效，改用系统分享或写缓存后 Share */
+async function saveCsvBlobWithMobileFallback(filename: string, blob: Blob) {
+  const file = new File([blob], filename, {
+    type: 'text/csv;charset=utf-8',
+  })
+
+  if (
+    typeof navigator !== 'undefined' &&
+    typeof navigator.share === 'function' &&
+    typeof navigator.canShare === 'function' &&
+    navigator.canShare({ files: [file] })
+  ) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: '记账 CSV 备份',
+      })
+      return
+    } catch (e) {
+      if (isShareDismissedByUser(e)) return
+      /* 继续尝试其它方式 */
+    }
+  }
+
+  if (Capacitor.isNativePlatform()) {
+    const base64 = await blobToBase64(blob)
+    await Filesystem.writeFile({
+      path: filename,
+      data: base64,
+      directory: Directory.Cache,
+    })
+    const uriResult = await Filesystem.getUri({
+      directory: Directory.Cache,
+      path: filename,
+    })
+    try {
+      await Share.share({
+        title: '导出 CSV 备份',
+        text: '在分享面板选择保存到文件或发送到电脑',
+        url: uriResult.uri,
+        dialogTitle: '导出 CSV',
+      })
+    } catch (shareErr) {
+      if (!isShareDismissedByUser(shareErr)) throw shareErr
+    }
+    return
+  }
+
+  downloadBlob(filename, blob)
 }
 
 /** 解析含引号与逗号的 CSV 全文为二维数组 */
@@ -302,7 +375,51 @@ export function parseLedgerImportCsv(
   return { ok: true, records }
 }
 
-export function exportCsv(records: LedgerRecord[], fields: FieldDef[]) {
+/** 与 index.html 标题一致，用于导出文件名 */
+const CSV_EXPORT_BRAND = '个人记账'
+
+export type ExportCsvOptions = {
+  /** yyyy-MM-dd，含当日；可与 dateTo 同时省略表示全部账单 */
+  dateFrom?: string
+  dateTo?: string
+  /** 自定义文件名（须含 .csv）；省略时按日期范围或时间戳生成 */
+  filename?: string
+}
+
+function orderedDateRange(
+  dateFrom?: string,
+  dateTo?: string,
+): { lo: string; hi: string } | null {
+  if (dateFrom == null && dateTo == null) return null
+  const a = dateFrom ?? '0000-01-01'
+  const b = dateTo ?? '9999-12-31'
+  return a <= b ? { lo: a, hi: b } : { lo: b, hi: a }
+}
+
+function defaultExportCsvFilename(options?: ExportCsvOptions): string {
+  if (options?.filename?.trim()) return options.filename.trim()
+  const range = orderedDateRange(options?.dateFrom, options?.dateTo)
+  if (range) {
+    return `${CSV_EXPORT_BRAND}_${range.lo.replace(/-/g, '')}_${range.hi.replace(/-/g, '')}.csv`
+  }
+  return `ledger-export-${formatTs()}.csv`
+}
+
+export async function exportCsv(
+  records: LedgerRecord[],
+  fields: FieldDef[],
+  options?: ExportCsvOptions,
+) {
+  const range = orderedDateRange(options?.dateFrom, options?.dateTo)
+  let list = records
+  if (range) {
+    list = records.filter((r) => r.date >= range.lo && r.date <= range.hi)
+    if (list.length === 0) {
+      alert('所选日期范围内没有账单')
+      return
+    }
+  }
+
   const plateId = fields.find((f) => f.key === 'plate')?.id
   const amountId = getAmountFieldId(fields)
   const meta = csvMetaHeaders(fields)
@@ -335,7 +452,7 @@ export function exportCsv(records: LedgerRecord[], fields: FieldDef[]) {
 
   const rows: string[][] = [headers]
 
-  for (const r of records) {
+  for (const r of list) {
     const plate = plateId ? (r.values[plateId] ?? '') : ''
     const recordTotal =
       amountId && r.values[amountId] !== undefined
@@ -384,7 +501,14 @@ export function exportCsv(records: LedgerRecord[], fields: FieldDef[]) {
 
   const csv = rows.map((row) => row.join(',')).join('\r\n')
   const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' })
-  downloadBlob(`ledger-export-${formatTs()}.csv`, blob)
+  const filename = defaultExportCsvFilename(options)
+  try {
+    await saveCsvBlobWithMobileFallback(filename, blob)
+  } catch (e) {
+    if (!isShareDismissedByUser(e)) {
+      alert(e instanceof Error ? e.message : '导出失败')
+    }
+  }
 }
 
 function escapeCsv(s: string): string {

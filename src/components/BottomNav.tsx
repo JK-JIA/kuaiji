@@ -1,9 +1,13 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 
 const linkCls =
   'flex flex-1 items-center justify-center py-3 text-sm transition-colors'
 
 export function BottomNav() {
+  const { pathname } = useLocation()
+  if (pathname.startsWith('/settings/import-export')) {
+    return null
+  }
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 flex border-t border-stone-200 bg-white/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-md">
       <NavLink

@@ -3,6 +3,10 @@ import { AppUpdateGate } from './components/AppUpdateGate'
 import { BottomNav } from './components/BottomNav'
 import { AuthProvider } from './context/AuthContext'
 import { LedgerProvider } from './context/LedgerContext'
+import { BillExportPage } from './pages/importExport/BillExportPage'
+import { BillImportPage } from './pages/importExport/BillImportPage'
+import { ImportExportHubPage } from './pages/importExport/ImportExportHubPage'
+import { ImportHistoryPage } from './pages/importExport/ImportHistoryPage'
 import { HomePage } from './pages/HomePage'
 import { SettingsPage } from './pages/SettingsPage'
 import { StatsPage } from './pages/StatsPage'
@@ -18,6 +22,22 @@ export default function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/stats" element={<StatsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route
+              path="/settings/import-export"
+              element={<ImportExportHubPage />}
+            />
+            <Route
+              path="/settings/import-export/export"
+              element={<BillExportPage />}
+            />
+            <Route
+              path="/settings/import-export/import"
+              element={<BillImportPage />}
+            />
+            <Route
+              path="/settings/import-export/history"
+              element={<ImportHistoryPage />}
+            />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <BottomNav />

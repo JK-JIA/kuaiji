@@ -20,6 +20,7 @@ import {
   getUnitPriceFieldId,
   parseMoney,
 } from '../utils/recordHelpers'
+import { isShareDismissedByUser } from '../utils/shareDismissed'
 
 const PERMISSION_HINT_KEY = 'kuaiji_receipt_save_hint_seen'
 
@@ -33,28 +34,6 @@ type Props = {
 function fmtMoney(n: number): string {
   const x = Math.round(n * 100) / 100
   return Number.isInteger(x) ? String(x) : x.toFixed(2)
-}
-
-/** 用户在系统分享面板点「取消/关闭」时，Web / Capacitor 会抛错，不应当失败提示 */
-function isShareDismissedByUser(e: unknown): boolean {
-  if (
-    e &&
-    typeof e === 'object' &&
-    'name' in e &&
-    (e as { name: string }).name === 'AbortError'
-  ) {
-    return true
-  }
-  const msg = e instanceof Error ? e.message : String(e)
-  const lower = msg.toLowerCase()
-  return (
-    lower.includes('abort') ||
-    lower.includes('cancel') ||
-    lower.includes('cancelled') ||
-    lower.includes('canceled') ||
-    lower.includes('dismiss') ||
-    lower.includes('user canceled')
-  )
 }
 
 export function ReceiptModal({ open, onClose, record, fields }: Props) {
