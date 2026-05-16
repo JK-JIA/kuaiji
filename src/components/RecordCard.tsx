@@ -1,3 +1,4 @@
+import { format } from 'date-fns'
 import { useCallback, useRef, useState } from 'react'
 import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
 import { ReceiptModal } from './ReceiptModal'
@@ -30,8 +31,10 @@ type Props = {
   onEdit?: (record: LedgerRecord) => void
   onDelete?: (id: string) => void
   onReconcile?: (record: LedgerRecord) => void
-  /** 首页语音刚写入：绿色 New 与描边 */
-  showVoiceNewBadge?: boolean
+  /** 首页刚保存/更新：绿色描边 + New 标识 */
+  showSavedHighlightBadge?: boolean
+  /** 核账保存完成：绿色描边，无 New */
+  showReconcileHighlight?: boolean
 }
 
 export function RecordCard({
@@ -41,7 +44,8 @@ export function RecordCard({
   onEdit,
   onDelete,
   onReconcile,
-  showVoiceNewBadge,
+  showSavedHighlightBadge,
+  showReconcileHighlight,
 }: Props) {
   const amountId = getAmountFieldId(fields)
   const exp = getExpectedAmount(record, amountId)
@@ -86,6 +90,8 @@ export function RecordCard({
       : 0
 
   const showMoney = Boolean(amountId)
+  const showGreenHighlight =
+    showSavedHighlightBadge === true || showReconcileHighlight === true
 
   const [slide, setSlide] = useState(0)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
@@ -216,7 +222,7 @@ export function RecordCard({
         className={`relative z-10 rounded-2xl border text-left ${
           dragActive ? '' : 'transition-[transform] duration-200 ease-out'
         } ${
-          showVoiceNewBadge
+          showGreenHighlight
             ? 'border-[#2ecc71]/55 bg-emerald-50 ring-2 ring-[#2ecc71]/45'
             : fullyPaid
               ? 'border-stone-200 bg-stone-100'
@@ -254,12 +260,7 @@ export function RecordCard({
           {showMoney && (
             <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium tabular-nums text-neutral-900">
-                    {new Date(record.createdAt).toLocaleTimeString('zh-CN', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
+                  <RecordCardDateTime record={record} />
                   <CardStatusBadges
                     fullyPaid={fullyPaid}
                     exp={exp}
@@ -267,7 +268,7 @@ export function RecordCard({
                     settled={record.settled === true}
                   />
                   <div className="ml-auto flex shrink-0 items-center gap-2">
-                    {showVoiceNewBadge && (
+                    {showSavedHighlightBadge && (
                       <span
                         className="rounded-md bg-[#2ecc71] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm"
                         aria-label="新录入"
@@ -430,12 +431,7 @@ export function RecordCard({
           {!showMoney && (
             <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium tabular-nums text-neutral-900">
-                    {new Date(record.createdAt).toLocaleTimeString('zh-CN', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </span>
+                  <RecordCardDateTime record={record} />
                   <CardStatusBadges
                     fullyPaid={fullyPaid}
                     exp={exp}
@@ -443,7 +439,7 @@ export function RecordCard({
                     settled={record.settled === true}
                   />
                   <div className="ml-auto flex shrink-0 items-center gap-2">
-                    {showVoiceNewBadge && (
+                    {showSavedHighlightBadge && (
                       <span
                         className="rounded-md bg-[#2ecc71] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm"
                         aria-label="新录入"
@@ -640,6 +636,34 @@ function CardStatusBadges({
           待核账
         </span>
       )}
+    </span>
+  )
+}
+
+/** 账单卡片日期：今天 →「今天」，否则 M/d（如 5/15） */
+function formatRecordCardDateLabel(dateKey: string): string {
+  const todayStr = format(new Date(), 'yyyy-MM-dd')
+  if (dateKey === todayStr) return '今天'
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(dateKey)
+  if (m) {
+    const month = parseInt(m[2], 10)
+    const day = parseInt(m[3], 10)
+    if (!Number.isNaN(month) && !Number.isNaN(day)) return `${month}/${day}`
+  }
+  return dateKey
+}
+
+function RecordCardDateTime({ record }: { record: LedgerRecord }) {
+  const dateLabel = formatRecordCardDateLabel(record.date)
+  const time = new Date(record.createdAt).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  return (
+    <span className="text-sm font-medium tabular-nums text-neutral-900">
+      {dateLabel}
+      <span className="font-normal text-[#999999]"> · </span>
+      {time}
     </span>
   )
 }

@@ -39,6 +39,7 @@ export function useHoldVolcTranscript({
   onHoldReleased,
 }: UseHoldVolcTranscriptArgs) {
   const [recording, setRecording] = useState(false)
+  const [holdPressActive, setHoldPressActive] = useState(false)
   const [transcript, setTranscript] = useState('')
   const [hint, setHint] = useState<string | null>(null)
 
@@ -96,6 +97,7 @@ export function useHoldVolcTranscript({
   }, [])
 
   const endHoldGesture = useCallback(() => {
+    setHoldPressActive(false)
     detachGlobalPointerEnd()
     clearLongPressTimer()
     const wasPressing = pressDownRef.current
@@ -218,6 +220,7 @@ export function useHoldVolcTranscript({
     pointerIdRef.current = e.pointerId
     pointerTypeRef.current = e.pointerType
     pressDownRef.current = true
+    setHoldPressActive(true)
     detachGlobalPointerEnd()
     const onWinEnd = (ev: PointerEvent) => {
       if (
@@ -262,6 +265,7 @@ export function useHoldVolcTranscript({
     transcript,
     setTranscript: setTranscriptTracked,
     recording,
+    holdPressActive,
     hint,
     setHint,
     canUseVoice,

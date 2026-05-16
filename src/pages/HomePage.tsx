@@ -8,7 +8,6 @@ import {
 } from '../components/AddRecordModal'
 import { CalendarPickerModal } from '../components/CalendarPickerModal'
 import { HomeSearchDateRangeBlock } from '../components/HomeSearchDateRangeBlock'
-import { HomeFilterSheet } from '../components/HomeFilterSheet'
 import { ReconcileModal } from '../components/ReconcileModal'
 import { RecordCard } from '../components/RecordCard'
 import { useAuth } from '../context/AuthContext'
@@ -21,10 +20,8 @@ import {
   isEmptyBuyerBucketKey,
 } from '../utils/recordHelpers'
 import {
-  countActiveFilters,
-  defaultHomeFilter,
-  recordMatchesHomeFilters,
-  type HomeFilterState,
+  recordMatchesReconcileFilter,
+  type ReconcileFilter,
 } from '../utils/homeFilters'
 import { recordMatchesHomeSearch } from '../utils/homeRecordSearch'
 import { collectAsrHotwordsFromLedger } from '../utils/asrHotwordsFromLedger'
@@ -40,7 +37,7 @@ import {
 } from '../utils/ledgerRecordDraft'
 import { messageIfPremiumFeatureBlocked } from '../utils/premiumGate'
 import { findFieldIdByName, sumAmount } from '../utils/stats'
-import type { FieldDef, LedgerRecord } from '../types'
+import type { FieldDef, LedgerRecord, ReconcilePayload } from '../types'
 import { useLedger } from '../context/LedgerContext'
 
 export function HomePage() {
@@ -60,16 +57,17 @@ export function HomePage() {
     format(new Date(), 'yyyy-MM-dd'),
   )
   const [pinnedDates, setPinnedDates] = useState<string[]>([])
-  const [filterOpen, setFilterOpen] = useState(false)
-  const [filterState, setFilterState] = useState<HomeFilterState>(
-    defaultHomeFilter,
-  )
-  const [homeSearchOpen, setHomeSearchOpen] = useState(false)
-  const [homeSearchQuery, setHomeSearchQuery] = useState('')
-  const [homeSearchDateFrom, setHomeSearchDateFrom] = useState('')
-  const [homeSearchDateTo, setHomeSearchDateTo] = useState('')
-  const [homeSearchAdvancedOpen, setHomeSearchAdvancedOpen] = useState(false)
-  const homeSearchInputRef = useRef<HTMLInputElement>(null)
+  const [searchDraftQuery, setSearchDraftQuery] = useState('')
+  const [searchDraftDateFrom, setSearchDraftDateFrom] = useState('')
+  const [searchDraftDateTo, setSearchDraftDateTo] = useState('')
+  const [appliedSearchQuery, setAppliedSearchQuery] = useState('')
+  const [appliedSearchDateFrom, setAppliedSearchDateFrom] = useState('')
+  const [appliedSearchDateTo, setAppliedSearchDateTo] = useState('')
+  const [searchDraftReconcile, setSearchDraftReconcile] =
+    useState<ReconcileFilter>('all')
+  const [appliedSearchReconcile, setAppliedSearchReconcile] =
+    useState<ReconcileFilter>('all')
+  const [searchDateExpanded, setSearchDateExpanded] = useState(false)
   const [showTopBtn, setShowTopBtn] = useState(false)
   const [voiceParsing, setVoiceParsing] = useState(false)
   const [voiceBanner, setVoiceBanner] = useState<string | null>(null)
@@ -82,13 +80,17 @@ export function HomePage() {
     phase: 'asr' | 'parse'
     rawText: string
   } | null>(null)
-  /** 语音录入刚保存的账单：绿色 New，下一条语音新增前一直保留 */
-  const [voiceNewHighlightId, setVoiceNewHighlightId] = useState<string | null>(
-    null,
-  )
-  const expectVoicePrefillHighlightRef = useRef(false)
+  /** 刚保存或更新的账单：绿色 New、描边；再保存其他条目前一直保留 */
+  const [savedHighlightId, setSavedHighlightId] = useState<string | null>(null)
+
+  /** 核账保存完成：绿色描边（无 New） */
+  const [reconcileHighlightId, setReconcileHighlightId] = useState<
+    string | null
+  >(null)
 
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
+  /** 已对当前 savedHighlightId 滚过屏，避免核账等更新 records 时再次跳到带 New 的条目 */
+  const scrolledForHighlightRef = useRef<string | null>(null)
 
   const todayStr = format(new Date(), 'yyyy-MM-dd')
 
@@ -103,21 +105,29 @@ export function HomePage() {
   )
 
   const openAddRecordModal = useCallback(() => {
-    expectVoicePrefillHighlightRef.current = false
     setVoiceFormPrefill(null)
     setEditingRecord(null)
     setModalOpen(true)
+    setReconcileHighlightId(null)
   }, [])
 
   const handleModalSave = useCallback(
     async (rec: LedgerRecord) => {
       await saveRecord(rec)
-      if (expectVoicePrefillHighlightRef.current) {
-        setVoiceNewHighlightId(rec.id)
-        expectVoicePrefillHighlightRef.current = false
-      }
+      scrolledForHighlightRef.current = null
+      setReconcileHighlightId(null)
+      setSavedHighlightId(rec.id)
     },
     [saveRecord],
+  )
+
+  const handleReconcileConfirm = useCallback(
+    async (id: string, payload: ReconcilePayload) => {
+      await setRecordPayment(id, payload)
+      setSavedHighlightId(null)
+      setReconcileHighlightId(id)
+    },
+    [setRecordPayment],
   )
 
   const emptySpeechToastRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -209,7 +219,6 @@ export function HomePage() {
         )
 
         const openVoicePrefillModal = () => {
-          expectVoicePrefillHighlightRef.current = true
           setVoiceFormPrefill({
             values,
             lines: lines.map((l) => ({
@@ -247,7 +256,8 @@ export function HomePage() {
             recordToEdit: null,
           })
           await saveRecord(rec)
-          setVoiceNewHighlightId(rec.id)
+          scrolledForHighlightRef.current = null
+          setSavedHighlightId(rec.id)
           setVoiceBanner(null)
           return
         }
@@ -283,6 +293,7 @@ export function HomePage() {
   const {
     micBtnRef: homeRecordBarRef,
     recording: voiceRecording,
+    holdPressActive: voiceHoldPressActive,
     hint: voiceMicHint,
     canUseVoice: homeVoiceEnabled,
     handleMicPointerDown: homeRecordBarPointerDown,
@@ -317,50 +328,95 @@ export function HomePage() {
     openAddRecordModal()
   }
 
-  const filteredRecords = useMemo(
-    () =>
-      records.filter((r) =>
-        recordMatchesHomeFilters(r, fields, filterState),
-      ),
-    [records, fields, filterState],
+  const applyHomeSearch = useCallback(
+    (reconcileOverride?: ReconcileFilter) => {
+      const reconcile =
+        reconcileOverride !== undefined
+          ? reconcileOverride
+          : searchDraftReconcile
+      setAppliedSearchQuery(searchDraftQuery.trim())
+      setAppliedSearchDateFrom(searchDraftDateFrom.trim())
+      setAppliedSearchDateTo(searchDraftDateTo.trim())
+      setAppliedSearchReconcile(reconcile)
+      setSearchDraftReconcile(reconcile)
+    },
+    [
+      searchDraftQuery,
+      searchDraftDateFrom,
+      searchDraftDateTo,
+      searchDraftReconcile,
+    ],
   )
 
-  const filterActive = countActiveFilters(filterState) > 0
+  const clearHomeSearch = useCallback(() => {
+    setSearchDraftQuery('')
+    setSearchDraftDateFrom('')
+    setSearchDraftDateTo('')
+    setSearchDraftReconcile('all')
+    setAppliedSearchQuery('')
+    setAppliedSearchDateFrom('')
+    setAppliedSearchDateTo('')
+    setAppliedSearchReconcile('all')
+    setSearchDateExpanded(false)
+  }, [])
 
-  const homeSearchLower = useMemo(
-    () => homeSearchQuery.trim().toLowerCase(),
-    [homeSearchQuery],
+  const quickReconcileFilter = useCallback(
+    (next: 'settled' | 'pending') => {
+      const toggleOff = appliedSearchReconcile === next
+      applyHomeSearch(toggleOff ? 'all' : next)
+    },
+    [appliedSearchReconcile, applyHomeSearch],
   )
 
-  const { searchDateFrom, searchDateTo } = useMemo(() => {
-    let f = homeSearchDateFrom.trim()
-    let t = homeSearchDateTo.trim()
+  const appliedSearchLower = useMemo(
+    () => appliedSearchQuery.toLowerCase(),
+    [appliedSearchQuery],
+  )
+
+  const { appliedDateFrom, appliedDateTo } = useMemo(() => {
+    let f = appliedSearchDateFrom.trim()
+    let t = appliedSearchDateTo.trim()
     if (f && t && f > t) [f, t] = [t, f]
-    return { searchDateFrom: f, searchDateTo: t }
-  }, [homeSearchDateFrom, homeSearchDateTo])
+    return { appliedDateFrom: f, appliedDateTo: t }
+  }, [appliedSearchDateFrom, appliedSearchDateTo])
 
   const homeSearchModeActive =
-    Boolean(homeSearchLower) || Boolean(searchDateFrom || searchDateTo)
+    Boolean(appliedSearchLower) ||
+    Boolean(appliedDateFrom || appliedDateTo) ||
+    appliedSearchReconcile !== 'all'
 
   const recordsForHomeTimeline = useMemo(() => {
-    const hasDateRange = Boolean(searchDateFrom || searchDateTo)
-    if (!homeSearchLower && !hasDateRange) return filteredRecords
-    let list = filteredRecords
-    if (homeSearchLower) {
+    const hasDateRange = Boolean(appliedDateFrom || appliedDateTo)
+    const hasReconcile = appliedSearchReconcile !== 'all'
+    if (!appliedSearchLower && !hasDateRange && !hasReconcile) return records
+    let list = records
+    if (appliedSearchLower) {
       list = list.filter((r) =>
-        recordMatchesHomeSearch(r, fields, homeSearchLower),
+        recordMatchesHomeSearch(r, fields, appliedSearchLower),
       )
     }
-    if (searchDateFrom || searchDateTo) {
+    if (appliedDateFrom || appliedDateTo) {
       list = list.filter((r) => {
         const d = r.date
-        if (searchDateFrom && d < searchDateFrom) return false
-        if (searchDateTo && d > searchDateTo) return false
+        if (appliedDateFrom && d < appliedDateFrom) return false
+        if (appliedDateTo && d > appliedDateTo) return false
         return true
       })
     }
+    if (hasReconcile) {
+      list = list.filter((r) =>
+        recordMatchesReconcileFilter(r, fields, appliedSearchReconcile),
+      )
+    }
     return list
-  }, [filteredRecords, fields, homeSearchLower, searchDateFrom, searchDateTo])
+  }, [
+    records,
+    fields,
+    appliedSearchLower,
+    appliedDateFrom,
+    appliedDateTo,
+    appliedSearchReconcile,
+  ])
 
   const grouped = useMemo(() => {
     const map = new Map<string, typeof records>()
@@ -399,7 +455,7 @@ export function HomePage() {
     todayStr,
   ])
 
-  const todayRecords = filteredRecords.filter((r) => r.date === todayStr)
+  const todayRecords = records.filter((r) => r.date === todayStr)
   const amountId = getAmountFieldId(fields) ?? findFieldIdByName(fields, '金额')
   const todaySum = sumAmount(todayRecords, amountId)
   const searchResultCount = recordsForHomeTimeline.length
@@ -461,33 +517,61 @@ export function HomePage() {
     }
   }, [])
 
-  /** 若带 New 的账单已被删除，清除高亮 id */
+  /** 若高亮账单已删除，清除 id */
   useEffect(() => {
-    if (!voiceNewHighlightId) return
-    if (!records.some((r) => r.id === voiceNewHighlightId)) {
-      setVoiceNewHighlightId(null)
+    if (!savedHighlightId) return
+    if (!records.some((r) => r.id === savedHighlightId)) {
+      setSavedHighlightId(null)
     }
-  }, [records, voiceNewHighlightId])
+  }, [records, savedHighlightId])
 
+  /** 筛选/搜索下当前列表不展示该条时，不保留无意义的 New 状态 */
   useEffect(() => {
-    if (!voiceNewHighlightId) return
-    if (!records.some((r) => r.id === voiceNewHighlightId)) return
-    const id = voiceNewHighlightId
+    if (!savedHighlightId) return
+    if (!recordsForHomeTimeline.some((r) => r.id === savedHighlightId)) {
+      setSavedHighlightId(null)
+    }
+  }, [recordsForHomeTimeline, savedHighlightId])
+
+  /** 仅「记一笔/语音」新设高亮时滚屏一次；核账等引起的 records 更新不再重滚 */
+  useEffect(() => {
+    if (!savedHighlightId) {
+      scrolledForHighlightRef.current = null
+      return
+    }
+    if (!records.some((r) => r.id === savedHighlightId)) return
+    if (scrolledForHighlightRef.current === savedHighlightId) return
+    scrolledForHighlightRef.current = savedHighlightId
+    const id = savedHighlightId
+    const rec = records.find((r) => r.id === id)
     const t = window.setTimeout(() => {
+      if (rec) {
+        sectionRefs.current[rec.date]?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        })
+      }
       document
         .querySelector(`[data-home-record-id="${id}"]`)
         ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 80)
     return () => clearTimeout(t)
-  }, [voiceNewHighlightId, records])
+  }, [savedHighlightId, records])
+
+  /** 若高亮账单已被删除/筛掉，清空核账绿色框选中 */
+  useEffect(() => {
+    if (!reconcileHighlightId) return
+    if (!records.some((r) => r.id === reconcileHighlightId)) {
+      setReconcileHighlightId(null)
+    }
+  }, [records, reconcileHighlightId])
 
   useEffect(() => {
-    if (homeSearchOpen) homeSearchInputRef.current?.focus()
-  }, [homeSearchOpen])
-
-  useEffect(() => {
-    if (!homeSearchOpen) setHomeSearchAdvancedOpen(false)
-  }, [homeSearchOpen])
+    if (!reconcileHighlightId) return
+    if (!recordsForHomeTimeline.some((r) => r.id === reconcileHighlightId)) {
+      setReconcileHighlightId(null)
+    }
+  }, [recordsForHomeTimeline, reconcileHighlightId])
 
   const scrollTop = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -510,16 +594,8 @@ export function HomePage() {
   }
 
   return (
-    <div
-      className={`min-h-dvh bg-[#f8f9fa] pt-12 ${
-        homeSearchOpen
-          ? homeSearchAdvancedOpen
-            ? 'pb-52'
-            : 'pb-36'
-          : 'pb-24'
-      }`}
-    >
-      <header className="mb-4 flex flex-wrap items-center justify-between gap-2 px-4">
+    <div className="min-h-dvh bg-[#f8f9fa] pb-24 pt-12">
+      <header className="mb-3 flex flex-wrap items-center justify-between gap-2 px-4">
         <div className="min-w-0">
           <h1
             className="font-light italic tracking-[0.12em] text-transparent"
@@ -538,29 +614,134 @@ export function HomePage() {
             按日账单 · 购买方分组 · 核账与统计，批发场景随身记。
           </p>
         </div>
-        <div className="flex flex-wrap justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => setJumpOpen(true)}
+          className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-800 shadow-sm hover:bg-stone-50"
+        >
+          <CalendarGlyph className="h-4 w-4 text-stone-500" aria-hidden />
+          选择日期
+        </button>
+      </header>
+
+      <div className="mx-4 mb-3">
+        <form
+          className="flex items-center gap-2 rounded-2xl border border-stone-200/90 bg-white px-3 py-2 shadow-sm"
+          onSubmit={(e) => {
+            e.preventDefault()
+            applyHomeSearch()
+          }}
+        >
+          <SearchGlyph
+            className="h-4 w-4 shrink-0 text-stone-400"
+            aria-hidden
+          />
+          <input
+            type="search"
+            enterKeyHint="search"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            value={searchDraftQuery}
+            onChange={(e) => setSearchDraftQuery(e.target.value)}
+            placeholder="搜索全部字段…"
+            className="min-w-0 flex-1 bg-transparent text-sm text-neutral-900 outline-none placeholder:text-stone-400"
+            aria-label="搜索账单"
+          />
           <button
             type="button"
-            onClick={() => setFilterOpen(true)}
-            className="relative inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-800 shadow-sm hover:bg-stone-50"
+            onClick={() => setSearchDateExpanded((v) => !v)}
+            className={`shrink-0 rounded-lg p-2 text-stone-600 transition-colors hover:bg-stone-100 ${
+              searchDateExpanded ||
+              searchDraftDateFrom ||
+              searchDraftDateTo ||
+              appliedSearchDateFrom ||
+              appliedSearchDateTo
+                ? 'bg-stone-100 text-stone-900 ring-1 ring-stone-300/90'
+                : ''
+            }`}
+            aria-expanded={searchDateExpanded}
+            aria-label="记账日区间"
+            title="记账日区间"
           >
-            筛选
-            {filterActive ? (
-              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#2ecc71] px-1 text-xs font-bold text-white">
-                {countActiveFilters(filterState)}
-              </span>
-            ) : null}
+            <SearchOptionsBarsGlyph className="h-5 w-5" />
+          </button>
+          <button
+            type="submit"
+            className="shrink-0 rounded-lg bg-[#2ecc71] px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-[#27ae60] active:bg-[#22a85a]"
+          >
+            搜索
+          </button>
+        </form>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => quickReconcileFilter('settled')}
+            className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+              appliedSearchReconcile === 'settled'
+                ? 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-300/80'
+                : 'bg-stone-100 text-stone-600 hover:bg-stone-200/90'
+            }`}
+            aria-pressed={appliedSearchReconcile === 'settled'}
+          >
+            已结清
           </button>
           <button
             type="button"
-            onClick={() => setJumpOpen(true)}
-            className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-800 shadow-sm hover:bg-stone-50"
+            onClick={() => quickReconcileFilter('pending')}
+            className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+              appliedSearchReconcile === 'pending'
+                ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-300/80'
+                : 'bg-stone-100 text-stone-600 hover:bg-stone-200/90'
+            }`}
+            aria-pressed={appliedSearchReconcile === 'pending'}
           >
-            <CalendarGlyph className="h-4 w-4 text-stone-500" aria-hidden />
-            选择日期
+            未结清
           </button>
         </div>
-      </header>
+        {searchDateExpanded && (
+          <div className="mt-2 rounded-2xl border border-stone-200/90 bg-white px-3 py-2.5 shadow-sm">
+            <HomeSearchDateRangeBlock
+              dateFrom={searchDraftDateFrom}
+              dateTo={searchDraftDateTo}
+              minDate={ledgerDateBounds.min || todayStr}
+              maxDate={ledgerDateBounds.max || todayStr}
+              onChange={(from, to) => {
+                setSearchDraftDateFrom(from)
+                setSearchDraftDateTo(to)
+              }}
+            />
+          </div>
+        )}
+        {homeSearchModeActive ? (
+          <div className="mt-2 flex items-center justify-between gap-2 px-1">
+            <p className="min-w-0 text-xs text-[#888888]">
+              {[
+                appliedSearchLower
+                  ? `关键词「${appliedSearchQuery.slice(0, 48)}${appliedSearchQuery.length > 48 ? '…' : ''}」`
+                  : null,
+                appliedDateFrom || appliedDateTo
+                  ? `记账日 ${appliedDateFrom || '不限'}～${appliedDateTo || '不限'}`
+                  : null,
+                appliedSearchReconcile === 'settled'
+                  ? '已结清'
+                  : appliedSearchReconcile === 'pending'
+                    ? '未结清'
+                    : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+            <button
+              type="button"
+              onClick={clearHomeSearch}
+              className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800"
+            >
+              清除
+            </button>
+          </div>
+        ) : null}
+      </div>
 
       <section className="mx-4 mb-3 rounded-2xl border border-stone-200/90 bg-white p-4 text-left shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-2">
@@ -572,20 +753,6 @@ export function HomePage() {
               <p className="text-sm font-medium text-neutral-900">
                 {homeSearchModeActive ? '结果概况' : '今日概况'}
               </p>
-              {homeSearchModeActive ? (
-                <p className="mt-1 max-w-[min(100%,22rem)] text-xs leading-relaxed text-[#888888]">
-                  {[
-                    homeSearchLower
-                      ? `关键词「${homeSearchQuery.trim().slice(0, 48)}${homeSearchQuery.trim().length > 48 ? '…' : ''}」`
-                      : null,
-                    searchDateFrom || searchDateTo
-                      ? `记账日 ${searchDateFrom || '不限'}～${searchDateTo || '不限'}`
-                      : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </p>
-              ) : null}
             </div>
           </div>
         </div>
@@ -668,16 +835,7 @@ export function HomePage() {
 
       <div className="px-4">
         {records.length > 0 &&
-          filterActive &&
-          filteredRecords.length === 0 && (
-            <p className="mb-4 rounded-2xl border border-dashed border-stone-300 bg-white py-10 text-center text-sm text-[#666666]">
-              无匹配账单，请调整筛选条件。
-            </p>
-          )}
-
-        {records.length > 0 &&
           homeSearchModeActive &&
-          filteredRecords.length > 0 &&
           recordsForHomeTimeline.length === 0 && (
             <p className="mb-4 rounded-2xl border border-dashed border-stone-300 bg-white py-10 text-center text-sm text-[#666666]">
               无匹配结果，请调整关键词或日期区间。
@@ -738,9 +896,13 @@ export function HomePage() {
                               record={r}
                               fields={fields}
                               productCatalog={productCatalog}
-                              showVoiceNewBadge={r.id === voiceNewHighlightId}
+                              showSavedHighlightBadge={
+                                r.id === savedHighlightId
+                              }
+                              showReconcileHighlight={
+                                r.id === reconcileHighlightId
+                              }
                               onEdit={(rec) => {
-                                expectVoicePrefillHighlightRef.current = false
                                 setVoiceFormPrefill(null)
                                 setEditingRecord(rec)
                                 setModalOpen(true)
@@ -748,7 +910,10 @@ export function HomePage() {
                                 onDelete={(id) => {
                                   void removeRecord(id)
                                 }}
-                                onReconcile={(rec) => setReconcileId(rec.id)}
+                                onReconcile={(rec) => {
+                                  setReconcileHighlightId(null)
+                                  setReconcileId(rec.id)
+                                }}
                               />
                             </li>
                           ))}
@@ -785,135 +950,24 @@ export function HomePage() {
         </div>
       )}
 
-      {homeSearchOpen && (
-        <button
-          type="button"
-          className="fixed inset-0 z-[25] cursor-default bg-transparent"
-          aria-label="关闭搜索"
-          onPointerDown={() => {
-            setHomeSearchOpen(false)
-            setHomeSearchAdvancedOpen(false)
-          }}
-        />
-      )}
 
       <div className="pointer-events-none fixed bottom-20 left-1/2 z-30 w-full max-w-lg -translate-x-1/2 px-4">
-        {homeSearchOpen && (
-          <div className="pointer-events-auto mb-2 rounded-2xl border border-stone-200/90 bg-white/95 px-3 py-2.5 shadow-md backdrop-blur-md">
-            <div className="flex items-center gap-2">
-              <SearchGlyph className="h-4 w-4 shrink-0 text-stone-400" aria-hidden />
-              <input
-                ref={homeSearchInputRef}
-                type="search"
-                enterKeyHint="search"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                value={homeSearchQuery}
-                onChange={(e) => setHomeSearchQuery(e.target.value)}
-                placeholder="搜索全部字段…"
-                className="min-w-0 flex-1 bg-transparent text-sm text-neutral-900 outline-none placeholder:text-stone-400"
-                aria-label="搜索账单"
-              />
-              {homeSearchQuery.trim() ? (
-                <button
-                  type="button"
-                  onClick={() => setHomeSearchQuery('')}
-                  className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800"
-                >
-                  清除
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => setHomeSearchAdvancedOpen((v) => !v)}
-                className={`relative shrink-0 rounded-lg p-2 text-stone-600 transition-colors hover:bg-stone-100 ${
-                  homeSearchAdvancedOpen
-                    ? 'bg-stone-100 text-stone-900 ring-1 ring-stone-300/90'
-                    : homeSearchDateFrom || homeSearchDateTo
-                      ? 'ring-1 ring-stone-300/60'
-                      : ''
-                }`}
-                aria-expanded={homeSearchAdvancedOpen}
-                aria-label="日期与快捷筛选"
-                title="日期与快捷筛选"
-              >
-                <SearchOptionsBarsGlyph className="h-5 w-5" />
-              </button>
-            </div>
-            {homeSearchAdvancedOpen && (
-              <div className="mt-2 border-t border-stone-200/80 pt-2">
-                <HomeSearchDateRangeBlock
-                  dateFrom={homeSearchDateFrom}
-                  dateTo={homeSearchDateTo}
-                  minDate={ledgerDateBounds.min || todayStr}
-                  maxDate={ledgerDateBounds.max || todayStr}
-                  onChange={(from, to) => {
-                    setHomeSearchDateFrom(from)
-                    setHomeSearchDateTo(to)
-                  }}
-                />
-              </div>
-            )}
-          </div>
-        )}
-        <div className="pointer-events-auto mx-auto flex w-full max-w-full items-center justify-center gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setHomeSearchOpen((o) => {
-                const next = !o
-                if (next) setHomeSearchAdvancedOpen(false)
-                return next
-              })
-            }}
-            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black text-white shadow-lg transition-colors active:bg-neutral-500 ${
-              homeSearchOpen || homeSearchModeActive ? 'ring-2 ring-white/20' : ''
-            }`}
-            aria-pressed={homeSearchOpen || homeSearchModeActive}
-            aria-label={homeSearchOpen ? '关闭搜索' : '搜索账单'}
-            title="搜索"
-          >
-            <SearchGlyph className="h-5 w-5" aria-hidden />
-          </button>
-          <div className="w-[60%] min-w-0 max-w-full">
-            <button
-              ref={homeRecordBarRef}
-              type="button"
-              style={{ touchAction: 'none' }}
-              onPointerDown={homeRecordBarPointerDown}
-              onPointerUp={homeRecordBarPointerUp}
-              onPointerCancel={homeRecordBarPointerUp}
-              onClick={onRecordBarClick}
-              className={
-                voiceRecording
-                  ? 'flex min-h-11 w-full select-none items-center justify-center gap-3 rounded-full bg-neutral-500 py-2.5 pl-4 pr-4 text-sm font-semibold tracking-wide text-white shadow-lg'
-                  : homeVoiceEnabled
-                    ? 'flex min-h-11 w-full select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-white shadow-lg active:bg-neutral-500'
-                    : 'flex min-h-11 w-full select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-neutral-500 shadow-lg'
-              }
-              title={
-                voiceRecording
-                  ? undefined
-                  : '轻点：手动记账；长按：语音识别并保存'
-              }
-              aria-label={
-                voiceRecording
-                  ? '录音中，松手结束'
-                  : '记一笔：轻点手动记账，长按语音识别'
-              }
+        <div className="pointer-events-auto mx-auto flex w-full max-w-full flex-col items-center gap-2">
+          {homeVoiceEnabled && (voiceHoldPressActive || voiceRecording) ? (
+            <div
+              role="status"
+              className="flex min-h-10 w-[min(100%,18rem)] items-center justify-center gap-2 rounded-2xl border border-stone-200/90 bg-white/95 px-3 py-2 shadow-md backdrop-blur-sm"
             >
               {voiceRecording ? (
                 <>
-                  <span className="shrink-0">收音中</span>
-                  <span
-                    className="flex h-5 items-end gap-0.5"
-                    aria-hidden
-                  >
+                  <span className="text-sm font-semibold text-neutral-800">
+                    收音中
+                  </span>
+                  <span className="flex h-5 items-end gap-0.5" aria-hidden>
                     {[0, 1, 2, 3].map((i) => (
                       <span
                         key={i}
-                        className="recording-wave-bar inline-block w-1 rounded-sm bg-white"
+                        className="recording-wave-bar inline-block w-1 rounded-sm bg-[#2ecc71]"
                         style={{
                           height: '1rem',
                           animationDelay: `${i * 0.12}s`,
@@ -921,33 +975,77 @@ export function HomePage() {
                       />
                     ))}
                   </span>
+                  <span className="text-xs font-medium text-stone-500">
+                    松手结束
+                  </span>
                 </>
               ) : (
                 <>
-                  <span className="min-w-0 flex-1 text-center">记一笔</span>
                   <span
-                    className={
-                      homeVoiceEnabled
-                        ? 'shrink-0 text-white/75'
-                        : 'shrink-0 text-neutral-500'
-                    }
+                    className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-[#2ecc71]"
                     aria-hidden
-                  >
-                    <HomeMiniMicGlyph className="h-5 w-5" />
+                  />
+                  <span className="text-sm font-semibold text-neutral-800">
+                    请继续按住…
                   </span>
+                  <span className="text-xs text-stone-500">即将开始收音</span>
                 </>
               )}
-            </button>
-          </div>
+            </div>
+          ) : null}
+          <button
+            ref={homeRecordBarRef}
+            type="button"
+            style={{ touchAction: 'none' }}
+            onPointerDown={homeRecordBarPointerDown}
+            onPointerUp={homeRecordBarPointerUp}
+            onPointerCancel={homeRecordBarPointerUp}
+            onClick={onRecordBarClick}
+            className={
+              voiceRecording
+                ? 'flex min-h-11 w-[52%] max-w-[220px] min-w-[10.5rem] select-none items-center justify-center gap-2 rounded-full bg-neutral-500 py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-white shadow-lg'
+                : homeVoiceEnabled
+                  ? `flex min-h-11 w-[52%] max-w-[220px] min-w-[10.5rem] select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-white shadow-lg active:bg-neutral-500 ${
+                      voiceHoldPressActive && !voiceRecording
+                        ? 'ring-2 ring-[#2ecc71]/55 ring-offset-2 ring-offset-[#f8f9fa]'
+                        : ''
+                    }`
+                  : 'flex min-h-11 w-[52%] max-w-[220px] min-w-[10.5rem] select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-neutral-500 shadow-lg'
+            }
+            title={
+              voiceRecording
+                ? undefined
+                : '轻点：手动记账；长按：语音识别并保存'
+            }
+            aria-label={
+              voiceRecording
+                ? '录音中，松手结束'
+                : '记一笔：轻点手动记账，长按语音识别'
+            }
+          >
+            {voiceRecording ? (
+              <>
+                <HomeMiniMicGlyph className="h-5 w-5 shrink-0 text-white" />
+                <span className="shrink-0">松手结束</span>
+              </>
+            ) : (
+              <>
+                <span className="min-w-0 flex-1 text-center">记一笔</span>
+                <span
+                  className={
+                    homeVoiceEnabled
+                      ? 'shrink-0 text-white/75'
+                      : 'shrink-0 text-neutral-500'
+                  }
+                  aria-hidden
+                >
+                  <HomeMiniMicGlyph className="h-5 w-5" />
+                </span>
+              </>
+            )}
+          </button>
         </div>
       </div>
-
-      <HomeFilterSheet
-        open={filterOpen}
-        onClose={() => setFilterOpen(false)}
-        value={filterState}
-        onChange={setFilterState}
-      />
 
       <AddRecordModal
         open={modalOpen}
@@ -955,7 +1053,6 @@ export function HomePage() {
           setModalOpen(false)
           setEditingRecord(null)
           setVoiceFormPrefill(null)
-          expectVoicePrefillHighlightRef.current = false
         }}
         fields={fields}
         onSave={handleModalSave}
@@ -970,7 +1067,7 @@ export function HomePage() {
         record={reconcileRecord}
         fields={fields}
         onClose={() => setReconcileId(null)}
-        onConfirm={(id, payload) => void setRecordPayment(id, payload)}
+        onConfirm={(id, payload) => void handleReconcileConfirm(id, payload)}
       />
 
       <CalendarPickerModal

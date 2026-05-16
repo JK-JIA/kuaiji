@@ -42,6 +42,17 @@ export function recordMatchesHomeFilters(
   return true
 }
 
+export function recordMatchesReconcileFilter(
+  record: LedgerRecord,
+  fields: FieldDef[],
+  reconcile: ReconcileFilter,
+): boolean {
+  if (reconcile === 'all') return true
+  const fully = isRecordFullyPaid(record, fields)
+  if (reconcile === 'settled') return fully
+  return !fully
+}
+
 export function countActiveFilters(f: HomeFilterState): number {
   let n = 0
   if (f.plate.trim()) n++
