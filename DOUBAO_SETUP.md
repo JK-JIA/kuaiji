@@ -64,15 +64,18 @@ cp .env.example .env
 copy .env.example .env
 ```
 
-在 `.env` 或 `.env.local` 中配置（Key 来自火山方舟「API Key 管理」，**勿提交到 Git**）：
+**正式环境（推荐）**：在 **ledger-api 服务端** `.env` / `docker-compose` 中配置（用户 App **无需**因换模型而重新打包）：
 
 ```
-VITE_DOUBAO_API_KEY=你的方舟_API_Key
-# 与官方 curl 的 model 完全一致；不填则默认 doubao-seed-1-8-251228
-VITE_DOUBAO_MODEL=doubao-seed-1-8-251228
+DOUBAO_API_KEY=你的方舟_API_Key
+DOUBAO_MODEL=doubao-seed-1-8-251228
+# 可选
+# DOUBAO_ENDPOINT=https://ark.cn-beijing.volces.com/api/v3/responses
 ```
 
-本应用调用 **Responses API**（`POST /api/v3/responses`），请求体为 `input` + `input_text`，见 [`src/utils/doubaoParser.ts`](src/utils/doubaoParser.ts)。开发改 `.env` 后需**重启 `npm run dev`**；打 APK / 热更前须带 `VITE_DOUBAO_API_KEY` 执行 `npm run build`。
+App 登录后调用 `POST /api/voice/parse`，由服务端请求火山方舟。修改后 **重启 api 容器** 即可生效。
+
+**仅本地浏览器调试**（未连后端时）可在项目根 `.env` 配置 `VITE_DOUBAO_API_KEY`；打 APK/热更**不再依赖**此项。
 
 ## 📦 重新构建 APK
 

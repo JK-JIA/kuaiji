@@ -82,7 +82,7 @@ export function VoiceInputSection({
       setHint('请先完成语音识别或输入文字')
       return
     }
-    if (!isDoubaoConfigured()) {
+    if (!isDoubaoConfigured({ apiBase })) {
       onFillFirstLine(text, '')
       setHint(null)
       return
@@ -99,7 +99,10 @@ export function VoiceInputSection({
     setBusy(true)
     setHint(null)
     try {
-      const r: DoubaoParseResult = await parseWithDoubao(text, fields)
+      const r: DoubaoParseResult = await parseWithDoubao(text, fields, {
+        apiBase,
+        token,
+      })
       if (!r.success || !r.data) {
         setHint(r.error ?? '解析失败')
         return

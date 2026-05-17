@@ -88,7 +88,40 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const lastRemoteCatalogRef = useRef<ProductCatalogEntry[]>([])
   const lastRemoteSuppressedRef = useRef<string[]>([])
 
+  const loadLocalSnapshot = useCallback(async () => {
+    const f = await ensureDefaultFields()
+    const mergedFields = mergeMissingDefaultFields(f)
+    const needsLocalPersist = mergedFields.some((nf) => {
+      const of = f.find((x) => x.id === nf.id)
+      return of && of.name !== nf.name
+    })
+    if (needsLocalPersist) {
+      await updateFields(mergedFields)
+    }
+    setFields(mergedFields)
+    const r = await db.records.orderBy('createdAt').reverse().toArray()
+    setRecords(r)
+
+    let catalogLocal = await getProductCatalogFromDb()
+    let suppressedLocal = await getProductCatalogSuppressedFromDb()
+    const prodIdLocal = mergedFields.find((x) => x.key === 'product')?.id
+    const mergedLocal = mergeAutoProductCatalog({
+      records: r,
+      prodId: prodIdLocal,
+      existing: catalogLocal,
+      suppressedNormalizedNames: suppressedLocal,
+    })
+    if (!catalogsEqual(mergedLocal, catalogLocal)) {
+      await replaceProductCatalogInDb(mergedLocal, suppressedLocal)
+      catalogLocal = mergedLocal
+    }
+    setProductCatalog(catalogLocal)
+    setProductCatalogSuppressed(suppressedLocal)
+    setReady(true)
+  }, [])
+
   const refresh = useCallback(async () => {
+    try {
     if (useRemoteLedger && apiBase && token) {
       const data = await fetchLedger(apiBase, token)
       const raw = data as Record<string, unknown>
@@ -178,36 +211,21 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    const f = await ensureDefaultFields()
-    const mergedFields = mergeMissingDefaultFields(f)
-    const needsLocalPersist = mergedFields.some((nf) => {
-      const of = f.find((x) => x.id === nf.id)
-      return of && of.name !== nf.name
-    })
-    if (needsLocalPersist) {
-      await updateFields(mergedFields)
+    await loadLocalSnapshot()
+    } catch (err) {
+      console.error('[LedgerContext] refresh failed, fallback to local', err)
+      try {
+        await loadLocalSnapshot()
+      } catch (fallbackErr) {
+        console.error('[LedgerContext] local fallback failed', fallbackErr)
+        setFields(getDefaultFieldDefs())
+        setRecords([])
+        setProductCatalog([])
+        setProductCatalogSuppressed([])
+        setReady(true)
+      }
     }
-    setFields(mergedFields)
-    const r = await db.records.orderBy('createdAt').reverse().toArray()
-    setRecords(r)
-
-    let catalogLocal = await getProductCatalogFromDb()
-    let suppressedLocal = await getProductCatalogSuppressedFromDb()
-    const prodIdLocal = mergedFields.find((x) => x.key === 'product')?.id
-    const mergedLocal = mergeAutoProductCatalog({
-      records: r,
-      prodId: prodIdLocal,
-      existing: catalogLocal,
-      suppressedNormalizedNames: suppressedLocal,
-    })
-    if (!catalogsEqual(mergedLocal, catalogLocal)) {
-      await replaceProductCatalogInDb(mergedLocal, suppressedLocal)
-      catalogLocal = mergedLocal
-    }
-    setProductCatalog(catalogLocal)
-    setProductCatalogSuppressed(suppressedLocal)
-    setReady(true)
-  }, [useRemoteLedger, apiBase, token])
+  }, [useRemoteLedger, apiBase, token, loadLocalSnapshot])
 
   useEffect(() => {
     void refresh()

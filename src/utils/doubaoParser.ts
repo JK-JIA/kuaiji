@@ -5,7 +5,11 @@
  * 模型：VITE_DOUBAO_MODEL，默认 doubao-seed-1-8-251228，须与控制台 curl 的 model 逐字一致
  */
 
+import { getApiBase, getStoredToken, parseVoiceLedger } from '../api/ledgerClient'
+import type { DoubaoParseResult, DoubaoProductLine } from '../types/voiceParse'
 import { computedLineAmountFromUnitAndQty } from './recordHelpers'
+
+export type { DoubaoParseResult, DoubaoProductLine }
 
 /** 在 .env 中配置 VITE_DOUBAO_API_KEY，勿提交密钥 */
 const DOUBAO_API_KEY =
@@ -25,12 +29,177 @@ const DOUBAO_ENDPOINT_RAW =
 
 const DEFAULT_DOUBAO_MODEL = 'doubao-seed-1-8-251228'
 
+const ARK_RESPONSES_ENDPOINT =
+  'https://ark.cn-beijing.volces.com/api/v3/responses'
+const ARK_CHAT_ENDPOINT =
+  'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
+
 const DOUBAO_CONFIG = {
   API_KEY: DOUBAO_API_KEY || 'your_api_key_here',
   MODEL: DOUBAO_MODEL_RAW || DEFAULT_DOUBAO_MODEL,
-  ENDPOINT:
-    DOUBAO_ENDPOINT_RAW ||
-    'https://ark.cn-beijing.volces.com/api/v3/responses',
+  ENDPOINT: DOUBAO_ENDPOINT_RAW || ARK_RESPONSES_ENDPOINT,
+}
+
+type ArkCallFailure = {
+  ok: false
+  status: number
+  errorData: unknown
+  errorText: string
+  via: 'responses' | 'chat'
+}
+
+type ArkCallSuccess = { ok: true; data: unknown; via: 'responses' | 'chat' }
+
+function pickArkErrorMessage(errorData: unknown, errorText: string): string {
+  if (errorData && typeof errorData === 'object') {
+    const root = errorData as Record<string, unknown>
+    const err = root.error
+    if (err && typeof err === 'object') {
+      const e = err as Record<string, unknown>
+      const code =
+        typeof e.code === 'string' ? e.code.trim() : ''
+      const msg =
+        typeof e.message === 'string' ? e.message.trim() : ''
+      if (code && msg) return `${code}: ${msg}`
+      if (msg) return msg
+    }
+    if (typeof root.message === 'string' && root.message.trim()) {
+      return root.message.trim()
+    }
+  }
+  const t = errorText.trim()
+  return t.length > 0 && t.length < 400 ? t : ''
+}
+
+function formatDoubaoHttpError(
+  failure: ArkCallFailure,
+  model: string,
+): string {
+  const detail = pickArkErrorMessage(failure.errorData, failure.errorText)
+  const suffix = detail ? `（${detail}）` : ''
+
+  if (failure.status === 401) {
+    return `API Key 无效${suffix}，请检查 VITE_DOUBAO_API_KEY`
+  }
+  if (failure.status === 403) {
+    return (
+      `无权调用模型「${model}」${suffix}。常见原因：账号欠费、API Key 无该模型权限、` +
+      `或未在火山方舟开通 Responses。可在控制台创建推理接入点 ep-xxxx 并写入 VITE_DOUBAO_MODEL，或改用已开通的模型。`
+    )
+  }
+  if (failure.status === 404) {
+    return (
+      `模型「${model}」不可用${suffix}。请核对 VITE_DOUBAO_MODEL 与控制台 curl 的 model 是否完全一致。`
+    )
+  }
+  if (failure.status === 429) {
+    return '请求过于频繁，请稍后再试'
+  }
+  return `API 错误 ${failure.status}${suffix ? `: ${suffix}` : ''}`
+}
+
+async function callArkResponses(
+  prompt: string,
+  model: string,
+): Promise<ArkCallSuccess | ArkCallFailure> {
+  const response = await fetch(DOUBAO_CONFIG.ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${DOUBAO_CONFIG.API_KEY}`,
+    },
+    body: JSON.stringify({
+      model,
+      input: [
+        {
+          role: 'user',
+          content: [{ type: 'input_text', text: prompt }],
+        },
+      ],
+    }),
+  })
+  if (!response.ok) {
+    const errorText = await response.text()
+    let errorData: unknown = { message: errorText }
+    try {
+      errorData = JSON.parse(errorText)
+    } catch {
+      /* keep raw */
+    }
+    return {
+      ok: false,
+      status: response.status,
+      errorData,
+      errorText,
+      via: 'responses',
+    }
+  }
+  return { ok: true, data: await response.json(), via: 'responses' }
+}
+
+async function callArkChat(
+  prompt: string,
+  model: string,
+): Promise<ArkCallSuccess | ArkCallFailure> {
+  const response = await fetch(ARK_CHAT_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${DOUBAO_CONFIG.API_KEY}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  })
+  if (!response.ok) {
+    const errorText = await response.text()
+    let errorData: unknown = { message: errorText }
+    try {
+      errorData = JSON.parse(errorText)
+    } catch {
+      /* keep raw */
+    }
+    return {
+      ok: false,
+      status: response.status,
+      errorData,
+      errorText,
+      via: 'chat',
+    }
+  }
+  return { ok: true, data: await response.json(), via: 'chat' }
+}
+
+/** Responses 403/404 时自动尝试 Chat Completions（部分 Key 仅开通对话接口） */
+async function callDoubaoModel(
+  prompt: string,
+  model: string,
+): Promise<ArkCallSuccess | ArkCallFailure> {
+  const endpoint = DOUBAO_CONFIG.ENDPOINT
+  const tryResponsesFirst =
+    !endpoint.includes('/chat/completions') &&
+    endpoint.includes('/responses')
+
+  if (!tryResponsesFirst) {
+    return callArkChat(prompt, model)
+  }
+
+  const primary = await callArkResponses(prompt, model)
+  if (primary.ok) return primary
+
+  if (primary.status === 403 || primary.status === 404) {
+    console.warn(
+      '豆包 Responses API 失败，回退 Chat Completions:',
+      primary.status,
+      pickArkErrorMessage(primary.errorData, primary.errorText),
+    )
+    const fallback = await callArkChat(prompt, model)
+    if (fallback.ok) return fallback
+    return fallback
+  }
+
+  return primary
 }
 
 /** 从 Responses API 响应中提取助手文本（兼容 output[].content[].output_text） */
@@ -82,24 +251,6 @@ function extractChatCompletionsText(result: unknown): string {
       .join('')
   }
   return ''
-}
-
-/** 智能识别得到的多行商品（每行对应表单一行） */
-export type DoubaoProductLine = {
-  product: string
-  quantity: string
-  /** 单价（元/斤），可选；与数量齐全时可由系统算行金额 */
-  unitPrice?: string
-  /** 该行金额（元），可选 */
-  lineAmount?: string
-}
-
-export interface DoubaoParseResult {
-  success: boolean
-  data?: Record<string, string>
-  /** 多商品时每行一对；单商品时可为 1 条或与 data 首行一致 */
-  productLines?: DoubaoProductLine[]
-  error?: string
 }
 
 /** 模型可能用同义键表示金额，统一解析出字符串 */
@@ -279,17 +430,84 @@ function splitLegacyListStrings(
 /**
  * 使用豆包大模型解析自然语言输入
  */
+export type DoubaoParseOptions = {
+  apiBase?: string | null
+  token?: string | null
+}
+
+function hasClientDoubaoKey(): boolean {
+  return (
+    DOUBAO_CONFIG.API_KEY !== 'your_api_key_here' &&
+    DOUBAO_CONFIG.API_KEY.length > 0
+  )
+}
+
+/** 服务端未部署新接口时，用构建时 VITE_DOUBAO_* 兜底（兼容旧 api 镜像） */
+function shouldFallbackToClientParse(httpStatus: number): boolean {
+  return httpStatus === 404 || httpStatus === 503 || httpStatus === 502
+}
+
 export async function parseWithDoubao(
   text: string,
   fields: Array<{ id: string; name: string; key?: string }>,
+  opts?: DoubaoParseOptions,
 ): Promise<DoubaoParseResult> {
-  if (!isDoubaoConfigured()) {
-    return {
-      success: false,
-      error: '请先配置豆包 API Key：在 .env 中设置 VITE_DOUBAO_API_KEY，改后需重启 dev 或重新 build。',
+  const base = opts?.apiBase?.trim() || getApiBase()?.trim()
+  const token = opts?.token?.trim() ?? getStoredToken()?.trim()
+  if (base && token) {
+    try {
+      const { result, httpStatus } = await parseVoiceLedger(
+        base,
+        token,
+        text,
+        fields,
+      )
+      if (
+        !result.success &&
+        shouldFallbackToClientParse(httpStatus) &&
+        hasClientDoubaoKey()
+      ) {
+        console.warn(
+          '[doubao] 服务端解析不可用，使用客户端兜底',
+          httpStatus,
+        )
+        return parseWithDoubaoDirect(text, fields)
+      }
+      if (!result.success && httpStatus === 404) {
+        return {
+          success: false,
+          error:
+            '服务端尚未支持语音解析（404）。请更新并重启 ledger-api（需含 /api/voice/parse 与 DOUBAO_API_KEY），或在本机 .env 配置 VITE_DOUBAO_API_KEY 后重新打包。',
+        }
+      }
+      return result
+    } catch (e) {
+      if (hasClientDoubaoKey()) {
+        console.warn('[doubao] 请求解析服务失败，使用客户端兜底', e)
+        return parseWithDoubaoDirect(text, fields)
+      }
+      return {
+        success: false,
+        error: e instanceof Error ? e.message : '无法连接解析服务',
+      }
     }
   }
 
+  if (!isDoubaoConfigured(opts)) {
+    return {
+      success: false,
+      error:
+        '未配置解析服务：请登录并使用云端账本，或在开发环境配置 VITE_DOUBAO_API_KEY。',
+    }
+  }
+
+  return parseWithDoubaoDirect(text, fields)
+}
+
+async function parseWithDoubaoDirect(
+  text: string,
+  fields: Array<{ id: string; name: string; key?: string }>,
+): Promise<DoubaoParseResult> {
   try {
     // 构建字段说明
     const fieldDescriptions = fields
@@ -352,60 +570,24 @@ export async function parseWithDoubao(
   "${amountLabel}": "30"
 }`
 
-    console.log('调用豆包 Responses API，模型:', DOUBAO_CONFIG.MODEL)
+    console.log('调用豆包 API，模型:', DOUBAO_CONFIG.MODEL)
 
-    const response = await fetch(DOUBAO_CONFIG.ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${DOUBAO_CONFIG.API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: DOUBAO_CONFIG.MODEL,
-        input: [
-          {
-            role: 'user',
-            content: [{ type: 'input_text', text: prompt }],
-          },
-        ],
-      }),
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      let errorData
-      try {
-        errorData = JSON.parse(errorText)
-      } catch {
-        errorData = { message: errorText }
-      }
-      console.error('豆包 API 错误:', response.status, errorData)
-      
-      if (response.status === 401) {
-        return { success: false, error: 'API Key 无效，请检查配置' }
-      } else if (response.status === 404) {
-        const detail =
-          (typeof errorData?.message === 'string' && errorData.message) ||
-          (typeof errorData?.error?.message === 'string' &&
-            errorData.error.message) ||
-          ''
-        const suffix = detail ? `（${detail}）` : ''
-        return {
-          success: false,
-          error: `模型不可用${suffix}。请核对 VITE_DOUBAO_MODEL 是否与控制台 curl 的 model 完全一致（默认 ${DEFAULT_DOUBAO_MODEL}），且已开通 Responses API 权限。`,
-        }
-      } else if (response.status === 429) {
-        return { success: false, error: '请求过于频繁，请稍后再试' }
-      } else {
-        return { success: false, error: `API 错误 ${response.status}: ${errorData.message || '未知错误'}` }
+    const api = await callDoubaoModel(prompt, DOUBAO_CONFIG.MODEL)
+    if (!api.ok) {
+      console.error('豆包 API 错误:', api.status, api.via, api.errorData)
+      return {
+        success: false,
+        error: formatDoubaoHttpError(api, DOUBAO_CONFIG.MODEL),
       }
     }
 
-    const result = await response.json()
-    console.log('豆包 API 响应:', result)
+    const result = api.data
+    console.log(`豆包 API 响应（${api.via}）:`, result)
 
     let content =
-      extractResponsesApiText(result) || extractChatCompletionsText(result)
+      api.via === 'responses'
+        ? extractResponsesApiText(result) || extractChatCompletionsText(result)
+        : extractChatCompletionsText(result) || extractResponsesApiText(result)
 
     if (!content) {
       console.error('未找到响应内容:', result)
@@ -544,12 +726,11 @@ export async function parseWithDoubao(
 }
 
 /**
- * 是否启用「智能填入」：仅看 API Key（接入点 ID 单独校验，缺失时在请求前提示，避免只配了 Key 却显示「填入首行」）
+ * 是否可用智能解析：已配置 API 地址（走服务端）或开发用 VITE_DOUBAO_API_KEY
  */
-export function isDoubaoConfigured(): boolean {
-  return (
-    DOUBAO_CONFIG.API_KEY !== 'your_api_key_here' &&
-    DOUBAO_CONFIG.API_KEY.length > 0
-  )
+export function isDoubaoConfigured(opts?: DoubaoParseOptions): boolean {
+  const base = opts?.apiBase?.trim() || getApiBase()?.trim()
+  if (base) return true
+  return hasClientDoubaoKey()
 }
 

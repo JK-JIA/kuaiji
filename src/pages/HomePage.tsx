@@ -193,10 +193,10 @@ export function HomePage() {
         return
       }
 
-      if (!isDoubaoConfigured()) {
+      if (!isDoubaoConfigured({ apiBase })) {
         clearVoiceSlot()
         setVoiceBanner(
-          '未配置豆包智能解析，无法在首页自动入账。请在 .env 设置 VITE_DOUBAO_API_KEY（模型默认 doubao-seed-1-8-251228），或使用「记一笔」手动录入。\n\n请重新语音录入',
+          '未配置智能解析服务，无法在首页自动入账。请确认已登录且服务端已配置豆包，或使用「记一笔」手动录入。\n\n请重新语音录入',
         )
         return
       }
@@ -213,7 +213,10 @@ export function HomePage() {
             },
       )
       try {
-        const r = await parseWithDoubao(text, ledgerLayout.sortedFields)
+        const r = await parseWithDoubao(text, ledgerLayout.sortedFields, {
+          apiBase,
+          token,
+        })
         if (!r.success || !r.data) {
           setVoiceBanner(`${r.error ?? '解析失败'}\n\n请重新语音录入`)
           return

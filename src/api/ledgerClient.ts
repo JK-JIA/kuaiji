@@ -1,4 +1,5 @@
 import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
+import type { DoubaoParseResult } from '../types/voiceParse'
 
 const TOKEN_KEY = 'ledger_auth_token'
 const EMAIL_KEY = 'ledger_auth_email'
@@ -250,13 +251,33 @@ export async function apiRegister(
   }
 }
 
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 20_000,
+): Promise<Response> {
+  const ac = new AbortController()
+  const timer = setTimeout(() => ac.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal: ac.signal })
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      throw new Error('连接服务器超时，请检查网络或 API 地址')
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export async function fetchLedger(
   base: string,
   token: string,
 ): Promise<LedgerApiResponse> {
-  const res = await fetch(`${base.replace(/\/$/, '')}/api/ledger`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
+  const res = await fetchWithTimeout(
+    `${base.replace(/\/$/, '')}/api/ledger`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
   if (!res.ok) throw new Error(await parseErr(res))
   return (await res.json()) as LedgerApiResponse
 }
@@ -276,4 +297,49 @@ export async function putLedger(
   })
   if (!res.ok) throw new Error(await parseErr(res))
   return (await res.json()) as LedgerApiResponse
+}
+
+export type VoiceLedgerParseResponse = {
+  result: DoubaoParseResult
+  /** HTTP 状态；2xx 时 result.success 可能仍为 false（业务错误） */
+  httpStatus: number
+}
+
+/** 语音口语 → 账单字段（优先走服务端 /api/voice/parse） */
+export async function parseVoiceLedger(
+  base: string,
+  token: string,
+  text: string,
+  fields: Array<{ id: string; name: string; key?: string }>,
+): Promise<VoiceLedgerParseResponse> {
+  const res = await fetchWithTimeout(
+    `${base.replace(/\/$/, '')}/api/voice/parse`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text, fields }),
+    },
+  )
+  let data: DoubaoParseResult & { error?: string }
+  try {
+    data = (await res.json()) as DoubaoParseResult & { error?: string }
+  } catch {
+    return {
+      httpStatus: res.status,
+      result: { success: false, error: `解析服务异常（${res.status}）` },
+    }
+  }
+  if (!res.ok) {
+    return {
+      httpStatus: res.status,
+      result: {
+        success: false,
+        error: data.error ?? `解析服务错误（${res.status}）`,
+      },
+    }
+  }
+  return { httpStatus: res.status, result: data }
 }

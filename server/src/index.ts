@@ -12,6 +12,7 @@ import {
   verifyAliyunSmsCode,
 } from './aliyunSms.js'
 import { attachAsrWebSocket, volcAsrEnvReady } from './asrStream.js'
+import { doubaoEnvReady, parseVoiceOnServer } from './voiceParse.js'
 
 const prisma = new PrismaClient()
 
@@ -59,6 +60,17 @@ const SmsLoginSchema = z.object({
 
 const RedeemSchema = z.object({
   code: z.string().min(4).max(64),
+})
+
+const VoiceParseSchema = z.object({
+  text: z.string().min(1).max(8000),
+  fields: z.array(
+    z.object({
+      id: z.string().min(1).max(128),
+      name: z.string().min(1).max(128),
+      key: z.string().max(64).optional(),
+    }),
+  ),
 })
 
 const lastSmsSend = new Map<string, number>()
@@ -153,11 +165,59 @@ app.get('/api/asr/health', (_req, res) => {
   res.json({
     ok: true,
     volcAsrEnvReady: volcAsrEnvReady(),
+    doubaoEnvReady: doubaoEnvReady(),
     websocketPath: '/api/asr/stream',
     handshakeNotes:
       'After WS connect, send first text JSON: type auth + JWT token field',
     node: process.version,
   })
+})
+
+app.post('/api/voice/parse', async (req, res) => {
+  const token = authHeader(req)
+  if (!token) {
+    res.status(401).json({ success: false, error: '未登录' })
+    return
+  }
+  const userId = userIdFromToken(token)
+  if (!userId) {
+    res.status(401).json({ success: false, error: '无效令牌' })
+    return
+  }
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  if (!user || !membershipActive(user.membershipExpiresAt)) {
+    res.status(403).json({
+      success: false,
+      error: '需要有效会员才能使用智能识别',
+      code: 'membership_required',
+    })
+    return
+  }
+  const parsed = VoiceParseSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ success: false, error: '请求体须包含 text 与 fields' })
+    return
+  }
+  if (!doubaoEnvReady()) {
+    res.status(503).json({
+      success: false,
+      error: '服务端未配置豆包解析（DOUBAO_API_KEY）',
+    })
+    return
+  }
+  try {
+    const result = await parseVoiceOnServer(
+      parsed.data.text,
+      parsed.data.fields,
+    )
+    res.status(result.success ? 200 : 502).json(result)
+  } catch (e) {
+    console.error('[ledger-api][voice/parse]', e)
+    res.status(500).json({
+      success: false,
+      error: e instanceof Error ? e.message : '解析服务异常',
+    })
+  }
 })
 
 app.post('/auth/register', async (req, res) => {
@@ -522,6 +582,15 @@ async function bootstrap() {
   if (!aliyunSmsConfigured()) {
     console.warn(
       '[ledger-api] 未配置阿里云短信密钥：手机号验证码登录不可用，直至设置 ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET',
+    )
+  }
+  if (!doubaoEnvReady()) {
+    console.warn(
+      '[ledger-api] 未配置 DOUBAO_API_KEY：语音智能解析不可用，直至在服务端环境变量中设置',
+    )
+  } else {
+    console.log(
+      `[ledger-api] 豆包语音解析已启用，模型=${process.env.DOUBAO_MODEL?.trim() || 'doubao-seed-1-8-251228'}`,
     )
   }
   await ensureDefaultAdmin()
