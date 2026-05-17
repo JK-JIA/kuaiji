@@ -1,7 +1,7 @@
 import { format, parseISO, subDays } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   AddRecordModal,
   type VoiceFormPrefillPayload,
@@ -20,9 +20,16 @@ import {
   isEmptyBuyerBucketKey,
 } from '../utils/recordHelpers'
 import {
+  recordMatchesHomeFilters,
   recordMatchesReconcileFilter,
+  type HomeFilterState,
   type ReconcileFilter,
 } from '../utils/homeFilters'
+import {
+  buildStatsDrillDownHint,
+  STATS_DRILL_DOWN_STATE_KEY,
+  type StatsDrillDownLocationState,
+} from '../utils/statsDrillDown'
 import { recordMatchesHomeSearch } from '../utils/homeRecordSearch'
 import { collectAsrHotwordsFromLedger } from '../utils/asrHotwordsFromLedger'
 import { isDoubaoConfigured, parseWithDoubao } from '../utils/doubaoParser'
@@ -41,6 +48,8 @@ import type { FieldDef, LedgerRecord, ReconcilePayload } from '../types'
 import { useLedger } from '../context/LedgerContext'
 
 export function HomePage() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const {
     apiBase,
     useRemoteLedger,
@@ -67,6 +76,9 @@ export function HomePage() {
     useState<ReconcileFilter>('all')
   const [appliedSearchReconcile, setAppliedSearchReconcile] =
     useState<ReconcileFilter>('all')
+  const [appliedDrillPlate, setAppliedDrillPlate] = useState('')
+  const [appliedDrillProduct, setAppliedDrillProduct] = useState('')
+  const [statsDrillBanner, setStatsDrillBanner] = useState<string | null>(null)
   const [searchDateExpanded, setSearchDateExpanded] = useState(false)
   const [showTopBtn, setShowTopBtn] = useState(false)
   const [voiceParsing, setVoiceParsing] = useState(false)
@@ -93,6 +105,26 @@ export function HomePage() {
   const scrolledForHighlightRef = useRef<string | null>(null)
 
   const todayStr = format(new Date(), 'yyyy-MM-dd')
+
+  useEffect(() => {
+    const drill = (location.state as StatsDrillDownLocationState | null)?.[
+      STATS_DRILL_DOWN_STATE_KEY
+    ]
+    if (!drill) return
+    setSearchDraftQuery('')
+    setAppliedSearchQuery('')
+    setSearchDraftDateFrom(drill.dateFrom)
+    setSearchDraftDateTo(drill.dateTo)
+    setAppliedSearchDateFrom(drill.dateFrom)
+    setAppliedSearchDateTo(drill.dateTo)
+    setAppliedDrillPlate(drill.plate ?? '')
+    setAppliedDrillProduct(drill.product ?? '')
+    setStatsDrillBanner(drill.hint ?? buildStatsDrillDownHint(drill))
+    setSearchDraftReconcile('all')
+    setAppliedSearchReconcile('all')
+    setSearchDateExpanded(Boolean(drill.dateFrom || drill.dateTo))
+    navigate(location.pathname, { replace: true, state: null })
+  }, [location.state, location.pathname, navigate])
 
   const ledgerLayout = useMemo(() => getLedgerFormLayout(fields), [fields])
 
@@ -357,6 +389,9 @@ export function HomePage() {
     setAppliedSearchDateFrom('')
     setAppliedSearchDateTo('')
     setAppliedSearchReconcile('all')
+    setAppliedDrillPlate('')
+    setAppliedDrillProduct('')
+    setStatsDrillBanner(null)
     setSearchDateExpanded(false)
   }, [])
 
@@ -380,15 +415,36 @@ export function HomePage() {
     return { appliedDateFrom: f, appliedDateTo: t }
   }, [appliedSearchDateFrom, appliedSearchDateTo])
 
+  const drillFilter = useMemo<HomeFilterState>(
+    () => ({
+      plate: appliedDrillPlate,
+      product: appliedDrillProduct,
+      reconcile: 'all',
+    }),
+    [appliedDrillPlate, appliedDrillProduct],
+  )
+
+  const drillFilterActive = Boolean(
+    appliedDrillPlate.trim() || appliedDrillProduct.trim(),
+  )
+
   const homeSearchModeActive =
     Boolean(appliedSearchLower) ||
     Boolean(appliedDateFrom || appliedDateTo) ||
-    appliedSearchReconcile !== 'all'
+    appliedSearchReconcile !== 'all' ||
+    drillFilterActive
 
   const recordsForHomeTimeline = useMemo(() => {
     const hasDateRange = Boolean(appliedDateFrom || appliedDateTo)
     const hasReconcile = appliedSearchReconcile !== 'all'
-    if (!appliedSearchLower && !hasDateRange && !hasReconcile) return records
+    if (
+      !appliedSearchLower &&
+      !hasDateRange &&
+      !hasReconcile &&
+      !drillFilterActive
+    ) {
+      return records
+    }
     let list = records
     if (appliedSearchLower) {
       list = list.filter((r) =>
@@ -403,6 +459,11 @@ export function HomePage() {
         return true
       })
     }
+    if (drillFilterActive) {
+      list = list.filter((r) =>
+        recordMatchesHomeFilters(r, fields, drillFilter),
+      )
+    }
     if (hasReconcile) {
       list = list.filter((r) =>
         recordMatchesReconcileFilter(r, fields, appliedSearchReconcile),
@@ -416,6 +477,8 @@ export function HomePage() {
     appliedDateFrom,
     appliedDateTo,
     appliedSearchReconcile,
+    drillFilterActive,
+    drillFilter,
   ])
 
   const grouped = useMemo(() => {
@@ -587,14 +650,14 @@ export function HomePage() {
 
   if (!ready) {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center text-stone-400">
+      <div className="flex min-h-[50vh] items-center justify-center text-kj-muted">
         加载本地数据中…
       </div>
     )
   }
 
   return (
-    <div className="min-h-dvh bg-[#f8f9fa] pb-24 pt-12">
+    <div className="kuaiji-page">
       <header className="mb-3 flex flex-wrap items-center justify-between gap-2 px-4">
         <div className="min-w-0">
           <h1
@@ -610,30 +673,30 @@ export function HomePage() {
           >
             kuaiji
           </h1>
-          <p className="mt-1 text-xs leading-relaxed text-[#666666]">
+          <p className="mt-1 text-xs leading-relaxed text-kj-secondary">
             按日账单 · 购买方分组 · 核账与统计，批发场景随身记。
           </p>
         </div>
         <button
           type="button"
           onClick={() => setJumpOpen(true)}
-          className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-800 shadow-sm hover:bg-stone-50"
+          className="inline-flex items-center gap-2 rounded-xl border border-kj-border-strong bg-kj-surface px-4 py-2 text-sm font-medium text-kj-primary shadow-sm hover:bg-kj-hover"
         >
-          <CalendarGlyph className="h-4 w-4 text-stone-500" aria-hidden />
+          <CalendarGlyph className="h-4 w-4 text-kj-secondary" aria-hidden />
           选择日期
         </button>
       </header>
 
       <div className="mx-4 mb-3">
         <form
-          className="flex items-center gap-2 rounded-2xl border border-stone-200/90 bg-white px-3 py-2 shadow-sm"
+          className="flex items-center gap-2 rounded-2xl border border-kj-border-strong/80 bg-kj-surface px-3 py-2 shadow-sm"
           onSubmit={(e) => {
             e.preventDefault()
             applyHomeSearch()
           }}
         >
           <SearchGlyph
-            className="h-4 w-4 shrink-0 text-stone-400"
+            className="h-4 w-4 shrink-0 text-kj-muted"
             aria-hidden
           />
           <input
@@ -645,19 +708,19 @@ export function HomePage() {
             value={searchDraftQuery}
             onChange={(e) => setSearchDraftQuery(e.target.value)}
             placeholder="搜索全部字段…"
-            className="min-w-0 flex-1 bg-transparent text-sm text-neutral-900 outline-none placeholder:text-stone-400"
+            className="min-w-0 flex-1 bg-transparent text-sm text-kj-primary outline-none placeholder:text-kj-muted"
             aria-label="搜索账单"
           />
           <button
             type="button"
             onClick={() => setSearchDateExpanded((v) => !v)}
-            className={`shrink-0 rounded-lg p-2 text-stone-600 transition-colors hover:bg-stone-100 ${
+            className={`shrink-0 rounded-lg p-2 text-kj-secondary transition-colors hover:bg-kj-hover ${
               searchDateExpanded ||
               searchDraftDateFrom ||
               searchDraftDateTo ||
               appliedSearchDateFrom ||
               appliedSearchDateTo
-                ? 'bg-stone-100 text-stone-900 ring-1 ring-stone-300/90'
+                ? 'bg-kj-raised text-kj-primary ring-1 ring-kj-border-strong'
                 : ''
             }`}
             aria-expanded={searchDateExpanded}
@@ -677,11 +740,11 @@ export function HomePage() {
           <button
             type="button"
             onClick={() => quickReconcileFilter('settled')}
-            className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+            className={
               appliedSearchReconcile === 'settled'
-                ? 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-300/80'
-                : 'bg-stone-100 text-stone-600 hover:bg-stone-200/90'
-            }`}
+                ? 'kuaiji-chip kuaiji-chip-active-settled'
+                : 'kuaiji-chip kuaiji-chip-idle'
+            }
             aria-pressed={appliedSearchReconcile === 'settled'}
           >
             已结清
@@ -689,18 +752,18 @@ export function HomePage() {
           <button
             type="button"
             onClick={() => quickReconcileFilter('pending')}
-            className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+            className={
               appliedSearchReconcile === 'pending'
-                ? 'bg-amber-100 text-amber-900 ring-1 ring-amber-300/80'
-                : 'bg-stone-100 text-stone-600 hover:bg-stone-200/90'
-            }`}
+                ? 'kuaiji-chip kuaiji-chip-active-pending'
+                : 'kuaiji-chip kuaiji-chip-idle'
+            }
             aria-pressed={appliedSearchReconcile === 'pending'}
           >
             未结清
           </button>
         </div>
         {searchDateExpanded && (
-          <div className="mt-2 rounded-2xl border border-stone-200/90 bg-white px-3 py-2.5 shadow-sm">
+          <div className="mt-2 rounded-2xl border border-kj-border-strong/80 bg-kj-surface px-3 py-2.5 shadow-sm">
             <HomeSearchDateRangeBlock
               dateFrom={searchDraftDateFrom}
               dateTo={searchDraftDateTo}
@@ -714,9 +777,10 @@ export function HomePage() {
           </div>
         )}
         {homeSearchModeActive ? (
-          <div className="mt-2 flex items-center justify-between gap-2 px-1">
-            <p className="min-w-0 text-xs text-[#888888]">
+          <div className="mt-2 flex flex-col gap-2.5 rounded-2xl border border-kj-border-strong/80 bg-kj-raised px-3 py-2.5 shadow-sm">
+            <p className="min-w-0 text-xs leading-relaxed text-kj-secondary sm:text-sm">
               {[
+                statsDrillBanner,
                 appliedSearchLower
                   ? `关键词「${appliedSearchQuery.slice(0, 48)}${appliedSearchQuery.length > 48 ? '…' : ''}」`
                   : null,
@@ -735,22 +799,23 @@ export function HomePage() {
             <button
               type="button"
               onClick={clearHomeSearch}
-              className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-stone-500 hover:bg-stone-100 hover:text-stone-800"
+              className="w-full rounded-xl border border-kj-border-strong bg-kj-surface px-4 py-2.5 text-sm font-semibold text-kj-primary shadow-sm transition-colors hover:bg-kj-hover active:bg-kj-hover sm:w-auto sm:self-end"
+              aria-label="清除筛选条件"
             >
-              清除
+              清除筛选
             </button>
           </div>
         ) : null}
       </div>
 
-      <section className="mx-4 mb-3 rounded-2xl border border-stone-200/90 bg-white p-4 text-left shadow-sm">
+      <section className="kuaiji-card mx-4 mb-3 p-4 text-left">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-[#2ecc71]">
+            <div className="kuaiji-icon-well h-9 w-9">
               <WalletGlyph className="h-[18px] w-[18px]" />
             </div>
             <div>
-              <p className="text-sm font-medium text-neutral-900">
+              <p className="text-sm font-medium text-kj-primary">
                 {homeSearchModeActive ? '结果概况' : '今日概况'}
               </p>
             </div>
@@ -758,59 +823,57 @@ export function HomePage() {
         </div>
         <div className="mt-4 grid grid-cols-2 gap-6">
           <div>
-            <p className="text-2xl font-bold tabular-nums text-neutral-900">
+            <p className="text-2xl font-bold tabular-nums text-kj-primary">
               {homeSearchModeActive ? searchResultCount : todayRecords.length}
             </p>
-            <p className="mt-0.5 text-xs text-[#666666]">
+            <p className="mt-0.5 text-xs text-kj-secondary">
               {homeSearchModeActive ? '匹配笔数' : '今日笔数'}
             </p>
           </div>
           {amountId && (
             <div>
-              <p className="text-2xl font-bold tabular-nums text-neutral-900">
+              <p className="text-2xl font-bold tabular-nums text-kj-primary">
                 {homeSearchModeActive ? searchResultSum : todaySum}
               </p>
-              <p className="mt-0.5 text-xs text-[#666666]">
+              <p className="mt-0.5 text-xs text-kj-secondary">
                 {homeSearchModeActive ? '匹配金额合计' : '今日金额合计'}
               </p>
             </div>
           )}
         </div>
         {!amountId && (
-          <p className="mt-3 text-xs text-stone-400">
+          <p className="mt-3 text-xs text-kj-muted">
             默认已含「金额」字段；若被删除可在设置里加回。
           </p>
         )}
       </section>
 
       {useRemoteLedger && (
-        <div className="mx-4 mb-3 flex items-start gap-2.5 rounded-2xl border border-sky-100 bg-sky-50/90 px-3.5 py-3">
-          <CloudOkGlyph className="mt-0.5 h-5 w-5 shrink-0 text-sky-600" />
-          <p className="text-left text-xs leading-relaxed text-sky-950">
-            <span className="font-semibold text-sky-800">云端已同步</span>
-            <span className="font-normal text-sky-900/90">
+        <div className="kuaiji-banner-cloud mx-4 mb-3 flex items-start gap-2.5 px-3.5 py-3">
+          <CloudOkGlyph className="kuaiji-banner-cloud-icon mt-0.5 h-5 w-5 shrink-0" />
+          <p className="text-left text-xs leading-relaxed">
+            <span className="kuaiji-banner-cloud-title font-semibold">云端已同步</span>
+            <span className="kuaiji-banner-cloud-body font-normal">
               {' '}
-              数据已存储云端。点击账单可编辑，左滑删除需确认。
-              {homeVoiceEnabled
-                ? ' 长按底部「记一笔」可语音说话识别，松手后保存。'
-                : ''}
+              点账单编辑，左滑删除。
+              {homeVoiceEnabled ? ' 长按「记一笔」可语音记账。' : ''}
             </span>
           </p>
         </div>
       )}
 
       {apiBase && token && !membershipActive && (
-        <div className="mx-4 mb-3 flex items-start gap-2.5 rounded-2xl border border-amber-200/90 bg-amber-50/90 px-3.5 py-3">
-          <HintBulbGlyph className="mt-0.5 h-[15px] w-[15px] shrink-0 text-amber-700" />
-          <p className="text-left text-xs leading-relaxed text-amber-950">
-            <span className="font-semibold text-amber-900">未开通云备份会员</span>
-            <span className="text-amber-900/90">
+        <div className="kuaiji-banner-warning mx-4 mb-3 flex items-start gap-2.5 px-3.5 py-3">
+          <HintBulbGlyph className="mt-0.5 h-[15px] w-[15px] shrink-0 opacity-90" />
+          <p className="text-left text-xs leading-relaxed">
+            <span className="font-semibold">未开通云备份会员</span>
+            <span className="opacity-90">
               {' '}
               已登录但需兑换会员码后才会同步账本至服务器；语音识别与智能识别亦需有效会员。请打开{' '}
             </span>
             <Link
               to="/settings"
-              className="font-semibold text-amber-800 underline-offset-2 hover:underline"
+              className="font-semibold underline-offset-2 hover:underline"
             >
               设置
             </Link>
@@ -820,11 +883,11 @@ export function HomePage() {
       )}
 
       {!useRemoteLedger && (
-        <div className="mx-4 mb-3 flex items-start gap-2.5 rounded-2xl border border-emerald-100/70 bg-[#f3fcf7] px-3.5 py-3">
-          <HintBulbGlyph className="mt-0.5 h-[15px] w-[15px] shrink-0 text-[#2ecc71]" />
+        <div className="kuaiji-banner-success mx-4 mb-3 flex items-start gap-2.5 px-3.5 py-3">
+          <HintBulbGlyph className="mt-0.5 h-[15px] w-[15px] shrink-0 text-kj-brand" />
           <div className="text-left text-xs leading-relaxed">
-            <span className="font-semibold text-[#1a7f4c]">提示：</span>
-            <span className="font-normal text-[#2d6a4f]">
+            <span className="font-semibold">提示：</span>
+            <span className="font-normal opacity-90">
               {apiBase
                 ? '数据仅保存在本机，卸载或清理存储会丢失；请定期在「设置 → 导入导出」备份账单（CSV）。登录并开通会员后可使用云端同步、语音识别与智能识别。'
                 : '当前为离线使用，数据仅存本机。点击账单可编辑，向左滑删除前会二次确认。'}
@@ -837,7 +900,7 @@ export function HomePage() {
         {records.length > 0 &&
           homeSearchModeActive &&
           recordsForHomeTimeline.length === 0 && (
-            <p className="mb-4 rounded-2xl border border-dashed border-stone-300 bg-white py-10 text-center text-sm text-[#666666]">
+            <p className="mb-4 rounded-2xl border border-dashed border-kj-border-strong bg-kj-surface py-10 text-center text-sm text-kj-secondary">
               无匹配结果，请调整关键词或日期区间。
             </p>
           )}
@@ -845,7 +908,7 @@ export function HomePage() {
         {visibleTimelineDates.length === 0 &&
           records.length === 0 &&
           !homeVoiceSlot && (
-          <p className="rounded-2xl border border-dashed border-stone-200 bg-white py-12 text-center text-stone-400">
+          <p className="rounded-2xl border border-dashed border-kj-border-strong bg-kj-surface py-12 text-center text-kj-muted">
             暂无记录，轻点下方记一笔手动录入，长按同按钮语音识别。
           </p>
         )}
@@ -862,13 +925,13 @@ export function HomePage() {
               }}
               className="mb-5 scroll-mt-20"
             >
-              <h2 className="sticky top-0 z-10 mb-2 border-b border-stone-100/90 bg-[#f8f9fa]/95 py-2 text-sm font-bold text-neutral-900 backdrop-blur">
+              <h2 className="sticky top-0 z-10 mb-2 border-b border-kj-border/90 bg-kj-bg/95 py-2 text-sm font-bold text-kj-primary backdrop-blur">
                 {headerDayLabel(dateKey)}{' '}
-                <span className="font-normal text-[#999999]">{dateKey}</span>
+                <span className="font-normal text-kj-muted">{dateKey}</span>
               </h2>
               {list.length === 0 && !showVoiceSlot ? (
-                <div className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-stone-300 bg-white py-8 text-sm text-[#666666]">
-                  <ClipboardGlyph className="h-5 w-5 shrink-0 text-[#999999]" />
+                <div className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-kj-border-strong bg-kj-surface py-8 text-sm text-kj-secondary">
+                  <ClipboardGlyph className="h-5 w-5 shrink-0 text-kj-muted" />
                   <span>当日暂无账单</span>
                 </div>
               ) : (
@@ -883,7 +946,7 @@ export function HomePage() {
                   {list.length > 0 &&
                     groupRecordsByPlate(list, fields).map(([plate, recs]) => (
                       <div key={`${dateKey}-${plate}`}>
-                        <p className="mb-2 text-xs font-semibold tracking-wide text-stone-500">
+                        <p className="mb-2 text-xs font-semibold tracking-wide text-kj-secondary">
                           {plateGroupHeading(plate, fields)}
                         </p>
                         <ul className="space-y-2.5">
@@ -931,7 +994,7 @@ export function HomePage() {
         <button
           type="button"
           onClick={scrollTop}
-          className="fixed bottom-52 right-4 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-700 shadow-md backdrop-blur hover:bg-stone-50"
+          className="fixed bottom-52 right-4 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-kj-border-strong bg-kj-surface text-kj-secondary shadow-md backdrop-blur hover:bg-kj-hover"
           aria-label="回到顶部"
         >
           <ChevronUpGlyph className="h-5 w-5" />
@@ -940,7 +1003,7 @@ export function HomePage() {
 
       {(voiceParsing || voiceBanner || voiceMicHint) && (
         <div
-          className="fixed bottom-[9.5rem] left-1/2 z-30 w-max min-w-0 max-w-[min(32rem,calc(100vw-2rem-env(safe-area-inset-left)-env(safe-area-inset-right)))] -translate-x-1/2 rounded-xl border border-stone-200/90 bg-white/95 px-3 py-2 text-sm leading-snug text-neutral-800 shadow-md backdrop-blur-md whitespace-pre-line break-words"
+          className="fixed bottom-[9.5rem] left-1/2 z-30 w-max min-w-0 max-w-[min(32rem,calc(100vw-2rem-env(safe-area-inset-left)-env(safe-area-inset-right)))] -translate-x-1/2 rounded-xl border border-kj-border-strong/80 bg-kj-surface/95 px-3 py-2 text-sm leading-snug text-kj-primary shadow-md backdrop-blur-md whitespace-pre-line break-words"
           role="status"
         >
           {voiceMicHint
@@ -956,11 +1019,11 @@ export function HomePage() {
           {homeVoiceEnabled && (voiceHoldPressActive || voiceRecording) ? (
             <div
               role="status"
-              className="flex min-h-10 w-[min(100%,18rem)] items-center justify-center gap-2 rounded-2xl border border-stone-200/90 bg-white/95 px-3 py-2 shadow-md backdrop-blur-sm"
+              className="flex min-h-10 w-[min(100%,18rem)] items-center justify-center gap-2 rounded-2xl border border-kj-border-strong/80 bg-kj-surface/95 px-3 py-2 shadow-md backdrop-blur-sm"
             >
               {voiceRecording ? (
                 <>
-                  <span className="text-sm font-semibold text-neutral-800">
+                  <span className="text-sm font-semibold text-kj-primary">
                     收音中
                   </span>
                   <span className="flex h-5 items-end gap-0.5" aria-hidden>
@@ -975,7 +1038,7 @@ export function HomePage() {
                       />
                     ))}
                   </span>
-                  <span className="text-xs font-medium text-stone-500">
+                  <span className="text-xs font-medium text-kj-secondary">
                     松手结束
                   </span>
                 </>
@@ -985,10 +1048,10 @@ export function HomePage() {
                     className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-[#2ecc71]"
                     aria-hidden
                   />
-                  <span className="text-sm font-semibold text-neutral-800">
+                  <span className="text-sm font-semibold text-kj-primary">
                     请继续按住…
                   </span>
-                  <span className="text-xs text-stone-500">即将开始收音</span>
+                  <span className="text-xs text-kj-muted">即将开始收音</span>
                 </>
               )}
             </div>
@@ -1007,7 +1070,7 @@ export function HomePage() {
                 : homeVoiceEnabled
                   ? `flex min-h-11 w-[52%] max-w-[220px] min-w-[10.5rem] select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-white shadow-lg active:bg-neutral-500 ${
                       voiceHoldPressActive && !voiceRecording
-                        ? 'ring-2 ring-[#2ecc71]/55 ring-offset-2 ring-offset-[#f8f9fa]'
+                        ? 'ring-2 ring-[#2ecc71]/55 ring-offset-2 ring-offset-kj-bg'
                         : ''
                     }`
                   : 'flex min-h-11 w-[52%] max-w-[220px] min-w-[10.5rem] select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-neutral-500 shadow-lg'
@@ -1159,24 +1222,24 @@ function HomeVoicePipelineSlot({
   const snippet = rawText.trim().slice(0, 200)
   return (
     <div
-      className="relative overflow-hidden rounded-2xl border border-dashed border-emerald-300/80 bg-gradient-to-br from-white to-emerald-50/40 p-4 shadow-sm"
+      className="relative overflow-hidden rounded-2xl border border-dashed border-kj-settled-border bg-kj-surface p-4 shadow-sm"
       role="status"
       aria-live="polite"
       aria-busy="true"
     >
-      <div className="pointer-events-none absolute inset-0 animate-pulse bg-emerald-500/[0.04]" />
+      <div className="pointer-events-none absolute inset-0 animate-pulse bg-kj-brand/5" />
       <div className="relative flex items-start gap-3">
-        <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-[#1a7f4c]">
+        <div className="kuaiji-icon-well mt-0.5 h-9 w-9">
           <HomeVoiceSlotGlyph className="h-[18px] w-[18px]" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-emerald-900">{label}</p>
+          <p className="text-sm font-semibold text-kj-primary">{label}</p>
           {snippet ? (
-            <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-stone-500">
+            <p className="mt-1.5 line-clamp-3 text-xs leading-relaxed text-kj-secondary">
               「{snippet}」
             </p>
           ) : (
-            <p className="mt-1.5 text-xs text-stone-400">请稍候…</p>
+            <p className="mt-1.5 text-xs text-kj-muted">请稍候…</p>
           )}
         </div>
       </div>

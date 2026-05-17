@@ -5,6 +5,29 @@ import type { FieldDef, LedgerRecord } from '../types'
 import { expandProductLines, getAmountFieldId } from './recordHelpers'
 import { isShareDismissedByUser } from './shareDismissed'
 
+export const LAST_BACKUP_KEY = 'kuaiji_last_backup_at'
+
+export function markBackupNow(): void {
+  try {
+    const d = new Date()
+    const p = (n: number) => String(n).padStart(2, '0')
+    localStorage.setItem(
+      LAST_BACKUP_KEY,
+      `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
+    )
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readLastBackupDate(): string | null {
+  try {
+    return localStorage.getItem(LAST_BACKUP_KEY)
+  } catch {
+    return null
+  }
+}
+
 function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -504,6 +527,7 @@ export async function exportCsv(
   const filename = defaultExportCsvFilename(options)
   try {
     await saveCsvBlobWithMobileFallback(filename, blob)
+    markBackupNow()
   } catch (e) {
     if (!isShareDismissedByUser(e)) {
       alert(e instanceof Error ? e.message : '导出失败')

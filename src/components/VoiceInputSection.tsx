@@ -150,10 +150,10 @@ export function VoiceInputSection({
   const micEnabled = canUseVoice
 
   return (
-    <div className="rounded-2xl border border-stone-200/90 bg-white p-4 text-left shadow-sm">
+    <div className="rounded-2xl border border-kj-border-strong/80 bg-kj-surface p-4 text-left shadow-sm">
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="text-sm font-medium text-[#666666]">语音</span>
+          <span className="text-sm font-medium text-kj-secondary">语音</span>
           {!micIdle && (
             <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">
               录音中
@@ -179,7 +179,7 @@ export function VoiceInputSection({
           value={transcript}
           onChange={(e) => setTranscript(e.target.value)}
           rows={3}
-          className="min-h-[4.25rem] max-h-32 min-w-0 flex-1 resize-y rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm leading-relaxed text-neutral-900 placeholder:text-[#999999]"
+          className="min-h-[4.25rem] max-h-32 min-w-0 flex-1 resize-y rounded-xl border border-kj-border-strong bg-kj-raised px-3 py-2.5 text-sm leading-relaxed text-kj-primary placeholder:text-kj-muted"
           placeholder="识别文字"
           aria-label="识别文字"
         />

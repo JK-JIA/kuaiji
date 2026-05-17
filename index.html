@@ -3,13 +3,14 @@
   <head>
     <script>
       ;(function () {
-        var KEY = 'kuaiji_ui_font_pct'
+        var FONT_KEY = 'kuaiji_ui_font_pct'
+        var THEME_KEY = 'kuaiji_theme_mode'
         var DEF = 100,
           MIN = 85,
           MAX = 150,
           STEP = 5
         try {
-          var raw = localStorage.getItem(KEY)
+          var raw = localStorage.getItem(FONT_KEY)
           var pct = DEF
           if (raw != null) {
             var n = parseFloat(raw)
@@ -20,6 +21,19 @@
           }
           document.documentElement.style.fontSize = pct + '%'
         } catch (e) {}
+        try {
+          var mode = localStorage.getItem(THEME_KEY)
+          var dark =
+            mode === 'dark' ||
+            (mode !== 'light' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          if (dark) {
+            document.documentElement.classList.add('dark')
+            document.documentElement.style.colorScheme = 'dark'
+          }
+          var meta = document.querySelector('meta[name="theme-color"]')
+          if (meta) meta.setAttribute('content', dark ? '#0c0c0f' : '#f8f9fa')
+        } catch (e2) {}
       })()
     </script>
     <meta charset="UTF-8" />

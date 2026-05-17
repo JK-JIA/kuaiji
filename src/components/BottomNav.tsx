@@ -9,12 +9,12 @@ export function BottomNav() {
     return null
   }
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 flex border-t border-stone-200 bg-white/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-md">
+    <nav className="kuaiji-nav">
       <NavLink
         to="/"
         end
         className={({ isActive }) =>
-          `${linkCls} ${isActive ? 'font-medium text-stone-900' : 'text-stone-400'}`
+          `${linkCls} ${isActive ? 'font-medium text-kj-primary' : 'text-kj-muted'}`
         }
       >
         首页
@@ -22,7 +22,7 @@ export function BottomNav() {
       <NavLink
         to="/stats"
         className={({ isActive }) =>
-          `${linkCls} ${isActive ? 'font-medium text-stone-900' : 'text-stone-400'}`
+          `${linkCls} ${isActive ? 'font-medium text-kj-primary' : 'text-kj-muted'}`
         }
       >
         统计
@@ -30,7 +30,7 @@ export function BottomNav() {
       <NavLink
         to="/settings"
         className={({ isActive }) =>
-          `${linkCls} ${isActive ? 'font-medium text-stone-900' : 'text-stone-400'}`
+          `${linkCls} ${isActive ? 'font-medium text-kj-primary' : 'text-kj-muted'}`
         }
       >
         设置

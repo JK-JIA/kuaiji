@@ -38,6 +38,14 @@ export function getStoredEmail(): string | null {
   }
 }
 
+export function getStoredPhone(): string | null {
+  try {
+    return localStorage.getItem(PHONE_KEY)
+  } catch {
+    return null
+  }
+}
+
 export function persistSession(
   token: string,
   email: string,

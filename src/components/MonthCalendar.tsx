@@ -62,16 +62,16 @@ export function MonthCalendar({
     value.length >= 10 ? parseISO(value + 'T12:00:00') : today
 
   const navBtn = compact
-    ? 'flex h-8 w-8 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800'
-    : 'flex h-10 w-10 items-center justify-center rounded-full text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-800'
+    ? 'flex h-8 w-8 items-center justify-center rounded-full text-kj-secondary transition-colors hover:bg-kj-hover hover:text-kj-primary'
+    : 'flex h-10 w-10 items-center justify-center rounded-full text-kj-secondary transition-colors hover:bg-kj-hover hover:text-kj-primary'
 
   const titleCls = compact
-    ? 'text-[15px] font-semibold tracking-tight text-stone-900'
-    : 'text-lg font-semibold tracking-tight text-stone-900'
+    ? 'text-[15px] font-semibold tracking-tight text-kj-primary'
+    : 'text-lg font-semibold tracking-tight text-kj-primary'
 
   const weekCls = compact
-    ? 'py-1.5 text-xs font-medium text-stone-400'
-    : 'py-2 text-xs font-medium uppercase tracking-wider text-stone-400'
+    ? 'py-1.5 text-xs font-medium text-kj-muted'
+    : 'py-2 text-xs font-medium uppercase tracking-wider text-kj-muted'
 
   const emptyCls = compact
     ? 'aspect-square min-h-[34px]'
@@ -130,7 +130,7 @@ export function MonthCalendar({
                   isSelected
                     ? 'bg-stone-900 text-white shadow-sm'
                     : isToday
-                      ? 'bg-stone-100 text-stone-900 ring-1 ring-stone-300'
+                      ? 'bg-stone-100 text-kj-primary ring-1 ring-stone-300'
                       : 'text-stone-800 hover:bg-stone-100',
                 ].join(' ')}
               >
@@ -139,7 +139,7 @@ export function MonthCalendar({
                   <span className="absolute bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-stone-400" />
                 )}
                 {hasRecord && isSelected && (
-                  <span className="absolute bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-white/90" />
+                  <span className="absolute bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-kj-surface/90" />
                 )}
               </button>
             </div>

@@ -198,7 +198,7 @@ export function RecordCard({
   }
 
   return (
-    <div className="relative overflow-hidden rounded-2xl">
+    <div className="relative isolate overflow-hidden rounded-2xl">
       {onDelete && (
         <div
           className="absolute inset-y-0 right-0 z-0 flex"
@@ -219,14 +219,14 @@ export function RecordCard({
 
       <div
         ref={surfaceRef}
-        className={`relative z-10 rounded-2xl border text-left ${
+        className={`relative z-10 text-left ${
           dragActive ? '' : 'transition-[transform] duration-200 ease-out'
         } ${
           showGreenHighlight
-            ? 'border-[#2ecc71]/55 bg-emerald-50 ring-2 ring-[#2ecc71]/45'
+            ? 'kuaiji-record-highlight'
             : fullyPaid
-              ? 'border-stone-200 bg-stone-100'
-              : 'border-stone-200 bg-white'
+              ? 'kuaiji-record-settled'
+              : 'kuaiji-record-open'
         } ${
           onEdit
             ? 'cursor-pointer'
@@ -283,7 +283,7 @@ export function RecordCard({
                         setReceiptOpen(true)
                       }}
                       onPointerDown={(e) => e.stopPropagation()}
-                      className="shrink-0 rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-semibold text-[#666666] hover:bg-stone-50"
+                      className="shrink-0 rounded-lg border border-kj-border-strong bg-kj-surface px-2 py-1 text-xs font-semibold text-kj-secondary hover:bg-kj-hover"
                     >
                       发票
                     </button>
@@ -291,7 +291,7 @@ export function RecordCard({
                 </div>
                 {amountResolvedId &&
                   (exp > 0.005 || rec > 0.005 || fullyPaid) && (
-                    <p className="mt-1.5 text-xs font-medium tabular-nums leading-snug text-[#666666]">
+                    <p className="mt-1.5 text-xs font-medium tabular-nums leading-snug text-kj-secondary">
                       应收 ¥{fmt(exp)} · 已收 ¥{fmt(rec)} · 差额 ¥{fmt(out)}
                     </p>
                   )}
@@ -299,18 +299,18 @@ export function RecordCard({
                   <div className="min-w-0 w-full">
                     <div className="min-w-0">
                       <div className={lineGrid}>
-                        <span className="min-w-0 border-b border-stone-100 pb-2 pr-1 text-xs font-medium text-[#666666]">
+                        <span className="min-w-0 border-b border-kj-border pb-2 pr-1 text-xs font-medium text-kj-secondary">
                           商品
                         </span>
                         {unitPriceFieldId ? (
-                          <span className="border-b border-stone-100 pb-2 text-center text-xs font-medium tabular-nums text-[#666666]">
+                          <span className="border-b border-kj-border pb-2 text-center text-xs font-medium tabular-nums text-kj-secondary">
                             {unitPriceColLabel}
                           </span>
                         ) : null}
-                        <span className="border-b border-stone-100 pb-2 text-right text-xs font-medium tabular-nums text-[#666666]">
+                        <span className="border-b border-kj-border pb-2 text-right text-xs font-medium tabular-nums text-kj-secondary">
                           {quantityColLabel}
                         </span>
-                        <span className="border-b border-stone-100 pb-2 text-right text-xs font-medium tabular-nums text-[#666666]">
+                        <span className="border-b border-kj-border pb-2 text-right text-xs font-medium tabular-nums text-kj-secondary">
                           金额
                         </span>
                         {lines.flatMap((line, i) => {
@@ -320,7 +320,7 @@ export function RecordCard({
                           return [
                             <span
                               key={`${k}-p`}
-                              className="min-w-0 break-words py-2 text-sm font-medium leading-snug text-neutral-900"
+                              className="min-w-0 break-words py-2 text-sm font-medium leading-snug text-kj-primary"
                             >
                               {line.product || '—'}
                             </span>,
@@ -346,7 +346,7 @@ export function RecordCard({
                             </span>,
                             <span
                               key={`${k}-a`}
-                              className="whitespace-nowrap py-2 text-right text-sm font-semibold tabular-nums leading-snug text-neutral-900"
+                              className="whitespace-nowrap py-2 text-right text-sm font-semibold tabular-nums leading-snug text-kj-primary"
                             >
                               {lineAmt > 0 ? `¥${fmt(lineAmt)}` : '—'}
                             </span>,
@@ -366,7 +366,7 @@ export function RecordCard({
                     displayTotal > 0 ||
                     savedVsReceivable > 0 ||
                     onReconcile) && (
-                    <div className="border-t border-stone-100/80 pt-2">
+                    <div className="border-t border-kj-border/80 pt-2">
                       <div
                         className={
                           unitPriceFieldId
@@ -375,31 +375,31 @@ export function RecordCard({
                         }
                       >
                         <div
-                          className={`min-w-0 text-xs leading-snug text-[#666666] ${
+                          className={`min-w-0 text-xs leading-snug text-kj-secondary ${
                             unitPriceFieldId ? 'col-span-2' : ''
                           }`}
                         >
                           {plateField ? (
                             <span className="break-all">
-                              <span className="text-[#999999]">
+                              <span className="text-kj-muted">
                                 {plateField.name}
                               </span>
                               {plateDisplay || '—'}
                             </span>
                           ) : (
-                            <span className="text-[#999999]">—</span>
+                            <span className="text-kj-muted">—</span>
                           )}
                         </div>
                         <div className="text-right">
                           {displayTotal > 0 ? (
-                            <span className="text-xs font-medium tabular-nums text-[#666666]">
+                            <span className="text-xs font-medium tabular-nums text-kj-secondary">
                               总价
                             </span>
                           ) : null}
                         </div>
                         <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
                           {displayTotal > 0 ? (
-                            <span className="text-sm font-semibold tabular-nums text-neutral-900">
+                            <span className="text-sm font-semibold tabular-nums text-kj-primary">
                               ¥{fmt(displayTotal)}
                             </span>
                           ) : null}
@@ -416,7 +416,7 @@ export function RecordCard({
                         </div>
                       </div>
                       {savedVsReceivable > 0 && (
-                        <div className="mt-1.5 border-t border-stone-50 pt-1.5">
+                        <div className="mt-1.5 border-t border-kj-border pt-1.5">
                           <span className="text-xs font-medium tabular-nums text-[#2ecc71]">
                             已优惠 ¥{fmt(savedVsReceivable)}
                           </span>
@@ -454,7 +454,7 @@ export function RecordCard({
                         setReceiptOpen(true)
                       }}
                       onPointerDown={(e) => e.stopPropagation()}
-                      className="shrink-0 rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-semibold text-[#666666] hover:bg-stone-50"
+                      className="shrink-0 rounded-lg border border-kj-border-strong bg-kj-surface px-2 py-1 text-xs font-semibold text-kj-secondary hover:bg-kj-hover"
                     >
                       发票
                     </button>
@@ -462,16 +462,16 @@ export function RecordCard({
                 </div>
                 {amountResolvedId &&
                   (exp > 0.005 || rec > 0.005 || fullyPaid) && (
-                    <p className="mt-1.5 text-xs font-medium tabular-nums leading-snug text-[#666666]">
+                    <p className="mt-1.5 text-xs font-medium tabular-nums leading-snug text-kj-secondary">
                       应收 ¥{fmt(exp)} · 已收 ¥{fmt(rec)} · 差额 ¥{fmt(out)}
                     </p>
                   )}
                 <div className="mt-2 min-w-0 space-y-2">
-                  <div className="space-y-2 text-sm leading-snug text-neutral-900">
+                  <div className="space-y-2 text-sm leading-snug text-kj-primary">
                     {lines.map((line, i) => (
                       <div key={`${record.id}-ln-${i}`} className="min-w-0 break-words">
                         <span className="font-medium">{line.product || '—'}</span>
-                        <span className="ml-2 tabular-nums text-[#666666]">
+                        <span className="ml-2 tabular-nums text-kj-secondary">
                           {formatQuantityWithUnit(
                                 line.quantity,
                                 line.product,
@@ -488,11 +488,11 @@ export function RecordCard({
                     />
                   </div>
                   {plateField && (
-                    <div className="border-t border-stone-100/80 pt-2">
+                    <div className="border-t border-kj-border/80 pt-2">
                       <div className="flex min-w-0 items-center justify-between gap-2">
-                        <div className="min-w-0 flex-1 text-xs leading-snug text-[#666666]">
+                        <div className="min-w-0 flex-1 text-xs leading-snug text-kj-secondary">
                           <span className="break-all">
-                            <span className="text-[#999999]">{plateField.name}</span>
+                            <span className="text-kj-muted">{plateField.name}</span>
                             {plateDisplay || '—'}
                           </span>
                         </div>
@@ -510,7 +510,7 @@ export function RecordCard({
                     </div>
                   )}
                   {!plateField && onReconcile && (
-                    <div className="flex justify-end border-t border-stone-100/80 pt-2">
+                    <div className="flex justify-end border-t border-kj-border/80 pt-2">
                       <button
                         type="button"
                         onClick={openReconcile}
@@ -530,18 +530,18 @@ export function RecordCard({
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4">
           <div
-            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"
+            className="w-full max-w-sm rounded-2xl bg-kj-surface p-5 shadow-xl"
             role="dialog"
             aria-modal
             aria-labelledby="del-confirm-title"
           >
             <p
               id="del-confirm-title"
-              className="text-base font-bold text-neutral-900"
+              className="text-base font-bold text-kj-primary"
             >
               删除账单？
             </p>
-            <p className="mt-2 text-sm leading-relaxed text-[#666666]">
+            <p className="mt-2 text-sm leading-relaxed text-kj-secondary">
               删除后无法恢复，确定要删除这条记录吗？
             </p>
             <div className="mt-5 flex gap-2">
@@ -551,7 +551,7 @@ export function RecordCard({
                   setDeleteConfirm(false)
                   setSlide(0)
                 }}
-                className="flex-1 rounded-xl border border-stone-200 py-2.5 text-sm font-semibold text-[#666666]"
+                className="flex-1 rounded-xl border border-kj-border-strong py-2.5 text-sm font-semibold text-kj-secondary"
               >
                 取消
               </button>
@@ -593,10 +593,10 @@ function ExtraFieldsPlateLine({
   if (pairs.length === 0) return null
 
   return (
-    <div className="border-t border-stone-100/90 pt-3">
+    <div className="border-t border-kj-border/90 pt-3">
       <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs leading-snug">
         {pairs.flatMap(({ id, name, value }) => [
-          <span key={`${id}-n`} className="shrink-0 text-[#999999]">
+          <span key={`${id}-n`} className="shrink-0 text-kj-muted">
             {name}
           </span>,
           <span key={`${id}-v`} className="min-w-0 break-words text-[#444444]">
@@ -622,17 +622,13 @@ function CardStatusBadges({
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
       {fullyPaid && (
-        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium leading-none text-emerald-700">
-          已结清
-        </span>
+        <span className="kuaiji-badge-success">已结清</span>
       )}
       {!fullyPaid && exp > 0 && out > 0.005 && (
-        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium leading-none text-amber-900">
-          未结清
-        </span>
+        <span className="kuaiji-badge-warning">未结清</span>
       )}
       {!fullyPaid && exp <= 0 && !settled && (
-        <span className="rounded-full bg-stone-200/90 px-2 py-0.5 text-xs font-medium leading-none text-stone-700">
+        <span className="kuaiji-badge-warning bg-kj-raised text-kj-secondary">
           待核账
         </span>
       )}
@@ -660,9 +656,9 @@ function RecordCardDateTime({ record }: { record: LedgerRecord }) {
     minute: '2-digit',
   })
   return (
-    <span className="text-sm font-medium tabular-nums text-neutral-900">
+    <span className="text-sm font-medium tabular-nums text-kj-primary">
       {dateLabel}
-      <span className="font-normal text-[#999999]"> · </span>
+      <span className="font-normal text-kj-muted"> · </span>
       {time}
     </span>
   )

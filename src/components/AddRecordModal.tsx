@@ -358,15 +358,15 @@ export function AddRecordModal({
       <form
         noValidate
         onSubmit={handleSubmit}
-        className="relative z-10 flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-stone-200/90 bg-white shadow-xl sm:rounded-2xl"
+        className="relative z-10 flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-kj-border-strong/80 bg-kj-surface shadow-xl sm:rounded-2xl"
       >
-        <header className="flex items-start justify-between gap-3 border-b border-stone-100 bg-white px-4 pb-3 pt-4 sm:px-5">
+        <header className="flex items-start justify-between gap-3 border-b border-kj-border bg-kj-surface px-4 pb-3 pt-4 sm:px-5">
           <div className="min-w-0">
-            <h2 className="text-xl font-bold tracking-tight text-neutral-900">
+            <h2 className="text-xl font-bold tracking-tight text-kj-primary">
               {recordToEdit ? '编辑账单' : '记一笔'}
             </h2>
             {recordToEdit && (
-              <p className="mt-1 text-xs text-[#999999]">
+              <p className="mt-1 text-xs text-kj-muted">
                 创建于{' '}
                 {new Date(recordToEdit.createdAt).toLocaleString('zh-CN', {
                   month: 'numeric',
@@ -380,7 +380,7 @@ export function AddRecordModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[#666666] hover:bg-stone-100"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-kj-secondary hover:bg-stone-100"
             aria-label="关闭"
           >
             <CloseGlyph className="h-5 w-5" />
@@ -396,17 +396,17 @@ export function AddRecordModal({
           </div>
         )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto bg-[#f8f9fa] px-4 py-4 sm:px-5">
+        <div className="min-h-0 flex-1 overflow-y-auto bg-kj-bg px-4 py-4 sm:px-5">
           <div className="mb-4 flex justify-start">
             <button
               type="button"
               onClick={() => setDatePickerOpen(true)}
-              className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-sm font-medium text-neutral-900 shadow-sm active:bg-stone-50"
+              className="inline-flex items-center gap-2 rounded-xl border border-kj-border-strong bg-kj-surface px-3.5 py-2 text-sm font-medium text-kj-primary shadow-sm active:bg-stone-50 bg-kj-raised"
               aria-label="选择记账日期"
             >
-              <CalendarGlyph className="h-4 w-4 text-[#666666]" aria-hidden />
+              <CalendarGlyph className="h-4 w-4 text-kj-secondary" aria-hidden />
               <span>{dateCompactLabel}</span>
-              <ChevronDownGlyph className="h-4 w-4 text-[#999999]" aria-hidden />
+              <ChevronDownGlyph className="h-4 w-4 text-kj-muted" aria-hidden />
             </button>
           </div>
           <div className="mb-4">
@@ -428,13 +428,13 @@ export function AddRecordModal({
           </div>
 
           {rootFieldIdsForRender.length > 0 && (
-            <div className="mt-4 space-y-3 rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm">
+            <div className="mt-4 space-y-3 rounded-2xl border border-kj-border-strong/80 bg-kj-surface p-4 shadow-sm">
               {rootFieldIdsForRender.map((fid) => {
                 const f = sortedFields.find((x) => x.id === fid)
                 if (!f) return null
                 return (
                   <label key={f.id} className="block text-left">
-                    <span className="text-sm font-medium text-[#666666]">
+                    <span className="text-sm font-medium text-kj-secondary">
                       {f.name}
                       {f.required && (
                         <span className="text-rose-500" aria-hidden>
@@ -444,7 +444,7 @@ export function AddRecordModal({
                     </span>
                     {f.key === 'plate' && recentBuyerNames.length > 0 && (
                       <div className="mt-2 mb-1">
-                        <p className="mb-1.5 text-xs font-medium text-[#666666]">
+                        <p className="mb-1.5 text-xs font-medium text-kj-secondary">
                           最近常用
                         </p>
                         <div className="flex flex-wrap gap-2">
@@ -453,7 +453,7 @@ export function AddRecordModal({
                               key={name}
                               type="button"
                               onClick={() => applyRecentBuyer(name)}
-                              className="max-w-full truncate rounded-full border border-stone-200/90 bg-stone-100/90 px-3 py-1.5 text-xs font-medium text-neutral-800 active:bg-stone-200"
+                              className="max-w-full truncate rounded-full border border-kj-border-strong/80 bg-stone-100/90 px-3 py-1.5 text-xs font-medium text-kj-primary active:bg-stone-200"
                             >
                               {name}
                             </button>
@@ -473,7 +473,7 @@ export function AddRecordModal({
                             : raw
                         setValues((v) => ({ ...v, [f.id]: next }))
                       }}
-                      className="mt-1.5 w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-base text-neutral-900 placeholder:text-[#999999]"
+                      className="mt-1.5 w-full rounded-xl border border-kj-border-strong bg-kj-raised px-3 py-2.5 text-base text-kj-primary placeholder:text-kj-muted"
                       placeholder={f.name}
                       autoComplete="off"
                       spellCheck={f.type === 'number' ? false : undefined}
@@ -487,7 +487,7 @@ export function AddRecordModal({
           {prodField && qtyField && (
             <div className="mt-4">
               <div className="mb-3 flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-neutral-900">
+                <p className="text-sm font-semibold text-kj-primary">
                   商品明细
                 </p>
                 <button
@@ -500,7 +500,7 @@ export function AddRecordModal({
               </div>
               {recentProductNames.length > 0 && (
                 <div className="mb-3">
-                  <p className="mb-2 text-xs font-medium text-[#666666]">
+                  <p className="mb-2 text-xs font-medium text-kj-secondary">
                     常用
                   </p>
                   <div className="flex flex-wrap gap-2">
@@ -509,7 +509,7 @@ export function AddRecordModal({
                         key={name}
                         type="button"
                         onClick={() => applyRecentProduct(name)}
-                        className="max-w-full truncate rounded-full border border-stone-200/90 bg-stone-100/90 px-3 py-1.5 text-xs font-medium text-neutral-800 active:bg-stone-200"
+                        className="max-w-full truncate rounded-full border border-kj-border-strong/80 bg-stone-100/90 px-3 py-1.5 text-xs font-medium text-kj-primary active:bg-stone-200"
                       >
                         {name}
                       </button>
@@ -517,7 +517,7 @@ export function AddRecordModal({
                   </div>
                 </div>
               )}
-              <div className="rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm">
+              <div className="rounded-2xl border border-kj-border-strong/80 bg-kj-surface p-4 shadow-sm">
                 {!showDetailAmounts || !canonicalAmountId ? (
                   <div className="space-y-3 pt-2">
                     {lines.map((line, idx) => {
@@ -528,9 +528,9 @@ export function AddRecordModal({
                       return (
                       <div
                         key={line.id}
-                        className="flex flex-wrap items-end gap-2 rounded-xl border border-stone-100 bg-[#fafafa] p-3"
+                        className="flex flex-wrap items-end gap-2 rounded-xl border border-kj-border bg-kj-raised p-3"
                       >
-                        <label className="min-w-[120px] flex-[2] text-left text-xs font-medium text-[#666666]">
+                        <label className="min-w-[120px] flex-[2] text-left text-xs font-medium text-kj-secondary">
                           {prodField.name}
                           {prodField.required && (
                             <span className="text-rose-500" aria-hidden>
@@ -548,11 +548,11 @@ export function AddRecordModal({
                                 ),
                               )
                             }
-                            className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-base text-neutral-900"
+                            className="mt-1 w-full rounded-xl border border-kj-border-strong bg-kj-surface px-3 py-2.5 text-base text-kj-primary"
                             placeholder="商品名称"
                           />
                         </label>
-                        <label className="w-[6.5rem] shrink-0 text-left text-xs font-medium text-[#666666]">
+                        <label className="w-[6.5rem] shrink-0 text-left text-xs font-medium text-kj-secondary">
                           {qtyFieldDisplayName}
                           {qtyField.required && (
                             <span className="text-rose-500" aria-hidden>
@@ -573,7 +573,7 @@ export function AddRecordModal({
                                 ),
                               )
                             }}
-                            className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-2 py-2.5 text-center text-base tabular-nums text-neutral-900"
+                            className="mt-1 w-full rounded-xl border border-kj-border-strong bg-kj-surface px-2 py-2.5 text-center text-base tabular-nums text-kj-primary"
                             placeholder={lineUnit}
                             autoComplete="off"
                             spellCheck={false}
@@ -583,7 +583,7 @@ export function AddRecordModal({
                           <button
                             type="button"
                             onClick={() => removeLine(idx)}
-                            className="shrink-0 rounded-lg px-2 py-1.5 text-xs text-[#999999] hover:bg-white hover:text-rose-600"
+                            className="shrink-0 rounded-lg px-2 py-1.5 text-xs text-kj-muted hover:bg-white hover:bg-kj-hover hover:text-rose-600"
                           >
                             移除
                           </button>
@@ -596,7 +596,7 @@ export function AddRecordModal({
                   <div className="min-w-0 overflow-x-auto overscroll-x-contain pt-2">
                     <div className="min-w-[20.25rem]">
                       <div
-                        className="grid grid-cols-[minmax(7.5rem,1fr)_2.75rem_2.75rem_3.25rem_2rem] gap-x-2 border-b border-stone-100 pb-2 text-xs font-medium text-[#666666]"
+                        className="grid grid-cols-[minmax(7.5rem,1fr)_2.75rem_2.75rem_3.25rem_2rem] gap-x-2 border-b border-kj-border pb-2 text-xs font-medium text-kj-secondary"
                       >
                         <span className="min-w-0 break-words">
                           {prodField.name}
@@ -632,7 +632,7 @@ export function AddRecordModal({
                               ),
                             )
                           }
-                          className="w-full min-w-[7.5rem] rounded-xl border border-stone-200 bg-[#fafafa] px-2.5 py-2 text-sm text-neutral-900 placeholder:text-[#999999]"
+                          className="w-full min-w-[7.5rem] rounded-xl border border-kj-border-strong bg-kj-raised px-2.5 py-2 text-sm text-kj-primary placeholder:text-kj-muted"
                           placeholder="商品名称"
                           aria-label={prodField.name}
                         />
@@ -667,7 +667,7 @@ export function AddRecordModal({
                               }),
                             )
                           }}
-                          className="rounded-xl border border-stone-200 bg-[#fafafa] px-1.5 py-2 text-center text-sm tabular-nums text-neutral-900 placeholder:text-[#999999]"
+                          className="rounded-xl border border-kj-border-strong bg-kj-raised px-1.5 py-2 text-center text-sm tabular-nums text-kj-primary placeholder:text-kj-muted"
                           placeholder={`元/${lineUnit}`}
                           aria-label={unitPriceField?.name ?? '单价'}
                           autoComplete="off"
@@ -704,7 +704,7 @@ export function AddRecordModal({
                               }),
                             )
                           }}
-                          className="rounded-xl border border-stone-200 bg-[#fafafa] px-1.5 py-2 text-center text-sm tabular-nums text-neutral-900 placeholder:text-[#999999]"
+                          className="rounded-xl border border-kj-border-strong bg-kj-raised px-1.5 py-2 text-center text-sm tabular-nums text-kj-primary placeholder:text-kj-muted"
                           placeholder={lineUnit}
                           aria-label={qtyFieldDisplayName}
                           autoComplete="off"
@@ -741,7 +741,7 @@ export function AddRecordModal({
                               }),
                             )
                           }}
-                          className="rounded-xl border border-stone-200 bg-[#fafafa] px-1.5 py-2 text-right text-sm font-semibold tabular-nums text-amber-900 placeholder:text-[#999999] placeholder:font-normal"
+                          className="rounded-xl border border-kj-border-strong bg-kj-raised px-1.5 py-2 text-right text-sm font-semibold tabular-nums text-amber-900 placeholder:text-kj-muted placeholder:font-normal"
                           placeholder="金额"
                           aria-label={amountField?.name ?? '金额'}
                           title="单价、数量、金额填两项自动算第三项"
@@ -753,7 +753,7 @@ export function AddRecordModal({
                             <button
                               type="button"
                               onClick={() => removeLine(idx)}
-                              className="rounded-lg p-1 text-xs text-[#999999] hover:bg-stone-100 hover:text-rose-600"
+                              className="rounded-lg p-1 text-xs text-kj-muted hover:bg-stone-100 hover:text-rose-600"
                               aria-label="移除此行"
                             >
                               ×
@@ -772,24 +772,24 @@ export function AddRecordModal({
 
                 {showDetailAmounts && canonicalAmountId && (
                   <>
-                    <div className="mt-3 border-t border-stone-100 pt-2 text-right">
+                    <div className="mt-3 border-t border-kj-border pt-2 text-right">
                       <div className="flex items-baseline justify-end gap-2">
-                        <span className="text-xs leading-none text-neutral-900">
+                        <span className="text-xs leading-none text-kj-primary">
                           应收金额
                         </span>
-                        <span className="text-xl font-bold tabular-nums leading-none text-neutral-900">
+                        <span className="text-xl font-bold tabular-nums leading-none text-kj-primary">
                           {lineSubtotal > 0
                             ? `¥${formatLedgerMoneyInput(lineSubtotal)}`
                             : '¥0'}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs leading-tight text-[#999999]">
+                      <p className="mt-1 text-xs leading-tight text-kj-muted">
                         各行：单价、{qtyFieldDisplayName}、金额任填两项，自动算第三项并合计为应收
                       </p>
                     </div>
-                    <div className="mt-4 rounded-xl border border-stone-100 bg-[#f8f9fa] p-3">
+                    <div className="mt-4 rounded-xl border border-kj-border bg-kj-bg p-3">
                       <label className="block text-left">
-                        <span className="text-sm font-medium text-neutral-900">
+                        <span className="text-sm font-medium text-kj-primary">
                           总价（优惠后实收价）
                         </span>
                         <input
@@ -801,7 +801,7 @@ export function AddRecordModal({
                               sanitizeUnsignedDecimalInput(e.target.value),
                             )
                           }
-                          className="mt-1.5 block w-full rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-base font-semibold tabular-nums text-neutral-900 placeholder:text-xs placeholder:font-normal placeholder:leading-snug placeholder:text-[#a3a3a3]"
+                          className="mt-1.5 block w-full rounded-lg border border-kj-border-strong bg-kj-surface px-3 py-1.5 text-base font-semibold tabular-nums text-kj-primary placeholder:text-xs placeholder:font-normal placeholder:leading-snug placeholder:text-[#a3a3a3]"
                           placeholder="与应收不同填"
                           autoComplete="off"
                           spellCheck={false}
@@ -827,11 +827,11 @@ export function AddRecordModal({
           )}
         </div>
 
-        <footer className="flex gap-3 border-t border-stone-100 bg-white px-4 py-4 sm:px-5">
+        <footer className="flex gap-3 border-t border-kj-border bg-kj-surface px-4 py-4 sm:px-5">
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 rounded-xl border border-stone-300 bg-white py-3 text-sm font-medium text-neutral-900 shadow-sm hover:bg-stone-50"
+            className="flex-1 rounded-xl border border-kj-border-strong bg-kj-surface py-3 text-sm font-medium text-kj-primary shadow-sm hover:bg-kj-hover"
           >
             取消
           </button>

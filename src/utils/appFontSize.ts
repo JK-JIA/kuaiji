@@ -37,3 +37,10 @@ export function persistFontSizePercent(pct: number): void {
 export function applyFontSizePercentToHtml(pct: number): void {
   document.documentElement.style.fontSize = `${clampAndStep(pct)}%`
 }
+
+export function fontSizePresetLabel(pct: number): string {
+  if (pct <= 90) return '较小'
+  if (pct < 115) return '标准'
+  if (pct < 135) return '较大'
+  return '最大'
+}

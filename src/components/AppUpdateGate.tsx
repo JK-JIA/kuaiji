@@ -236,10 +236,10 @@ export function AppUpdateGate() {
       aria-modal="true"
       aria-labelledby="app-update-title"
     >
-      <div className="w-full max-w-sm rounded-2xl border border-stone-200/90 bg-white p-5 shadow-xl">
+      <div className="w-full max-w-sm rounded-2xl border border-kj-border-strong/80 bg-kj-surface p-5 shadow-xl">
         <h2
           id="app-update-title"
-          className="text-lg font-semibold text-neutral-900"
+          className="text-lg font-semibold text-kj-primary"
         >
           {preferredUpdate === 'bundle' ? '发现网页更新' : '发现新版本'}
         </h2>
@@ -276,7 +276,7 @@ export function AppUpdateGate() {
               if (manualRef.current) alert('可稍后在设置中再次检查更新')
               close()
             }}
-            className="min-h-[44px] rounded-xl border border-stone-200 bg-[#fafafa] px-4 py-2.5 text-sm font-medium text-neutral-800 disabled:opacity-50"
+            className="min-h-[44px] rounded-xl border border-kj-border-strong bg-kj-raised px-4 py-2.5 text-sm font-medium text-kj-primary disabled:opacity-50"
           >
             稍后
           </button>
@@ -284,7 +284,7 @@ export function AppUpdateGate() {
             type="button"
             disabled={downloading}
             onClick={skipThisVersion}
-            className="min-h-[44px] rounded-xl border border-stone-200 bg-white px-4 py-2.5 text-sm font-medium text-neutral-700 disabled:opacity-50"
+            className="min-h-[44px] rounded-xl border border-kj-border-strong bg-kj-surface px-4 py-2.5 text-sm font-medium text-neutral-700 disabled:opacity-50"
           >
             跳过此版本
           </button>

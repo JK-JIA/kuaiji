@@ -218,13 +218,13 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
         aria-label="关闭"
         onClick={onClose}
       />
-      <div className="relative max-h-[90dvh] overflow-y-auto rounded-t-2xl bg-white px-4 pb-8 pt-4 shadow-xl">
+      <div className="relative max-h-[90dvh] overflow-y-auto rounded-t-2xl bg-kj-surface px-4 pb-8 pt-4 shadow-xl">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-bold text-neutral-900">小票预览</h2>
+          <h2 className="text-base font-bold text-kj-primary">小票预览</h2>
           <button
             type="button"
             onClick={onClose}
-            className="text-sm font-medium text-[#666666]"
+            className="text-sm font-medium text-kj-secondary"
           >
             关闭
           </button>
@@ -343,9 +343,9 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
 
       {explainOpen && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 px-4">
-          <div className="max-w-sm rounded-2xl bg-white p-5 shadow-xl">
-            <p className="text-sm font-bold text-neutral-900">保存小票说明</p>
-            <p className="mt-2 text-xs leading-relaxed text-[#666666]">
+          <div className="max-w-sm rounded-2xl bg-kj-surface p-5 shadow-xl">
+            <p className="text-sm font-bold text-kj-primary">保存小票说明</p>
+            <p className="mt-2 text-xs leading-relaxed text-kj-secondary">
               将生成 JPEG 图片（体积小、保存更快）。在安卓上会通过系统「分享」面板保存到相册或文件；首次使用请允许存储/分享相关权限。若未出现相册选项，可选择「保存到文件」或使用截图。需要更清晰可在设置中开启「高清导出」。
             </p>
             <div className="mt-4 flex gap-2">
@@ -355,7 +355,7 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
                   setExplainOpen(false)
                   setPendingSave(false)
                 }}
-                className="flex-1 rounded-xl border border-stone-200 py-2.5 text-sm font-semibold text-[#666666]"
+                className="flex-1 rounded-xl border border-kj-border-strong py-2.5 text-sm font-semibold text-kj-secondary"
               >
                 取消
               </button>

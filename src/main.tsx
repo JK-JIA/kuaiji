@@ -5,8 +5,10 @@ import App from './App.tsx'
 import { BrowserOnlyNotice } from './components/BrowserOnlyNotice'
 import './index.css'
 import { applyFontSizePercentToHtml, readFontSizePercent } from './utils/appFontSize'
+import { initTheme } from './utils/appTheme'
 
 applyFontSizePercentToHtml(readFontSizePercent())
+initTheme()
 
 if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
   void import('@capgo/capacitor-updater').then(({ CapacitorUpdater }) => {

@@ -90,9 +90,9 @@ export function ReconcileModal({
       <form
         noValidate
         onSubmit={handleSubmit}
-        className="relative z-10 w-full max-w-md rounded-t-3xl border border-stone-200 bg-white p-5 shadow-xl sm:rounded-2xl"
+        className="relative z-10 w-full max-w-md rounded-t-3xl border border-kj-border-strong bg-kj-surface p-5 shadow-xl sm:rounded-2xl"
       >
-        <h3 className="text-lg font-semibold text-stone-900">核账 / 收款</h3>
+        <h3 className="text-lg font-semibold text-kj-primary">核账 / 收款</h3>
         <p className="mt-1 text-xs text-stone-500">
           {exp > 0
             ? '填写本次实收：不少于 0，不超过上方「未收」；累计收满应收后本单自动标为已结清（灰色）。'
@@ -104,15 +104,15 @@ export function ReconcileModal({
             {exp > 0 ? (
               <>
                 <span>
-                  <span className="text-stone-400">应收 </span>
-                  <span className="font-medium text-stone-900">¥{fmt(exp)}</span>
+                  <span className="text-kj-muted">应收 </span>
+                  <span className="font-medium text-kj-primary">¥{fmt(exp)}</span>
                 </span>
                 <span>
-                  <span className="text-stone-400">已收 </span>
+                  <span className="text-kj-muted">已收 </span>
                   <span className="font-medium text-emerald-700">¥{fmt(cur)}</span>
                 </span>
                 <span>
-                  <span className="text-stone-400">未收 </span>
+                  <span className="text-kj-muted">未收 </span>
                   <span
                     className={
                       out > 0
@@ -127,11 +127,11 @@ export function ReconcileModal({
             ) : (
               <>
                 <span>
-                  <span className="text-stone-400">应收 </span>
+                  <span className="text-kj-muted">应收 </span>
                   <span className="font-medium text-stone-600">未填</span>
                 </span>
                 <span>
-                  <span className="text-stone-400">已收 </span>
+                  <span className="text-kj-muted">已收 </span>
                   <span className="font-medium text-emerald-700">¥{fmt(cur)}</span>
                 </span>
               </>
@@ -142,12 +142,12 @@ export function ReconcileModal({
             <span className="text-stone-600">
               本次实收（元）
               {exp > 0 && out > 0 && (
-                <span className="ml-1 font-normal text-stone-400">
+                <span className="ml-1 font-normal text-kj-muted">
                   （最多 ¥{fmt(out)}）
                 </span>
               )}
               {exp <= 0 && (
-                <span className="ml-1 font-normal text-stone-400">
+                <span className="ml-1 font-normal text-kj-muted">
                   （累加至已收）
                 </span>
               )}
@@ -177,7 +177,7 @@ export function ReconcileModal({
               placeholder={
                 exp > 0 && out <= 0 ? '已全部收讫' : '0'
               }
-              className="mt-1 w-full rounded-xl border border-stone-200 px-3 py-2 text-stone-900 tabular-nums disabled:bg-stone-50 disabled:text-stone-400"
+              className="mt-1 w-full rounded-xl border border-kj-border-strong px-3 py-2 text-kj-primary tabular-nums disabled:bg-stone-50 bg-kj-raised disabled:text-kj-muted"
             />
           </label>
 
@@ -199,7 +199,7 @@ export function ReconcileModal({
                 type="checkbox"
                 checked={noAmountSettled}
                 onChange={(e) => setNoAmountSettled(e.target.checked)}
-                className="rounded border-stone-300"
+                className="rounded border-kj-border-strong"
               />
               已结清
             </label>
@@ -220,7 +220,7 @@ export function ReconcileModal({
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 rounded-xl border border-stone-200 py-2.5 text-stone-700"
+            className="flex-1 rounded-xl border border-kj-border-strong py-2.5 text-stone-700"
           >
             取消
           </button>

@@ -104,11 +104,9 @@ export function HomeSearchDateRangeBlock({
   }, [dateFrom, dateTo, weekStart, weekEnd, monthStart, monthEnd])
 
   const pill = (active: boolean) =>
-    `rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors ${
-      active
-        ? 'border border-stone-900 bg-white text-stone-900 shadow-sm'
-        : 'border border-transparent bg-stone-100 text-stone-600 hover:bg-stone-200/80'
-    }`
+    active
+      ? 'kuaiji-chip border border-kj-border-strong bg-kj-surface text-kj-primary shadow-sm'
+      : 'kuaiji-chip kuaiji-chip-idle'
 
   const pickerValue =
     picker === 'from'
@@ -119,7 +117,7 @@ export function HomeSearchDateRangeBlock({
 
   return (
     <div>
-      <p className="mb-2 text-[11px] font-medium tracking-wide text-stone-500">
+      <p className="mb-2 text-[11px] font-medium tracking-wide text-kj-secondary">
         账单日期
       </p>
       <div className="mb-2 flex flex-wrap gap-2">
@@ -146,40 +144,40 @@ export function HomeSearchDateRangeBlock({
         </button>
       </div>
 
-      <div className="flex items-stretch rounded-xl bg-stone-100/95 p-0.5 ring-1 ring-stone-200/60">
+      <div className="flex items-stretch rounded-xl bg-kj-raised p-0.5 ring-1 ring-kj-border">
         <button
           type="button"
           onClick={() => setPicker('from')}
-          className="flex min-h-[34px] flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1 text-left leading-snug transition-colors hover:bg-white/80 active:bg-white"
+          className="flex min-h-[34px] flex-1 items-center justify-center gap-1 rounded-lg bg-kj-surface px-2 py-1 text-left leading-snug transition-colors hover:bg-kj-hover active:bg-kj-surface"
         >
           <span
             className={`min-w-0 flex-1 truncate text-center text-[13px] leading-snug ${
-              dateFrom ? 'font-medium text-stone-900' : 'text-stone-400'
+              dateFrom ? 'font-medium text-kj-primary' : 'text-kj-muted'
             }`}
           >
             {dateFrom ? fmtCn(dateFrom) : '开始时间'}
           </span>
-          <ChevronDown className="h-3 w-3 shrink-0 text-stone-400" />
+          <ChevronDown className="h-3 w-3 shrink-0 text-kj-muted" />
         </button>
-        <div className="flex w-6 shrink-0 items-center justify-center text-xs text-stone-300">
+        <div className="flex w-6 shrink-0 items-center justify-center text-xs text-kj-muted">
           —
         </div>
         <button
           type="button"
           onClick={() => setPicker('to')}
-          className="flex min-h-[34px] flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1 text-left leading-snug transition-colors hover:bg-white/80 active:bg-white"
+          className="flex min-h-[34px] flex-1 items-center justify-center gap-1 rounded-lg bg-kj-surface px-2 py-1 text-left leading-snug transition-colors hover:bg-kj-hover active:bg-kj-surface"
         >
           <span
             className={`min-w-0 flex-1 truncate text-center text-[13px] leading-snug ${
-              dateTo ? 'font-medium text-stone-900' : 'text-stone-400'
+              dateTo ? 'font-medium text-kj-primary' : 'text-kj-muted'
             }`}
           >
             {dateTo ? fmtCn(dateTo) : '结束时间'}
           </span>
-          <ChevronDown className="h-3 w-3 shrink-0 text-stone-400" />
+          <ChevronDown className="h-3 w-3 shrink-0 text-kj-muted" />
         </button>
       </div>
-      <p className="mt-1.5 text-[10px] leading-relaxed text-stone-400">
+      <p className="mt-1.5 text-[10px] leading-relaxed text-kj-muted">
         可与关键词组合；仅选日期可不填关键词。开始晚于结束时会自动对调。
       </p>
 

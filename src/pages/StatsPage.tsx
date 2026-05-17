@@ -4,10 +4,19 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { StatsBuyerSummaryChart } from '../components/StatsBuyerSummaryChart'
 import { StatsCustomSection } from '../components/StatsCustomSection'
+import {
+  StatsSharePieChart,
+  StatsShareViewModeSwitch,
+  type StatsShareViewMode,
+} from '../components/StatsSharePieChart'
 import { useLedger } from '../context/LedgerContext'
 import type { LedgerRecord } from '../types'
 import {
@@ -22,15 +31,19 @@ import {
   aggregateBuyerOutstanding,
   aggregateBuyerProductRows,
   aggregateProductSales,
+  chartDataWithOther,
   collectDistinctBuyersForStats,
   collectDistinctProductsForStats,
+  CUSTOM_STATS_CHART_OTHER,
   findFieldIdByName,
   sumAmount,
-  type BuyerOutstandingRow,
-  type BuyerProductRow,
   type ProductSalesRow,
   type StatsDimensionFilter,
 } from '../utils/stats'
+import {
+  buildStatsDrillDownHint,
+  type StatsDrillDownPayload,
+} from '../utils/statsDrillDown'
 
 function filterByRange(
   records: LedgerRecord[],
@@ -77,35 +90,25 @@ function compareProductSalesRows(
   return a.name.localeCompare(b.name, 'zh-CN')
 }
 
-function compareBuyerProductRows(
-  a: BuyerProductRow,
-  b: BuyerProductRow,
-  key: StatsJinAmtSortKey,
-  dir: 'asc' | 'desc',
-): number {
-  const m = dir === 'desc' ? -1 : 1
-  const va = key === 'jin' ? a.jin : a.amount
-  const vb = key === 'jin' ? b.jin : b.amount
-  const d = va - vb
-  if (d !== 0) return m * d
-  const bc = a.buyer.localeCompare(b.buyer, 'zh-CN')
-  if (bc !== 0) return bc
-  return a.product.localeCompare(b.product, 'zh-CN')
+type BuyerSummaryRow = {
+  buyer: string
+  jin: number
+  amount: number
+  outstanding: number
 }
 
-/** 未核账排行表：按本周期应收合计或未核账排序（支持数值正负方向） */
-type BuyerOutstandingSortKey = 'totalExpected' | 'outstanding'
-type BuyerOutstandingSort = { key: BuyerOutstandingSortKey; dir: 'asc' | 'desc' }
+type BuyerSummarySortKey = 'jin' | 'amount' | 'outstanding'
+type BuyerSummarySort = { key: BuyerSummarySortKey; dir: 'asc' | 'desc' }
 
-function compareBuyerOutstandingRows(
-  a: BuyerOutstandingRow,
-  b: BuyerOutstandingRow,
-  key: BuyerOutstandingSortKey,
+function compareBuyerSummaryRows(
+  a: BuyerSummaryRow,
+  b: BuyerSummaryRow,
+  key: BuyerSummarySortKey,
   dir: 'asc' | 'desc',
 ): number {
   const m = dir === 'desc' ? -1 : 1
-  const va = key === 'totalExpected' ? a.totalExpected : a.outstanding
-  const vb = key === 'totalExpected' ? b.totalExpected : b.outstanding
+  const va = key === 'jin' ? a.jin : key === 'amount' ? a.amount : a.outstanding
+  const vb = key === 'jin' ? b.jin : key === 'amount' ? b.amount : b.outstanding
   const d = va - vb
   if (d !== 0) return m * d
   return a.buyer.localeCompare(b.buyer, 'zh-CN')
@@ -114,6 +117,7 @@ function compareBuyerOutstandingRows(
 type StatsRangeMode = 'preset' | 'custom'
 
 export function StatsPage() {
+  const navigate = useNavigate()
   const { ready, fields, records } = useLedger()
   const [kind, setKind] = useState<ReportKind>('month')
   /** 0=当前周期，-1=上一周期，不可大于 0（不向未来空周期） */
@@ -123,16 +127,23 @@ export function StatsPage() {
   const [customEndStr, setCustomEndStr] = useState('')
   const [customStatsOpen, setCustomStatsOpen] = useState(false)
   const [statsDetailModal, setStatsDetailModal] = useState<
-    null | 'product' | 'buyerProduct' | 'buyerOutstanding'
+    null | 'product' | 'buyerProduct'
   >(null)
   const [productShareSort, setProductShareSort] =
     useState<StatsJinAmtSort | null>(null)
-  const [buyerProductShareSort, setBuyerProductShareSort] =
-    useState<StatsJinAmtSort | null>(null)
-  const [buyerOutstandingSort, setBuyerOutstandingSort] =
-    useState<BuyerOutstandingSort | null>(null)
+  const [buyerSummarySort, setBuyerSummarySort] =
+    useState<BuyerSummarySort | null>(null)
   const [statsFilterBuyer, setStatsFilterBuyer] = useState('')
   const [statsFilterProduct, setStatsFilterProduct] = useState('')
+  const [productPieMetric, setProductPieMetric] = useState<'jin' | 'amount'>(
+    'amount',
+  )
+  const [productShareView, setProductShareView] =
+    useState<StatsShareViewMode>('chart')
+  const [buyerStatsView, setBuyerStatsView] =
+    useState<StatsShareViewMode>('chart')
+  const [statsFilterOpen, setStatsFilterOpen] = useState(false)
+  const statsFilterRef = useRef<HTMLDivElement>(null)
 
   const amountId =
     getAmountFieldId(fields) ?? findFieldIdByName(fields, '金额')
@@ -142,6 +153,22 @@ export function StatsPage() {
   useEffect(() => {
     setPeriodOffset(0)
   }, [kind])
+
+  useEffect(() => {
+    if (!statsFilterOpen) return
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      const el = statsFilterRef.current
+      if (el && e.target instanceof Node && !el.contains(e.target)) {
+        setStatsFilterOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('touchstart', onPointerDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('touchstart', onPointerDown)
+    }
+  }, [statsFilterOpen])
 
   const anchorDate = useMemo(
     () => getAnchorDateForOffset(kind, periodOffset, now),
@@ -293,6 +320,41 @@ export function StatsPage() {
     [statsFilterBuyer, statsFilterProduct],
   )
 
+  const drillToBills = useCallback(
+    (clicked: { product?: string; buyer?: string }) => {
+      if (rangeMode === 'custom' && !customRangeSorted) return
+      const product = clicked.product
+        ? clicked.product
+        : statsFilterProduct.trim() || undefined
+      const plate = clicked.buyer
+        ? clicked.buyer
+        : statsFilterBuyer.trim() || undefined
+      const payload: StatsDrillDownPayload = {
+        dateFrom: activeStartStr,
+        dateTo: activeEndStr,
+        ...(plate ? { plate } : {}),
+        ...(product ? { product } : {}),
+      }
+      navigate('/', {
+        state: {
+          statsDrillDown: {
+            ...payload,
+            hint: buildStatsDrillDownHint(payload),
+          },
+        },
+      })
+    },
+    [
+      navigate,
+      rangeMode,
+      customRangeSorted,
+      statsFilterProduct,
+      statsFilterBuyer,
+      activeStartStr,
+      activeEndStr,
+    ],
+  )
+
   const statsBuyerOptions = useMemo(
     () => collectDistinctBuyersForStats(currentRecords, fields),
     [currentRecords, fields],
@@ -325,7 +387,21 @@ export function StatsPage() {
       ),
     [currentRecords, fields, amountId, statsDimFilter],
   )
-  const buyerProductTotals = useMemo(() => {
+  const buyerOutstandingRows = useMemo(
+    () => aggregateBuyerOutstanding(currentRecords, fields, statsDimFilter),
+    [currentRecords, fields, statsDimFilter],
+  )
+
+  const buyerOutstandingMap = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const r of buyerOutstandingRows) {
+      m.set(r.buyer, r.outstanding)
+    }
+    return m
+  }, [buyerOutstandingRows])
+
+  /** 按购买方汇总：总斤数、总金额、未核账 */
+  const buyerSummaryRows = useMemo(() => {
     const m = new Map<string, { jin: number; amount: number }>()
     for (const r of buyerProductRows) {
       const t = m.get(r.buyer) || { jin: 0, amount: 0 }
@@ -333,12 +409,18 @@ export function StatsPage() {
       t.amount += r.amount
       m.set(r.buyer, t)
     }
-    return m
-  }, [buyerProductRows])
-  const buyerOutstandingRows = useMemo(
-    () => aggregateBuyerOutstanding(currentRecords, fields, statsDimFilter),
-    [currentRecords, fields, statsDimFilter],
-  )
+    for (const r of buyerOutstandingRows) {
+      if (!m.has(r.buyer)) m.set(r.buyer, { jin: 0, amount: 0 })
+    }
+    return [...m.entries()]
+      .map(([buyer, v]) => ({
+        buyer,
+        jin: v.jin,
+        amount: v.amount,
+        outstanding: buyerOutstandingMap.get(buyer) ?? 0,
+      }))
+      .sort((a, b) => a.buyer.localeCompare(b.buyer, 'zh-CN'))
+  }, [buyerProductRows, buyerOutstandingRows, buyerOutstandingMap])
 
   const totalJin = products.reduce((s, r) => s + r.jin, 0)
   const totalProductAmt = products.reduce((s, r) => s + r.amount, 0)
@@ -347,15 +429,6 @@ export function StatsPage() {
   const maxAmtBar =
     products.length > 0
       ? Math.max(...products.map((r) => r.amount), 1e-6)
-      : 1
-
-  const maxBpJin =
-    buyerProductRows.length > 0
-      ? Math.max(...buyerProductRows.map((r) => r.jin), 1e-6)
-      : 1
-  const maxBpAmt =
-    buyerProductRows.length > 0
-      ? Math.max(...buyerProductRows.map((r) => r.amount), 1e-6)
       : 1
 
   const sortedProductShareRows = useMemo(() => {
@@ -367,19 +440,51 @@ export function StatsPage() {
     return list
   }, [products, productShareSort])
 
-  const sortedBuyerProductShareRows = useMemo(() => {
-    if (!buyerProductShareSort) return buyerProductRows
-    const list = [...buyerProductRows]
+  const productPieMetricEffective: 'jin' | 'amount' =
+    productPieMetric === 'amount' && amountId ? 'amount' : 'jin'
+
+  const productPieData = useMemo(() => {
+    const rows = products.map((p) => ({
+      key: p.name,
+      value: productPieMetricEffective === 'amount' ? p.amount : p.jin,
+    }))
+    return chartDataWithOther(rows)
+  }, [products, productPieMetricEffective])
+
+  const totalBuyerJin = buyerSummaryRows.reduce((s, r) => s + r.jin, 0)
+  const totalBuyerAmt = buyerSummaryRows.reduce((s, r) => s + r.amount, 0)
+  const totalBuyerOutstanding = buyerSummaryRows.reduce(
+    (s, r) => s + r.outstanding,
+    0,
+  )
+  const maxBuyerJin =
+    buyerSummaryRows.length > 0
+      ? Math.max(...buyerSummaryRows.map((r) => r.jin), 1e-6)
+      : 1
+  const maxBuyerAmt =
+    buyerSummaryRows.length > 0
+      ? Math.max(...buyerSummaryRows.map((r) => r.amount), 1e-6)
+      : 1
+  const maxBuyerOutstanding =
+    buyerSummaryRows.length > 0
+      ? Math.max(...buyerSummaryRows.map((r) => r.outstanding), 1e-6)
+      : 1
+
+  const sortedBuyerSummaryRows = useMemo(() => {
+    if (!buyerSummarySort) return buyerSummaryRows
+    const list = [...buyerSummaryRows]
     list.sort((a, b) =>
-      compareBuyerProductRows(
+      compareBuyerSummaryRows(
         a,
         b,
-        buyerProductShareSort.key,
-        buyerProductShareSort.dir,
+        buyerSummarySort.key,
+        buyerSummarySort.dir,
       ),
     )
     return list
-  }, [buyerProductRows, buyerProductShareSort])
+  }, [buyerSummaryRows, buyerSummarySort])
+
+  const hasBuyerStatsSection = buyerSummaryRows.length > 0
 
   const toggleProductShareSort = useCallback((key: StatsJinAmtSortKey) => {
     setProductShareSort((prev) => {
@@ -388,39 +493,15 @@ export function StatsPage() {
     })
   }, [])
 
-  const toggleBuyerProductShareSort = useCallback(
-    (key: StatsJinAmtSortKey) => {
-      if (key === 'amount' && !amountId) return
-      setBuyerProductShareSort((prev) => {
+  const toggleBuyerSummarySort = useCallback(
+    (key: BuyerSummarySortKey) => {
+      if ((key === 'amount' || key === 'outstanding') && !amountId) return
+      setBuyerSummarySort((prev) => {
         if (!prev || prev.key !== key) return { key, dir: 'desc' }
         return { key, dir: prev.dir === 'desc' ? 'asc' : 'desc' }
       })
     },
     [amountId],
-  )
-
-  const sortedBuyerOutstandingRows = useMemo(() => {
-    if (!buyerOutstandingSort) return buyerOutstandingRows
-    const list = [...buyerOutstandingRows]
-    list.sort((a, b) =>
-      compareBuyerOutstandingRows(
-        a,
-        b,
-        buyerOutstandingSort.key,
-        buyerOutstandingSort.dir,
-      ),
-    )
-    return list
-  }, [buyerOutstandingRows, buyerOutstandingSort])
-
-  const toggleBuyerOutstandingSort = useCallback(
-    (key: BuyerOutstandingSortKey) => {
-      setBuyerOutstandingSort((prev) => {
-        if (!prev || prev.key !== key) return { key, dir: 'desc' }
-        return { key, dir: prev.dir === 'desc' ? 'asc' : 'desc' }
-      })
-    },
-    [],
   )
 
   if (!ready) {
@@ -617,180 +698,181 @@ export function StatsPage() {
 
       {currentRecords.length > 0 && (
         <>
-          <section className="mx-4 mb-6 rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm sm:p-5">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <h2 className="text-sm font-semibold text-neutral-900">
-                图表筛选
-              </h2>
-              {statsChartsFiltered && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStatsFilterBuyer('')
-                    setStatsFilterProduct('')
-                  }}
-                  className="shrink-0 rounded-lg border border-stone-200 bg-[#fafafa] px-3 py-1.5 text-xs font-medium text-[#666666] hover:bg-stone-100"
-                >
-                  清除筛选
-                </button>
-              )}
-            </div>
-            <p className="mb-3 mt-1 text-[11px] leading-relaxed text-[#666666]">
-              下方三张表共用；两条件为「且」。筛{productFieldName}时，未核账仍按整单计。
-            </p>
-            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-              <label className="flex min-w-0 flex-1 flex-col gap-1.5 sm:min-w-[160px]">
-                <span className="text-xs font-medium text-[#666666]">
-                  {buyerFieldName}
-                </span>
-                <select
-                  value={statsFilterBuyer}
-                  onChange={(e) => setStatsFilterBuyer(e.target.value)}
-                  className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900"
-                >
-                  <option value="">全部</option>
-                  {statsBuyerOptions.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex min-w-0 flex-1 flex-col gap-1.5 sm:min-w-[160px]">
-                <span className="text-xs font-medium text-[#666666]">
-                  {productFieldName}
-                </span>
-                <select
-                  value={statsFilterProduct}
-                  onChange={(e) => setStatsFilterProduct(e.target.value)}
-                  className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900"
-                >
-                  <option value="">全部</option>
-                  {statsProductOptions.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            {statsChartsFiltered && (
-              <p className="mt-3 text-[11px] text-[#1a7f4c]">筛选已生效</p>
-            )}
-          </section>
-
           <section className="mx-4 mb-6">
-            <h2 className="text-sm font-semibold text-neutral-900">
-              商品销售占比
-            </h2>
-            <p className="mb-3 mt-1 text-[11px] leading-relaxed text-[#666666]">
-              数量折斤数；多商品按斤数分摊金额。小字为斤/元，条为占比。表头可排序。
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold text-neutral-900">
+                商品销售占比
+              </h2>
+              <StatsChartsFilter
+                filterRef={statsFilterRef}
+                open={statsFilterOpen}
+                onOpenChange={setStatsFilterOpen}
+                filtered={statsChartsFiltered}
+                buyerFieldName={buyerFieldName}
+                productFieldName={productFieldName}
+                buyer={statsFilterBuyer}
+                product={statsFilterProduct}
+                onBuyerChange={setStatsFilterBuyer}
+                onProductChange={setStatsFilterProduct}
+                buyerOptions={statsBuyerOptions}
+                productOptions={statsProductOptions}
+                onClear={() => {
+                  setStatsFilterBuyer('')
+                  setStatsFilterProduct('')
+                }}
+              />
+            </div>
+            <p className="mb-3 text-[11px] leading-relaxed text-[#666666]">
+              切换饼图或列表查看；饼图为前 10 项及「其他」，列表含斤数/金额明细与排序。
             </p>
             <div className="overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-sm">
-              <div className="flex flex-wrap items-center justify-end gap-2 border-b border-stone-100 px-3 py-2">
-                <span className="mr-auto text-[11px] text-[#999999]">可滑动</span>
-                <button
-                  type="button"
-                  onClick={() => setStatsDetailModal('product')}
-                  className="shrink-0 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-[#1a7f4c] hover:bg-emerald-100"
-                >
-                  大屏查看
-                </button>
-              </div>
-              <div className="max-h-[min(52vh,22rem)] overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] px-2 sm:px-3">
-                <ProductSalesShareTable
-                  products={sortedProductShareRows}
-                  totalJin={totalJin}
-                  totalProductAmt={totalProductAmt}
-                  amountId={amountId}
-                  maxJinBar={maxJinBar}
-                  maxAmtBar={maxAmtBar}
-                  sort={productShareSort}
-                  onSortKey={toggleProductShareSort}
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-3 py-2.5">
+                <StatsShareViewModeSwitch
+                  mode={productShareView}
+                  onChange={setProductShareView}
                 />
-              </div>
-            </div>
-          </section>
-
-          <section className="mx-4 mb-6">
-            <h2 className="text-sm font-semibold text-neutral-900">
-              {buyerFieldName}购买商品占比
-            </h2>
-            <p className="mb-3 mt-1 text-[11px] leading-relaxed text-[#666666]">
-              购买方×商品；占比为该方内部占比。表头排序；默认按方分组。
-            </p>
-            {buyerProductRows.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-stone-300 bg-white py-8 text-center text-sm text-[#666666]">
-                需多行商品明细
-              </div>
-            ) : (
-              <div className="overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-sm">
-                <div className="flex flex-wrap items-center justify-end gap-2 border-b border-stone-100 px-3 py-2">
-                  <span className="mr-auto text-[11px] text-[#999999]">可滑动</span>
-                  <button
-                    type="button"
-                    onClick={() => setStatsDetailModal('buyerProduct')}
-                    className="shrink-0 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-[#1a7f4c] hover:bg-emerald-100"
-                  >
-                    大屏查看
-                  </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {amountId && productShareView === 'chart' ? (
+                    <div className="flex gap-1 rounded-lg border border-stone-200 bg-[#fafafa] p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setProductPieMetric('jin')}
+                        className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+                          productPieMetricEffective === 'jin'
+                            ? 'bg-[#2ecc71] text-white'
+                            : 'text-[#666666] hover:text-neutral-900'
+                        }`}
+                      >
+                        按斤数
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setProductPieMetric('amount')}
+                        className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+                          productPieMetricEffective === 'amount'
+                            ? 'bg-[#2ecc71] text-white'
+                            : 'text-[#666666] hover:text-neutral-900'
+                        }`}
+                      >
+                        按金额
+                      </button>
+                    </div>
+                  ) : null}
+                  {productShareView === 'list' ? (
+                    <button
+                      type="button"
+                      onClick={() => setStatsDetailModal('product')}
+                      className="shrink-0 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-[#1a7f4c] hover:bg-emerald-100"
+                    >
+                      大屏查看
+                    </button>
+                  ) : null}
                 </div>
-                <div className="max-h-[min(52vh,22rem)] overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] px-2 sm:px-3">
-                  <BuyerProductShareTable
-                    buyerFieldName={buyerFieldName}
-                    rows={sortedBuyerProductShareRows}
-                    buyerProductTotals={buyerProductTotals}
-                    amountId={amountId}
-                    maxBpJin={maxBpJin}
-                    maxBpAmt={maxBpAmt}
-                    sort={buyerProductShareSort}
-                    onSortKey={toggleBuyerProductShareSort}
+              </div>
+              {productShareView === 'chart' ? (
+                <div className="p-3 pt-2">
+                  <StatsSharePieChart
+                    data={productPieData}
+                    formatValue={(n) =>
+                      productPieMetricEffective === 'amount'
+                        ? `¥${fmtMoney(n)}`
+                        : `${fmtNum(n)} 斤`
+                    }
+                    emptyMessage={
+                      products.length === 0
+                        ? '暂无商品数据'
+                        : '暂无有效数值'
+                    }
+                    onItemClick={(name) => drillToBills({ product: name })}
+                    nonClickableNames={[CUSTOM_STATS_CHART_OTHER]}
                   />
                 </div>
-              </div>
-            )}
+              ) : (
+                <div className="max-h-[min(52vh,22rem)] overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] px-2 pb-2 pt-1 sm:px-3">
+                  <ProductSalesShareTable
+                    products={sortedProductShareRows}
+                    totalJin={totalJin}
+                    totalProductAmt={totalProductAmt}
+                    amountId={amountId}
+                    maxJinBar={maxJinBar}
+                    maxAmtBar={maxAmtBar}
+                    sort={productShareSort}
+                    onSortKey={toggleProductShareSort}
+                    onProductClick={(name) => drillToBills({ product: name })}
+                  />
+                </div>
+              )}
+            </div>
           </section>
 
           <section className="mx-4 mb-10">
             <h2 className="text-sm font-semibold text-neutral-900">
-              {buyerFieldName}未核账金额排行
+              {buyerFieldName}汇总与未核账
             </h2>
             <p className="mb-3 mt-1 text-[11px] leading-relaxed text-[#666666]">
-              有欠款的购买方；总额=周期应收合，未核账=欠款。表头排序；可滑动、大屏。
+              横轴为购买方，柱状图展示总斤数、总金额与未核账；可切换柱状图/列表，点击图例可单独查看某条线。
             </p>
-            {!amountId ? (
+            {!hasBuyerStatsSection ? (
               <div className="rounded-2xl border border-dashed border-stone-300 bg-white py-8 text-center text-sm text-[#666666]">
-                需金额列
-              </div>
-            ) : buyerOutstandingRows.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-stone-300 bg-white py-8 text-center text-sm text-[#666666]">
-                {rangeMode === 'custom'
-                  ? '该时段内暂无未核账金额'
-                  : '本周期内暂无未核账金额'}
+                {!amountId
+                  ? '需多行商品明细；未核账需金额列'
+                  : buyerProductRows.length === 0
+                    ? '需多行商品明细'
+                    : rangeMode === 'custom'
+                      ? '该时段暂无数据'
+                      : '本周期暂无数据'}
               </div>
             ) : (
               <div className="overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-sm">
-                <div className="flex flex-wrap items-center justify-end gap-2 border-b border-stone-100 px-3 py-2">
-                  <span className="mr-auto text-[11px] text-[#999999]">可滑动</span>
-                  <button
-                    type="button"
-                    onClick={() => setStatsDetailModal('buyerOutstanding')}
-                    className="shrink-0 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-[#1a7f4c] hover:bg-emerald-100"
-                  >
-                    大屏查看
-                  </button>
-                </div>
-                <div className="max-h-[min(52vh,22rem)] overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] px-2 sm:px-3">
-                  <BuyerOutstandingTable
-                    buyerFieldName={buyerFieldName}
-                    rows={sortedBuyerOutstandingRows}
-                    sort={buyerOutstandingSort}
-                    onSortKey={toggleBuyerOutstandingSort}
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-3 py-2.5">
+                  <StatsShareViewModeSwitch
+                    mode={buyerStatsView}
+                    onChange={setBuyerStatsView}
+                    chartLabel="柱状图"
+                    listLabel="列表"
                   />
+                  {buyerStatsView === 'list' ? (
+                    <button
+                      type="button"
+                      onClick={() => setStatsDetailModal('buyerProduct')}
+                      className="ml-auto shrink-0 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-[#1a7f4c] hover:bg-emerald-100"
+                    >
+                      大屏查看
+                    </button>
+                  ) : null}
                 </div>
+                {buyerStatsView === 'chart' ? (
+                  <div className="p-3 pt-2">
+                    <StatsBuyerSummaryChart
+                      rows={sortedBuyerSummaryRows}
+                      amountId={Boolean(amountId)}
+                      emptyMessage="暂无购买方数据"
+                      onBuyerClick={(buyer) => drillToBills({ buyer })}
+                    />
+                  </div>
+                ) : (
+                  <div className="max-h-[min(52vh,22rem)] overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] px-2 pb-2 pt-1 sm:px-3">
+                    <BuyerSummaryTable
+                      buyerFieldName={buyerFieldName}
+                      rows={sortedBuyerSummaryRows}
+                      amountId={amountId}
+                      totalJin={totalBuyerJin}
+                      totalAmt={totalBuyerAmt}
+                      totalOutstanding={totalBuyerOutstanding}
+                      maxJin={maxBuyerJin}
+                      maxAmt={maxBuyerAmt}
+                      maxOutstanding={maxBuyerOutstanding}
+                      sort={buyerSummarySort}
+                      onSortKey={toggleBuyerSummarySort}
+                      onBuyerClick={(buyer) => drillToBills({ buyer })}
+                    />
+                  </div>
+                )}
               </div>
             )}
           </section>
+
+
 
           <div className="mx-4 mb-3 flex justify-end">
             <button
@@ -822,10 +904,8 @@ export function StatsPage() {
           statsDetailModal === 'product'
             ? '商品销售占比'
             : statsDetailModal === 'buyerProduct'
-              ? `${buyerFieldName}购买商品占比`
-              : statsDetailModal === 'buyerOutstanding'
-                ? `${buyerFieldName}未核账金额排行`
-                : ''
+              ? `${buyerFieldName}汇总与未核账`
+              : ''
         }
         onClose={() => setStatsDetailModal(null)}
       >
@@ -839,152 +919,29 @@ export function StatsPage() {
             maxAmtBar={maxAmtBar}
             sort={productShareSort}
             onSortKey={toggleProductShareSort}
+            onProductClick={(name) => drillToBills({ product: name })}
             relaxed
           />
         )}
         {statsDetailModal === 'buyerProduct' && (
-          <BuyerProductShareTable
+          <BuyerSummaryTable
             buyerFieldName={buyerFieldName}
-            rows={sortedBuyerProductShareRows}
-            buyerProductTotals={buyerProductTotals}
+            rows={sortedBuyerSummaryRows}
             amountId={amountId}
-            maxBpJin={maxBpJin}
-            maxBpAmt={maxBpAmt}
-            sort={buyerProductShareSort}
-            onSortKey={toggleBuyerProductShareSort}
-            relaxed
-          />
-        )}
-        {statsDetailModal === 'buyerOutstanding' && (
-          <BuyerOutstandingTable
-            buyerFieldName={buyerFieldName}
-            rows={sortedBuyerOutstandingRows}
-            sort={buyerOutstandingSort}
-            onSortKey={toggleBuyerOutstandingSort}
+            totalJin={totalBuyerJin}
+            totalAmt={totalBuyerAmt}
+            totalOutstanding={totalBuyerOutstanding}
+            maxJin={maxBuyerJin}
+            maxAmt={maxBuyerAmt}
+            maxOutstanding={maxBuyerOutstanding}
+            sort={buyerSummarySort}
+            onSortKey={toggleBuyerSummarySort}
+            onBuyerClick={(buyer) => drillToBills({ buyer })}
             relaxed
           />
         )}
       </StatsDetailModal>
     </div>
-  )
-}
-
-function SortableOutstandingTh({
-  label,
-  sortKey,
-  sort,
-  onSortKey,
-  relaxed,
-}: {
-  label: string
-  sortKey: BuyerOutstandingSortKey
-  sort: BuyerOutstandingSort | null
-  onSortKey: (key: BuyerOutstandingSortKey) => void
-  relaxed?: boolean
-}) {
-  const active = sort?.key === sortKey
-  const dir = active ? sort!.dir : null
-  const thPad = relaxed ? 'py-3 text-sm' : 'py-2.5 text-xs'
-  const btnText = relaxed ? 'text-sm' : 'text-xs'
-  return (
-    <th
-      scope="col"
-      className={`w-[30%] min-w-[5.25rem] text-right font-medium text-[#666666] sm:w-28 ${thPad}`}
-      aria-sort={
-        active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'
-      }
-    >
-      <button
-        type="button"
-        onClick={() => onSortKey(sortKey)}
-        title={
-          active
-            ? dir === 'desc'
-              ? '点击改为升序'
-              : '点击改为降序'
-            : '点击排序'
-        }
-        className={`inline-flex w-full max-w-full items-center justify-end gap-1 rounded-lg py-0.5 pl-1 font-medium text-[#666666] transition-colors hover:bg-stone-100 hover:text-neutral-900 ${btnText}`}
-      >
-        <span className="min-w-0 text-right">{label}</span>
-        <span
-          className={`shrink-0 select-none tabular-nums ${active ? 'text-[#1a7f4c]' : 'text-[#bbbbbb]'}`}
-          aria-hidden
-        >
-          {active ? (dir === 'desc' ? '↓' : '↑') : '↕'}
-        </span>
-      </button>
-    </th>
-  )
-}
-
-function BuyerOutstandingTable({
-  buyerFieldName,
-  rows,
-  sort,
-  onSortKey,
-  relaxed,
-}: {
-  buyerFieldName: string
-  rows: BuyerOutstandingRow[]
-  sort: BuyerOutstandingSort | null
-  onSortKey: (key: BuyerOutstandingSortKey) => void
-  relaxed?: boolean
-}) {
-  const thIdx = relaxed
-    ? 'w-12 px-3 py-3 text-left text-sm font-medium text-[#666666]'
-    : 'w-10 px-2 py-2.5 text-left text-xs font-medium text-[#666666]'
-  const thBuyer = relaxed
-    ? 'min-w-0 py-3 text-left text-sm font-medium text-[#666666]'
-    : 'min-w-0 py-2.5 text-left text-xs font-medium text-[#666666]'
-  const tdIdx = relaxed
-    ? 'px-3 py-3 text-center text-sm text-[#999999]'
-    : 'px-2 py-2.5 text-center text-xs text-[#999999]'
-  const tdBuyer = relaxed
-    ? 'max-w-[42vw] truncate px-3 py-3 text-base font-medium text-neutral-900 sm:max-w-none'
-    : 'max-w-[40vw] truncate py-2.5 text-sm font-medium text-neutral-900 sm:max-w-none'
-  const tdNum = relaxed ? 'py-3 text-base tabular-nums' : 'py-2.5 text-sm tabular-nums'
-
-  return (
-    <table className="w-full text-left text-sm">
-      <thead className="sticky top-0 z-[1] bg-white shadow-[0_1px_0_0_rgb(245_245_244)]">
-        <tr>
-          <th className={thIdx}>#</th>
-          <th className={thBuyer}>{buyerFieldName}</th>
-          <SortableOutstandingTh
-            label="总金额（元）"
-            sortKey="totalExpected"
-            sort={sort}
-            onSortKey={onSortKey}
-            relaxed={relaxed}
-          />
-          <SortableOutstandingTh
-            label="未核账（元）"
-            sortKey="outstanding"
-            sort={sort}
-            onSortKey={onSortKey}
-            relaxed={relaxed}
-          />
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row, i) => (
-          <tr
-            key={`${row.buyer}-${i}`}
-            className="border-b border-stone-50 last:border-0"
-          >
-            <td className={tdIdx}>{i + 1}</td>
-            <td className={tdBuyer}>{row.buyer}</td>
-            <td className={`${tdNum} text-right text-neutral-800`}>
-              {fmtMoney(row.totalExpected)}
-            </td>
-            <td className={`${tdNum} text-right text-amber-900`}>
-              {fmtMoney(row.outstanding)}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   )
 }
 
@@ -1045,6 +1002,260 @@ function SortableShareMetricTh({
   )
 }
 
+function StatsShareMetricCell({
+  valueLine,
+  pct,
+  barPct,
+  barClassName,
+  valLineClass,
+  pctTextClass,
+}: {
+  valueLine: string
+  pct: number
+  barPct: number
+  barClassName: string
+  valLineClass: string
+  pctTextClass: string
+}) {
+  return (
+    <div className="space-y-0.5">
+      <div className={valLineClass}>{valueLine}</div>
+      <div className="flex items-center gap-1">
+        <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-stone-100">
+          <div
+            className={`h-full rounded-full ${barClassName}`}
+            style={{ width: `${Math.min(100, Math.max(0, barPct))}%` }}
+          />
+        </div>
+        <span
+          className={`w-9 shrink-0 text-right tabular-nums text-[#999999] ${pctTextClass}`}
+        >
+          {pct.toFixed(1)}%
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function SortableBuyerSummaryTh({
+  label,
+  sortKey,
+  sort,
+  onSortKey,
+  disabled,
+  relaxed,
+  widthClass,
+}: {
+  label: string
+  sortKey: BuyerSummarySortKey
+  sort: BuyerSummarySort | null
+  onSortKey: (key: BuyerSummarySortKey) => void
+  disabled?: boolean
+  relaxed?: boolean
+  widthClass: string
+}) {
+  const active = sort?.key === sortKey
+  const dir = active ? sort!.dir : null
+  const thPad = relaxed
+    ? 'px-3 py-3 text-left text-sm font-medium'
+    : 'px-3 py-2.5 text-left text-xs font-medium'
+  return (
+    <th
+      scope="col"
+      className={`${thPad} pl-2 text-[#666666] ${widthClass}`}
+      aria-sort={
+        active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'
+      }
+    >
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onSortKey(sortKey)}
+        title={
+          disabled
+            ? '需要金额列'
+            : active
+              ? dir === 'desc'
+                ? '点击改为升序'
+                : '点击改为降序'
+              : '点击排序'
+        }
+        className={`inline-flex max-w-full items-center gap-1 rounded-lg py-0.5 pr-1 text-left font-medium text-[#666666] transition-colors hover:bg-stone-100 hover:text-neutral-900 disabled:pointer-events-none disabled:opacity-40 ${relaxed ? 'text-sm' : 'text-xs'}`}
+      >
+        <span className="min-w-0">{label}</span>
+        <span
+          className={`shrink-0 select-none tabular-nums ${active ? 'text-[#1a7f4c]' : 'text-[#bbbbbb]'}`}
+          aria-hidden
+        >
+          {active ? (dir === 'desc' ? '↓' : '↑') : '↕'}
+        </span>
+      </button>
+    </th>
+  )
+}
+
+function BuyerSummaryTable({
+  buyerFieldName,
+  rows,
+  amountId,
+  totalJin,
+  totalAmt,
+  totalOutstanding,
+  maxJin,
+  maxAmt,
+  maxOutstanding,
+  sort,
+  onSortKey,
+  onBuyerClick,
+  relaxed,
+}: {
+  buyerFieldName: string
+  rows: BuyerSummaryRow[]
+  amountId: string | null | undefined
+  totalJin: number
+  totalAmt: number
+  totalOutstanding: number
+  maxJin: number
+  maxAmt: number
+  maxOutstanding: number
+  sort: BuyerSummarySort | null
+  onSortKey: (key: BuyerSummarySortKey) => void
+  onBuyerClick?: (buyer: string) => void
+  relaxed?: boolean
+}) {
+  const th = relaxed
+    ? 'px-2 py-2.5 text-left text-xs font-medium text-[#666666] sm:px-3 sm:py-3 sm:text-sm'
+    : 'px-1.5 py-2 text-left text-[11px] font-medium text-[#666666] sm:px-2'
+  const tdText = relaxed
+    ? 'break-words px-1.5 py-2 text-xs font-medium text-neutral-900 sm:px-2 sm:py-2.5 sm:text-sm'
+    : 'break-words px-1 py-2 text-[11px] font-medium text-neutral-900 sm:px-1.5'
+  const valLine = relaxed
+    ? 'text-sm tabular-nums text-neutral-700'
+    : 'text-[11px] tabular-nums text-neutral-700'
+  const pctText = relaxed ? 'text-sm' : 'text-xs'
+  const metricTd = relaxed ? 'px-1 py-2 align-top sm:px-1.5' : 'px-0.5 py-2 align-top sm:px-1'
+
+  const hasOutCol = Boolean(amountId)
+  const metricW = hasOutCol ? 'w-[22%]' : 'w-[28%]'
+
+  return (
+    <table className="w-full table-fixed text-left text-xs sm:text-sm">
+      <thead className="sticky top-0 z-[1] bg-white shadow-[0_1px_0_0_rgb(245_245_244)]">
+        <tr>
+          <th className={`${th} ${hasOutCol ? 'w-[22%]' : 'w-[28%]'}`}>
+            {buyerFieldName}
+          </th>
+          <SortableBuyerSummaryTh
+            label="总斤数"
+            sortKey="jin"
+            sort={sort}
+            onSortKey={onSortKey}
+            relaxed={relaxed}
+            widthClass={metricW}
+          />
+          <SortableBuyerSummaryTh
+            label="总金额"
+            sortKey="amount"
+            sort={sort}
+            onSortKey={onSortKey}
+            disabled={!amountId}
+            relaxed={relaxed}
+            widthClass={metricW}
+          />
+          {hasOutCol ? (
+            <SortableBuyerSummaryTh
+              label="未核账"
+              sortKey="outstanding"
+              sort={sort}
+              onSortKey={onSortKey}
+              relaxed={relaxed}
+              widthClass={metricW}
+            />
+          ) : null}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => {
+          const jinPct = totalJin > 0 ? (row.jin / totalJin) * 100 : 0
+          const amtPct = totalAmt > 0 ? (row.amount / totalAmt) * 100 : 0
+          const outPct =
+            totalOutstanding > 0 ? (row.outstanding / totalOutstanding) * 100 : 0
+          const jinBar = Math.round((row.jin / maxJin) * 100)
+          const amtBar = Math.round((row.amount / maxAmt) * 100)
+          const outBar = Math.round((row.outstanding / maxOutstanding) * 100)
+          const buyerCell = onBuyerClick ? (
+            <button
+              type="button"
+              onClick={() => onBuyerClick(row.buyer)}
+              className={`${tdText} w-full cursor-pointer text-left text-[#1a7f4c] underline decoration-[#1a7f4c]/30 underline-offset-2 hover:decoration-[#1a7f4c]`}
+            >
+              {row.buyer}
+            </button>
+          ) : (
+            row.buyer
+          )
+          return (
+            <tr
+              key={row.buyer}
+              className="border-b border-stone-50 last:border-0"
+            >
+              <td className={onBuyerClick ? 'p-0' : tdText}>{buyerCell}</td>
+              <td className={metricTd}>
+                {row.jin > 0 ? (
+                  <StatsShareMetricCell
+                    valueLine={`${fmtNum(row.jin)} 斤`}
+                    pct={jinPct}
+                    barPct={jinBar}
+                    barClassName="bg-teal-500"
+                    valLineClass={valLine}
+                    pctTextClass={pctText}
+                  />
+                ) : (
+                  <span className="text-[#999999]">—</span>
+                )}
+              </td>
+              <td className={metricTd}>
+                {amountId ? (
+                  row.amount > 0.005 ? (
+                    <StatsShareMetricCell
+                      valueLine={`${fmtMoney(row.amount)} 元`}
+                      pct={amtPct}
+                      barPct={amtBar}
+                      barClassName="bg-[#1a7f4c]"
+                      valLineClass={valLine}
+                      pctTextClass={pctText}
+                    />
+                  ) : (
+                    <span className="text-[#999999]">—</span>
+                  )
+                ) : (
+                  <span className="text-[#999999]">—</span>
+                )}
+              </td>
+              {hasOutCol ? (
+                <td className={metricTd}>
+                  {row.outstanding > 0.005 ? (
+                    <StatsShareMetricCell
+                      valueLine={`¥${fmtMoney(row.outstanding)}`}
+                      pct={outPct}
+                      barPct={outBar}
+                      barClassName="bg-amber-500"
+                      valLineClass={valLine}
+                      pctTextClass={pctText}
+                    />
+                  ) : (
+                    <span className="text-[#999999]">—</span>
+                  )}
+                </td>
+              ) : null}
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
+  )
+}
+
 function ProductSalesShareTable({
   products,
   totalJin,
@@ -1054,6 +1265,7 @@ function ProductSalesShareTable({
   maxAmtBar,
   sort,
   onSortKey,
+  onProductClick,
   relaxed,
 }: {
   products: ProductSalesRow[]
@@ -1064,6 +1276,7 @@ function ProductSalesShareTable({
   maxAmtBar: number
   sort: StatsJinAmtSort | null
   onSortKey: (key: StatsJinAmtSortKey) => void
+  onProductClick?: (name: string) => void
   relaxed?: boolean
 }) {
   const th = relaxed
@@ -1110,12 +1323,25 @@ function ProductSalesShareTable({
               : 0
           const jinBar = Math.round((row.jin / maxJinBar) * 100)
           const amtBar = Math.round((row.amount / maxAmtBar) * 100)
+          const nameCell = onProductClick ? (
+            <button
+              type="button"
+              onClick={() => onProductClick(row.name)}
+              className={`${tdName} block w-full cursor-pointer truncate text-left text-[#1a7f4c] underline decoration-[#1a7f4c]/30 underline-offset-2 hover:decoration-[#1a7f4c]`}
+            >
+              {row.name}
+            </button>
+          ) : (
+            row.name
+          )
           return (
             <tr
               key={row.name}
               className="border-b border-stone-50 last:border-0"
             >
-              <td className={tdName}>{row.name}</td>
+              <td className={onProductClick ? 'py-2 pl-3 pr-1' : tdName}>
+                {nameCell}
+              </td>
               <td className="py-2 pl-2 align-top">
                 <div className="space-y-1">
                   <div className={valLine}>{fmtNum(row.jin)} 斤</div>
@@ -1164,126 +1390,128 @@ function ProductSalesShareTable({
   )
 }
 
-function BuyerProductShareTable({
+function StatsChartsFilter({
+  filterRef,
+  open,
+  onOpenChange,
+  filtered,
   buyerFieldName,
-  rows,
-  buyerProductTotals,
-  amountId,
-  maxBpJin,
-  maxBpAmt,
-  sort,
-  onSortKey,
-  relaxed,
+  productFieldName,
+  buyer,
+  product,
+  onBuyerChange,
+  onProductChange,
+  buyerOptions,
+  productOptions,
+  onClear,
 }: {
+  filterRef: RefObject<HTMLDivElement | null>
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  filtered: boolean
   buyerFieldName: string
-  rows: BuyerProductRow[]
-  buyerProductTotals: Map<string, { jin: number; amount: number }>
-  amountId: string | null | undefined
-  maxBpJin: number
-  maxBpAmt: number
-  sort: StatsJinAmtSort | null
-  onSortKey: (key: StatsJinAmtSortKey) => void
-  relaxed?: boolean
+  productFieldName: string
+  buyer: string
+  product: string
+  onBuyerChange: (value: string) => void
+  onProductChange: (value: string) => void
+  buyerOptions: string[]
+  productOptions: string[]
+  onClear: () => void
 }) {
-  const th = relaxed
-    ? 'px-3 py-3 text-left text-sm font-medium text-[#666666]'
-    : 'px-3 py-2.5 text-left text-xs font-medium text-[#666666]'
-  const tdBuyer = relaxed
-    ? 'max-w-[32vw] truncate px-3 py-3 text-base font-medium text-neutral-900 sm:max-w-[160px]'
-    : 'max-w-[28vw] truncate px-3 py-2.5 text-sm font-medium text-neutral-900 sm:max-w-[140px]'
-  const tdProd = relaxed
-    ? 'max-w-[32vw] truncate px-3 py-3 text-base text-neutral-800 sm:max-w-none'
-    : 'max-w-[28vw] truncate px-3 py-2.5 text-sm text-neutral-800 sm:max-w-none'
-  const valLine = relaxed
-    ? 'text-sm tabular-nums text-neutral-700'
-    : 'text-[11px] tabular-nums text-neutral-700'
-  const pctText = relaxed ? 'text-sm' : 'text-xs'
-
   return (
-    <table className="w-full text-left text-sm">
-      <thead className="sticky top-0 z-[1] bg-white shadow-[0_1px_0_0_rgb(245_245_244)]">
-        <tr>
-          <th className={th}>{buyerFieldName}</th>
-          <th className={th}>商品</th>
-          <SortableShareMetricTh
-            label="斤数占比"
-            sortKey="jin"
-            sort={sort}
-            onSortKey={onSortKey}
-            relaxed={relaxed}
-            widthClass="w-[30%] min-w-[108px]"
-          />
-          <SortableShareMetricTh
-            label="金额占比"
-            sortKey="amount"
-            sort={sort}
-            onSortKey={onSortKey}
-            disabled={!amountId}
-            relaxed={relaxed}
-            widthClass="w-[30%] min-w-[108px]"
-          />
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row, i) => {
-          const bt = buyerProductTotals.get(row.buyer) ?? { jin: 0, amount: 0 }
-          const jinPct = bt.jin > 0 ? (row.jin / bt.jin) * 100 : 0
-          const amtPct =
-            amountId && bt.amount > 0 ? (row.amount / bt.amount) * 100 : 0
-          const jinBar = Math.round((row.jin / maxBpJin) * 100)
-          const amtBar = Math.round((row.amount / maxBpAmt) * 100)
-          return (
-            <tr
-              key={`${row.buyer}-${row.product}-${i}`}
-              className="border-b border-stone-50 last:border-0"
+    <div ref={filterRef} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => onOpenChange(!open)}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-semibold shadow-sm transition-colors ${
+          filtered
+            ? 'border-[#2ecc71] bg-emerald-50 text-[#1a7f4c] hover:bg-emerald-100'
+            : 'border-stone-200/90 bg-white text-[#666666] hover:bg-stone-50'
+        }`}
+      >
+        <svg
+          className="h-4 w-4"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          aria-hidden
+        >
+          <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
+        </svg>
+        筛选
+        {filtered ? (
+          <span className="h-1.5 w-1.5 rounded-full bg-[#2ecc71]" />
+        ) : null}
+      </button>
+      {open ? (
+        <div
+          className="absolute right-0 top-[calc(100%+6px)] z-50 w-[min(calc(100vw-2rem),18rem)] rounded-2xl border border-stone-200/90 bg-white p-3 shadow-lg"
+          role="dialog"
+          aria-label="筛选条件"
+        >
+          <p className="mb-3 text-[11px] leading-relaxed text-[#666666]">
+            下方图表共用；两条件为「且」。筛{productFieldName}时，未核账仍按整单计。
+          </p>
+          <div className="flex flex-col gap-3">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-[#666666]">
+                {buyerFieldName}
+              </span>
+              <select
+                value={buyer}
+                onChange={(e) => onBuyerChange(e.target.value)}
+                className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900"
+              >
+                <option value="">全部</option>
+                {buyerOptions.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-[#666666]">
+                {productFieldName}
+              </span>
+              <select
+                value={product}
+                onChange={(e) => onProductChange(e.target.value)}
+                className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900"
+              >
+                <option value="">全部</option>
+                {productOptions.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {filtered ? (
+            <button
+              type="button"
+              onClick={onClear}
+              className="mt-3 w-full rounded-lg border border-stone-200 py-2 text-xs font-medium text-[#666666] hover:bg-stone-50"
             >
-              <td className={tdBuyer}>{row.buyer}</td>
-              <td className={tdProd}>{row.product}</td>
-              <td className="py-2 pl-2 align-top">
-                <div className="space-y-1">
-                  <div className={valLine}>{fmtNum(row.jin)} 斤</div>
-                  <div className="flex items-center gap-2">
-                    <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-stone-100">
-                      <div
-                        className="h-full rounded-full bg-teal-500"
-                        style={{ width: `${jinBar}%` }}
-                      />
-                    </div>
-                    <span
-                      className={`w-12 shrink-0 text-right tabular-nums text-[#999999] ${pctText}`}
-                    >
-                      {jinPct.toFixed(1)}%
-                    </span>
-                  </div>
-                </div>
-              </td>
-              <td className="py-2 pl-2 align-top">
-                {amountId ? (
-                  <div className="space-y-1">
-                    <div className={valLine}>{fmtMoney(row.amount)} 元</div>
-                    <div className="flex items-center gap-2">
-                      <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-stone-100">
-                        <div
-                          className="h-full rounded-full bg-[#1a7f4c]"
-                          style={{ width: `${amtBar}%` }}
-                        />
-                      </div>
-                      <span
-                        className={`w-12 shrink-0 text-right tabular-nums text-[#999999] ${pctText}`}
-                      >
-                        {amtPct.toFixed(1)}%
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <span className="text-[#999999]">—</span>
-                )}
-              </td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
+              清除筛选
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            className="mt-2 w-full rounded-lg bg-[#2ecc71] py-2 text-xs font-semibold text-white hover:bg-[#27ae60]"
+          >
+            完成
+          </button>
+        </div>
+      ) : null}
+    </div>
   )
 }
 

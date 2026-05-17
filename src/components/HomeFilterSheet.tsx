@@ -22,7 +22,7 @@ export function HomeFilterSheet({ open, onClose, value, onChange }: Props) {
         onClick={onClose}
       />
       <div
-        className="relative max-h-[85dvh] overflow-y-auto rounded-t-2xl border border-stone-200 bg-white px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 shadow-xl"
+        className="relative max-h-[85dvh] overflow-y-auto rounded-t-2xl border border-kj-border-strong bg-kj-surface px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 shadow-xl"
         role="dialog"
         aria-modal
         aria-labelledby="home-filter-title"
@@ -30,7 +30,7 @@ export function HomeFilterSheet({ open, onClose, value, onChange }: Props) {
         <div className="mb-4 flex items-center justify-between">
           <h2
             id="home-filter-title"
-            className="text-base font-bold text-neutral-900"
+            className="text-base font-bold text-kj-primary"
           >
             筛选账单
           </h2>
@@ -44,31 +44,31 @@ export function HomeFilterSheet({ open, onClose, value, onChange }: Props) {
         </div>
 
         <label className="mb-3 block">
-          <span className="mb-1.5 block text-xs font-medium text-[#666666]">
+          <span className="mb-1.5 block text-xs font-medium text-kj-secondary">
             购买方（包含匹配）
           </span>
           <input
             value={value.plate}
             onChange={(e) => onChange({ ...value, plate: e.target.value })}
             placeholder="姓名、手机尾号、简称等"
-            className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
+            className="w-full rounded-xl border border-kj-border-strong bg-kj-raised px-3 py-2.5 text-sm text-kj-primary placeholder:text-kj-muted"
           />
         </label>
 
         <label className="mb-3 block">
-          <span className="mb-1.5 block text-xs font-medium text-[#666666]">
+          <span className="mb-1.5 block text-xs font-medium text-kj-secondary">
             商品（任一行包含）
           </span>
           <input
             value={value.product}
             onChange={(e) => onChange({ ...value, product: e.target.value })}
             placeholder="关键词"
-            className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900 placeholder:text-[#999999]"
+            className="w-full rounded-xl border border-kj-border-strong bg-kj-raised px-3 py-2.5 text-sm text-kj-primary placeholder:text-kj-muted"
           />
         </label>
 
         <fieldset className="mb-4">
-          <legend className="mb-1.5 text-xs font-medium text-[#666666]">
+          <legend className="mb-1.5 text-xs font-medium text-kj-secondary">
             核账状态
           </legend>
           <div className="flex flex-wrap gap-2">
@@ -88,7 +88,7 @@ export function HomeFilterSheet({ open, onClose, value, onChange }: Props) {
                 className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
                   value.reconcile === k
                     ? 'bg-[#2ecc71] text-white'
-                    : 'border border-stone-200 bg-stone-50 text-neutral-800'
+                    : 'border border-kj-border-strong bg-stone-50 bg-kj-raised text-kj-primary'
                 }`}
               >
                 {label}
@@ -102,7 +102,7 @@ export function HomeFilterSheet({ open, onClose, value, onChange }: Props) {
           onClick={() => {
             onChange({ ...defaultHomeFilter })
           }}
-          className="mb-2 w-full rounded-xl border border-stone-200 py-2.5 text-sm font-semibold text-[#666666]"
+          className="mb-2 w-full rounded-xl border border-kj-border-strong py-2.5 text-sm font-semibold text-kj-secondary"
         >
           清除筛选{n > 0 ? `（${n} 项）` : ''}
         </button>

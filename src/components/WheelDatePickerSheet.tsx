@@ -126,7 +126,7 @@ function PickerColumn({
       style={{ height: PICKER_H }}
     >
       <div
-        className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-11 -translate-y-1/2 border-y border-stone-200/70 bg-stone-100/25"
+        className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-11 -translate-y-1/2 border-y border-kj-border-strong/70 bg-stone-100/25"
         aria-hidden
       />
       <div
@@ -151,8 +151,8 @@ function PickerColumn({
             key={`${labelsSig}:${i}`}
             className={`flex h-11 shrink-0 snap-center items-center justify-center text-[15px] leading-none ${
               i === activeIndex
-                ? 'font-semibold text-stone-900'
-                : 'text-stone-400'
+                ? 'font-semibold text-kj-primary'
+                : 'text-kj-muted'
             }`}
           >
             {label}
@@ -284,17 +284,17 @@ export function WheelDatePickerSheet({
         aria-label="关闭"
         onClick={onClose}
       />
-      <div className="relative z-10 w-full max-w-[min(100vw,28rem)] overflow-hidden rounded-t-[1.35rem] border border-stone-200/90 bg-white shadow-2xl sm:max-w-[420px] sm:rounded-2xl">
-        <div className="border-b border-stone-100 px-4 py-3">
-          <p className="text-center text-[15px] font-semibold text-stone-900">
+      <div className="relative z-10 w-full max-w-[min(100vw,28rem)] overflow-hidden rounded-t-[1.35rem] border border-kj-border-strong/80 bg-kj-surface shadow-2xl sm:max-w-[420px] sm:rounded-2xl">
+        <div className="border-b border-kj-border px-4 py-3">
+          <p className="text-center text-[15px] font-semibold text-kj-primary">
             {title}
           </p>
-          <p className="mt-0.5 text-center text-xs text-stone-400">
+          <p className="mt-0.5 text-center text-xs text-kj-muted">
             {y}年{m}月{d}日
           </p>
         </div>
 
-        <div className="flex w-full min-w-0 border-b border-stone-100 px-0.5">
+        <div className="flex w-full min-w-0 border-b border-kj-border px-0.5">
           <PickerColumn
             labelsSig={yearSig}
             labels={yearLabels}
@@ -319,7 +319,7 @@ export function WheelDatePickerSheet({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full px-5 py-2.5 text-sm font-medium text-stone-600 hover:bg-stone-50"
+            className="rounded-full px-5 py-2.5 text-sm font-medium text-stone-600 hover:bg-kj-hover"
           >
             取消
           </button>

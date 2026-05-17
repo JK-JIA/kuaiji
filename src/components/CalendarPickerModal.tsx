@@ -41,9 +41,9 @@ export function CalendarPickerModal({
       className={`fixed inset-0 flex items-end justify-center bg-stone-900/35 p-0 backdrop-blur-[3px] sm:items-center sm:p-4 ${overlayZClass}`}
     >
       <div className="absolute inset-0" aria-hidden onClick={onClose} />
-      <div className="relative z-10 w-full max-w-[360px] overflow-hidden rounded-t-[1.75rem] border border-stone-200 bg-white shadow-2xl sm:rounded-3xl">
-        <div className="border-b border-stone-100 px-5 pb-2 pt-5">
-          <p className="text-center text-xs font-medium text-stone-400">选择日期</p>
+      <div className="relative z-10 w-full max-w-[360px] overflow-hidden rounded-t-[1.75rem] border border-kj-border-strong bg-kj-surface shadow-2xl sm:rounded-3xl">
+        <div className="border-b border-kj-border px-5 pb-2 pt-5">
+          <p className="text-center text-xs font-medium text-kj-muted">选择日期</p>
           {subtitle && (
             <p className="mt-1 text-center text-[15px] text-stone-600">{subtitle}</p>
           )}
@@ -57,7 +57,7 @@ export function CalendarPickerModal({
           />
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-stone-100 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-kj-border px-4 py-3">
           <button
             type="button"
             onClick={() => onChangeValue(todayStr)}
@@ -69,7 +69,7 @@ export function CalendarPickerModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-full px-5 py-2 text-sm font-medium text-stone-600 hover:bg-stone-50"
+              className="rounded-full px-5 py-2 text-sm font-medium text-stone-600 hover:bg-kj-hover"
             >
               取消
             </button>
