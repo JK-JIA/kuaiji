@@ -2,7 +2,7 @@
 
 本应用使用豆包大模型进行智能文本解析，支持自然语言输入。
 
-**方舟对话(Chat) API 官方说明**（请求格式、`model` 与接入点等）：[对话(Chat) API](https://www.volcengine.com/docs/82379/1298454)
+**方舟 Responses API 官方说明**：[创建模型响应](https://www.volcengine.com/docs/82379/1569618)
 
 ## ✨ 功能特点
 
@@ -64,19 +64,15 @@ cp .env.example .env
 copy .env.example .env
 ```
 
-在 `.env` 或 `.env.local` 中增加两行（Key 来自「查看 API Key」）。**`VITE_DOUBAO_MODEL` 必须与 Chat 接口请求体里的 `model` 完全一致**，常见两种写法（二选一，以你控制台/官方 curl 为准）：
-
-1. **推理接入点 ID**：`ep-20241211185157-xqxfh`（控制台「推理接入点」列表里复制）。
-2. **模型端点 ID**：文档或 curl 示例里的字符串，例如 `doubao-1-5-lite-32k-250115`（注意是 **`1-5` 连字符**，不要写成 `1.5`）。
+在 `.env` 或 `.env.local` 中配置（Key 来自火山方舟「API Key 管理」，**勿提交到 Git**）：
 
 ```
-VITE_DOUBAO_API_KEY=你的火山引擎豆包_API_Key
-VITE_DOUBAO_MODEL=ep-你的接入点ID
-# 或（与官方 curl 的 model 字段一致时）：
-# VITE_DOUBAO_MODEL=doubao-1-5-lite-32k-250115
+VITE_DOUBAO_API_KEY=你的方舟_API_Key
+# 与官方 curl 的 model 完全一致；不填则默认 doubao-seed-1-8-251228
+VITE_DOUBAO_MODEL=doubao-seed-1-8-251228
 ```
 
-说明：对话(Chat) API 见官方文档；本应用 Chat 地址在 [`src/utils/doubaoParser.ts`](src/utils/doubaoParser.ts) 的 `DOUBAO_CONFIG.ENDPOINT`；`model` 由 `VITE_DOUBAO_MODEL` 在**构建时**注入。开发改 `.env` 后需**重启 `npm run dev`**；打 APK 前须带上述变量执行 `npm run build`，否则安装包里仍会显示「填入首行」。
+本应用调用 **Responses API**（`POST /api/v3/responses`），请求体为 `input` + `input_text`，见 [`src/utils/doubaoParser.ts`](src/utils/doubaoParser.ts)。开发改 `.env` 后需**重启 `npm run dev`**；打 APK / 热更前须带 `VITE_DOUBAO_API_KEY` 执行 `npm run build`。
 
 ## 📦 重新构建 APK
 

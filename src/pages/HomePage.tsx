@@ -196,7 +196,7 @@ export function HomePage() {
       if (!isDoubaoConfigured()) {
         clearVoiceSlot()
         setVoiceBanner(
-          '未配置豆包智能解析，无法在首页自动入账。请在 .env 设置 VITE_DOUBAO_API_KEY 与 VITE_DOUBAO_MODEL，或使用「记一笔」手动录入。\n\n请重新语音录入',
+          '未配置豆包智能解析，无法在首页自动入账。请在 .env 设置 VITE_DOUBAO_API_KEY（模型默认 doubao-seed-1-8-251228），或使用「记一笔」手动录入。\n\n请重新语音录入',
         )
         return
       }

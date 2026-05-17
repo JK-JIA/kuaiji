@@ -1,9 +1,8 @@
 ﻿/**
- * 豆包大模型智能解析
+ * 豆包大模型智能解析（语音转文字后的结构化入账）
  * 官网：https://www.volcengine.com/product/doubao
- * 对话(Chat) API（本文件调用 chat/completions）：https://www.volcengine.com/docs/82379/1298454
- * 模型：VITE_DOUBAO_MODEL 与 Chat 请求体 model 一致——可为接入点 ID（ep-xxxx），
- * 或文档/控制台给出的模型端点 ID（如 doubao-1-5-lite-32k-250115），须与 curl 示例逐字相同
+ * Responses API：https://www.volcengine.com/docs/82379/1569618
+ * 模型：VITE_DOUBAO_MODEL，默认 doubao-seed-1-8-251228，须与控制台 curl 的 model 逐字一致
  */
 
 import { computedLineAmountFromUnitAndQty } from './recordHelpers'
@@ -14,19 +13,75 @@ const DOUBAO_API_KEY =
     ? import.meta.env.VITE_DOUBAO_API_KEY.trim()
     : ''
 
-/**
- * 方舟 Chat Completions 的 `model`：控制台「推理接入点」的 ep-xxxx，
- * 或官方给出的模型端点字符串（见文档 curl 的 model 字段）；勿手写错字符（如 1.5 与 1-5）。
- */
-const DOUBAO_MODEL =
+const DOUBAO_MODEL_RAW =
   typeof import.meta.env.VITE_DOUBAO_MODEL === 'string'
     ? import.meta.env.VITE_DOUBAO_MODEL.trim()
     : ''
 
+const DOUBAO_ENDPOINT_RAW =
+  typeof import.meta.env.VITE_DOUBAO_ENDPOINT === 'string'
+    ? import.meta.env.VITE_DOUBAO_ENDPOINT.trim()
+    : ''
+
+const DEFAULT_DOUBAO_MODEL = 'doubao-seed-1-8-251228'
+
 const DOUBAO_CONFIG = {
   API_KEY: DOUBAO_API_KEY || 'your_api_key_here',
-  MODEL: DOUBAO_MODEL,
-  ENDPOINT: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+  MODEL: DOUBAO_MODEL_RAW || DEFAULT_DOUBAO_MODEL,
+  ENDPOINT:
+    DOUBAO_ENDPOINT_RAW ||
+    'https://ark.cn-beijing.volces.com/api/v3/responses',
+}
+
+/** 从 Responses API 响应中提取助手文本（兼容 output[].content[].output_text） */
+function extractResponsesApiText(result: unknown): string {
+  if (!result || typeof result !== 'object') return ''
+  const root = result as Record<string, unknown>
+
+  if (typeof root.output_text === 'string' && root.output_text.trim()) {
+    return root.output_text.trim()
+  }
+
+  const output = root.output
+  if (!Array.isArray(output)) return ''
+
+  const parts: string[] = []
+  for (const item of output) {
+    if (!item || typeof item !== 'object') continue
+    const block = item as Record<string, unknown>
+    const content = block.content
+    if (!Array.isArray(content)) continue
+    for (const c of content) {
+      if (!c || typeof c !== 'object') continue
+      const piece = c as Record<string, unknown>
+      const t = piece.text
+      if (typeof t === 'string' && t.trim()) {
+        parts.push(t)
+      }
+    }
+  }
+  return parts.join('')
+}
+
+/** Chat Completions 回退解析（旧接入点） */
+function extractChatCompletionsText(result: unknown): string {
+  if (!result || typeof result !== 'object') return ''
+  const choice0 = (result as { choices?: unknown[] }).choices?.[0]
+  if (!choice0 || typeof choice0 !== 'object') return ''
+  const msg = (choice0 as { message?: unknown }).message
+  if (!msg || typeof msg !== 'object') return ''
+  const content = (msg as { content?: unknown }).content
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .map((p) => {
+        if (!p || typeof p !== 'object') return ''
+        const t = (p as { text?: unknown }).text
+        return typeof t === 'string' ? t : ''
+      })
+      .join('')
+  }
+  return ''
 }
 
 /** 智能识别得到的多行商品（每行对应表单一行） */
@@ -235,14 +290,6 @@ export async function parseWithDoubao(
     }
   }
 
-  if (!DOUBAO_CONFIG.MODEL) {
-    return {
-      success: false,
-      error:
-        '已配置 API Key，但未设置模型标识：请在 .env 中增加 VITE_DOUBAO_MODEL，与方舟 Chat 接口里 model 一致（可为 ep-xxxx 接入点 ID，或文档 curl 中的模型端点 ID，须逐字一致），重启 dev 或重新 build。',
-    }
-  }
-
   try {
     // 构建字段说明
     const fieldDescriptions = fields
@@ -305,9 +352,8 @@ export async function parseWithDoubao(
   "${amountLabel}": "30"
 }`
 
-    console.log('调用豆包 API，模型:', DOUBAO_CONFIG.MODEL)
+    console.log('调用豆包 Responses API，模型:', DOUBAO_CONFIG.MODEL)
 
-    // Chat Completions：messages + 纯文本 content（与 /responses 的 input 多模态块不同）
     const response = await fetch(DOUBAO_CONFIG.ENDPOINT, {
       method: 'POST',
       headers: {
@@ -316,7 +362,12 @@ export async function parseWithDoubao(
       },
       body: JSON.stringify({
         model: DOUBAO_CONFIG.MODEL,
-        messages: [{ role: 'user', content: prompt }],
+        input: [
+          {
+            role: 'user',
+            content: [{ type: 'input_text', text: prompt }],
+          },
+        ],
       }),
     })
 
@@ -341,7 +392,7 @@ export async function parseWithDoubao(
         const suffix = detail ? `（${detail}）` : ''
         return {
           success: false,
-          error: `模型或接入点不可用${suffix}。请核对 VITE_DOUBAO_MODEL 是否与控制台/文档 curl 中的 model 完全一致（ep-xxxx 或如 doubao-1-5-lite-32k-250115），接入点已开通，且地域与 URL 一致（本请求为 cn-beijing）。`,
+          error: `模型不可用${suffix}。请核对 VITE_DOUBAO_MODEL 是否与控制台 curl 的 model 完全一致（默认 ${DEFAULT_DOUBAO_MODEL}），且已开通 Responses API 权限。`,
         }
       } else if (response.status === 429) {
         return { success: false, error: '请求过于频繁，请稍后再试' }
@@ -353,19 +404,8 @@ export async function parseWithDoubao(
     const result = await response.json()
     console.log('豆包 API 响应:', result)
 
-    // Chat Completions：choices[0].message.content 为助手回复文本
-    let content = ''
-    const choice0 = result?.choices?.[0]
-    const msg = choice0?.message
-    if (typeof msg?.content === 'string') {
-      content = msg.content
-    } else if (Array.isArray(msg?.content)) {
-      const parts = msg.content as Array<{ type?: string; text?: string }>
-      content = parts
-        .filter((p) => p && (p.type === 'text' || p.text != null))
-        .map((p) => (typeof p.text === 'string' ? p.text : ''))
-        .join('')
-    }
+    let content =
+      extractResponsesApiText(result) || extractChatCompletionsText(result)
 
     if (!content) {
       console.error('未找到响应内容:', result)

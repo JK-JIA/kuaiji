@@ -486,18 +486,9 @@ export function AddRecordModal({
 
           {prodField && qtyField && (
             <div className="mt-4">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-kj-primary">
-                  商品明细
-                </p>
-                <button
-                  type="button"
-                  onClick={addLine}
-                  className="text-sm font-semibold text-[#2ecc71] hover:text-[#27ae60]"
-                >
-                  + 一行
-                </button>
-              </div>
+              <p className="mb-3 text-sm font-semibold text-kj-primary">
+                商品明细
+              </p>
               {recentProductNames.length > 0 && (
                 <div className="mb-3">
                   <p className="mb-2 text-xs font-medium text-kj-secondary">
@@ -517,6 +508,15 @@ export function AddRecordModal({
                   </div>
                 </div>
               )}
+              <div className="mb-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={addLine}
+                  className="text-sm font-semibold text-[#2ecc71] hover:text-[#27ae60]"
+                >
+                  + 一行
+                </button>
+              </div>
               <div className="rounded-2xl border border-kj-border-strong/80 bg-kj-surface p-4 shadow-sm">
                 {!showDetailAmounts || !canonicalAmountId ? (
                   <div className="space-y-3 pt-2">
