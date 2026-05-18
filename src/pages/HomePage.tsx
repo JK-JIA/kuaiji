@@ -216,6 +216,7 @@ export function HomePage() {
         const r = await parseWithDoubao(text, ledgerLayout.sortedFields, {
           apiBase,
           token,
+          productCatalog: productCatalog.map((p) => p.name),
         })
         if (!r.success || !r.data) {
           setVoiceBanner(`${r.error ?? '解析失败'}\n\n请重新语音录入`)

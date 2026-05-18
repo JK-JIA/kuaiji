@@ -102,6 +102,7 @@ export function VoiceInputSection({
       const r: DoubaoParseResult = await parseWithDoubao(text, fields, {
         apiBase,
         token,
+        productCatalog: productCatalog.map((p) => p.name),
       })
       if (!r.success || !r.data) {
         setHint(r.error ?? '解析失败')

@@ -311,6 +311,7 @@ export async function parseVoiceLedger(
   token: string,
   text: string,
   fields: Array<{ id: string; name: string; key?: string }>,
+  productCatalog?: string[],
 ): Promise<VoiceLedgerParseResponse> {
   const res = await fetchWithTimeout(
     `${base.replace(/\/$/, '')}/api/voice/parse`,
@@ -320,7 +321,7 @@ export async function parseVoiceLedger(
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ text, fields }),
+      body: JSON.stringify({ text, fields, productCatalog }),
     },
   )
   let data: DoubaoParseResult & { error?: string }

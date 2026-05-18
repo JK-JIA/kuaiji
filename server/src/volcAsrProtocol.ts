@@ -134,12 +134,11 @@ function extractDefinite(json: unknown): boolean | undefined {
 }
 
 /**
- * 构建首包 JSON：可选合并客户端热词 + 控制台词表 ID（VOLC_ASR_BOOSTING_TABLE_ID）。
+ * 构建首包 JSON：仅合并客户端动态热词。
  * 热词放在 request.corpus.context，序列化为 JSON 字符串（文档示例）。
  */
 export function buildAsrInitPayload(clientHotwords: string[]): Record<string, unknown> {
   const merged = mergeVolcAsrHotwords(clientHotwords)
-  const boostingId = process.env.VOLC_ASR_BOOSTING_TABLE_ID?.trim()
 
   const request: Record<string, unknown> = {
     model_name: 'bigmodel',
@@ -154,14 +153,13 @@ export function buildAsrInitPayload(clientHotwords: string[]): Record<string, un
     request.vad_segment_duration = vadMs
   }
 
-  const corpus: Record<string, string> = {}
-  if (boostingId) corpus.boosting_table_id = boostingId
   if (merged.length) {
-    corpus.context = JSON.stringify({
-      hotwords: merged.map((word) => ({ word })),
-    })
+    request.corpus = {
+      context: JSON.stringify({
+        hotwords: merged.map((word) => ({ word })),
+      }),
+    }
   }
-  if (Object.keys(corpus).length) request.corpus = corpus
 
   return {
     user: {

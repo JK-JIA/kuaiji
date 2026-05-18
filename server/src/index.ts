@@ -71,6 +71,7 @@ const VoiceParseSchema = z.object({
       key: z.string().max(64).optional(),
     }),
   ),
+  productCatalog: z.array(z.string().min(1).max(80)).max(300).optional(),
 })
 
 const lastSmsSend = new Map<string, number>()
@@ -209,6 +210,7 @@ app.post('/api/voice/parse', async (req, res) => {
     const result = await parseVoiceOnServer(
       parsed.data.text,
       parsed.data.fields,
+      parsed.data.productCatalog,
     )
     res.status(result.success ? 200 : 502).json(result)
   } catch (e) {

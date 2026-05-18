@@ -397,9 +397,23 @@ function splitLegacyListStrings(
   }))
 }
 
+function normalizeProductCatalogForPrompt(productCatalog?: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of productCatalog ?? []) {
+    const t = raw.normalize('NFKC').trim()
+    if (!t || seen.has(t)) continue
+    seen.add(t)
+    out.push(t)
+    if (out.length >= 120) break
+  }
+  return out
+}
+
 function buildVoiceParsePrompt(
   text: string,
   fields: VoiceFieldMeta[],
+  productCatalog?: string[],
 ): string {
   const fieldDescriptions = fields
     .filter(
@@ -415,12 +429,16 @@ function buildVoiceParsePrompt(
     fields.find((f) => f.key === 'amount')?.name?.trim() || '金额'
   const buyerLabel =
     fields.find((f) => f.key === 'plate')?.name?.trim() || '购买方'
+  const productCandidates = normalizeProductCatalogForPrompt(productCatalog)
+  const productCatalogBlock = productCandidates.length
+    ? `\n【候选商品列表】\n以下是当前用户维护的商品列表。商品字段必须优先从这些候选商品中选择规范名称：\n${productCandidates.join('、')}\n- 如果用户原话或识别文本中的商品名与候选商品读音相近、字形相近、简称相近或包含关系明显，请输出候选商品中的规范名称。\n- 不要编造候选列表外的商品名；只有完全无法对应时，才保留用户原话中的商品名称。\n`
+    : ''
 
   return `你是一个批发记账助手，从用户口语中提取结构化信息，输出严格 JSON。
 
 用户原话：${text}
 
-须提取的字段名必须与系统一致（含自定义列）：${fieldDescriptions || `${buyerLabel}等`}；其中**金额类字段名固定为「${amountLabel}」**（不要用收款、价钱等别的键名）。
+须提取的字段名必须与系统一致（含自定义列）：${fieldDescriptions || `${buyerLabel}等`}；其中**金额类字段名固定为「${amountLabel}」**（不要用收款、价钱等别的键名）。${productCatalogBlock}
 
 【商品与数量】
 - 多种商品：必须用「商品明细」数组，每项一条：{ "商品":"名称", "数量":"数字+单位（如斤）", "单价":"数字（元/斤，可选）" }；若用户说了**该行货款**或**小计**，再加 "金额":"数字"（该行小计，元）。若同时有「单价」和可换算的斤数，可省略 "金额"。
@@ -584,6 +602,7 @@ function mapModelContentToResult(
 export async function parseVoiceOnServer(
   text: string,
   fields: VoiceFieldMeta[],
+  productCatalog?: string[],
 ): Promise<VoiceParseResult> {
   if (!doubaoEnvReady()) {
     return {
@@ -593,7 +612,7 @@ export async function parseVoiceOnServer(
     }
   }
 
-  const prompt = buildVoiceParsePrompt(text.trim(), fields)
+  const prompt = buildVoiceParsePrompt(text.trim(), fields, productCatalog)
   const api = await callDoubaoModel(prompt, DOUBAO_MODEL)
   if (!api.ok) {
     console.error(
