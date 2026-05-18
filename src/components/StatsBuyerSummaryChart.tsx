@@ -596,7 +596,7 @@ export function StatsBuyerSummaryChart({
 
       <div
         ref={viewportRef}
-        className="overflow-x-auto overflow-y-hidden rounded-xl bg-kj-bg-subtle [-webkit-overflow-scrolling:touch]"
+        className="overflow-x-auto overflow-y-hidden rounded-xl bg-kj-surface [-webkit-overflow-scrolling:touch]"
         style={{ touchAction: 'pan-x pinch-zoom' }}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
