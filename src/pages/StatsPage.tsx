@@ -506,19 +506,19 @@ export function StatsPage() {
 
   if (!ready) {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center bg-[#f8f9fa] text-[#999999]">
+      <div className="flex min-h-[50vh] items-center justify-center bg-kj-bg text-kj-muted">
         加载中…
       </div>
     )
   }
 
   return (
-    <div className="min-h-dvh bg-[#f8f9fa] pb-28 pt-12">
+    <div className="min-h-dvh bg-kj-bg pb-28 pt-12">
       <header className="mb-4 px-4">
-        <h1 className="text-[22px] font-bold tracking-tight text-neutral-900">
+        <h1 className="text-[22px] font-bold tracking-tight text-kj-primary">
           统计分析
         </h1>
-        <p className="mt-0.5 text-xs leading-relaxed text-[#666666]">
+        <p className="mt-0.5 text-xs leading-relaxed text-kj-secondary">
           按周/月/年或自定义起止日期查看，可与上期对比。
         </p>
       </header>
@@ -541,7 +541,7 @@ export function StatsPage() {
             className={`rounded-xl px-4 py-2 text-sm font-semibold shadow-sm transition-colors ${
               rangeMode === 'preset' && kind === k
                 ? 'bg-[#2ecc71] text-white hover:bg-[#27ae60]'
-                : 'border border-stone-200/90 bg-white text-[#666666] hover:bg-stone-50'
+                : 'border border-kj-border bg-kj-surface text-kj-secondary hover:bg-kj-hover'
             }`}
           >
             {label}
@@ -557,7 +557,7 @@ export function StatsPage() {
           className={`rounded-xl px-4 py-2 text-sm font-semibold shadow-sm transition-colors ${
             rangeMode === 'custom'
               ? 'bg-[#2ecc71] text-white hover:bg-[#27ae60]'
-              : 'border border-stone-200/90 bg-white text-[#666666] hover:bg-stone-50'
+              : 'border border-kj-border bg-kj-surface text-kj-secondary hover:bg-kj-hover'
           }`}
         >
           自定义
@@ -565,43 +565,43 @@ export function StatsPage() {
       </div>
 
       {rangeMode === 'custom' && (
-        <div className="mx-4 mb-4 flex flex-col gap-3 rounded-2xl border border-stone-200/90 bg-white p-3 shadow-sm sm:flex-row sm:flex-wrap sm:items-end">
+        <div className="mx-4 mb-4 flex flex-col gap-3 rounded-2xl border border-kj-border bg-kj-surface p-3 shadow-sm sm:flex-row sm:flex-wrap sm:items-end">
           <label className="flex min-w-[140px] flex-1 flex-col gap-1.5">
-            <span className="text-xs font-medium text-[#666666]">开始日期</span>
+            <span className="text-xs font-medium text-kj-secondary">开始日期</span>
             <input
               type="date"
               value={customStartStr}
               onChange={(e) => setCustomStartStr(e.target.value)}
-              className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900"
+              className="w-full rounded-xl border border-kj-border bg-kj-raised px-3 py-2.5 text-sm text-kj-primary"
             />
           </label>
           <label className="flex min-w-[140px] flex-1 flex-col gap-1.5">
-            <span className="text-xs font-medium text-[#666666]">结束日期</span>
+            <span className="text-xs font-medium text-kj-secondary">结束日期</span>
             <input
               type="date"
               value={customEndStr}
               onChange={(e) => setCustomEndStr(e.target.value)}
-              className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900"
+              className="w-full rounded-xl border border-kj-border bg-kj-raised px-3 py-2.5 text-sm text-kj-primary"
             />
           </label>
-          <p className="text-[11px] leading-relaxed text-[#999999] sm:pb-2">
+          <p className="text-[11px] leading-relaxed text-kj-muted sm:pb-2">
             含起止两天；环比为紧邻上一段等长日历区间。
           </p>
         </div>
       )}
 
-      <div className="mx-4 mb-4 flex items-center gap-2 rounded-2xl border border-stone-200/90 bg-white px-2 py-2 shadow-sm">
+      <div className="mx-4 mb-4 flex items-center gap-2 rounded-2xl border border-kj-border bg-kj-surface px-2 py-2 shadow-sm">
         {rangeMode === 'preset' ? (
           <>
             <button
               type="button"
               aria-label="上一周期"
               onClick={() => setPeriodOffset((o) => o - 1)}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-stone-200 bg-[#fafafa] text-[#666666] transition-colors hover:bg-stone-100"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-kj-border bg-kj-raised text-kj-secondary transition-colors hover:bg-kj-hover"
             >
               <StatsChevronLeft className="h-5 w-5" />
             </button>
-            <p className="min-w-0 flex-1 px-1 text-center text-xs leading-relaxed text-[#666666]">
+            <p className="min-w-0 flex-1 px-1 text-center text-xs leading-relaxed text-kj-secondary">
               {rangeTitle}
             </p>
             <button
@@ -609,20 +609,20 @@ export function StatsPage() {
               aria-label="下一周期"
               disabled={periodOffset >= 0}
               onClick={() => setPeriodOffset((o) => Math.min(0, o + 1))}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-stone-200 bg-[#fafafa] text-[#666666] transition-colors hover:bg-stone-100 disabled:pointer-events-none disabled:opacity-35"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-kj-border bg-kj-raised text-kj-secondary transition-colors hover:bg-kj-hover disabled:pointer-events-none disabled:opacity-35"
             >
               <StatsChevronRight className="h-5 w-5" />
             </button>
           </>
         ) : (
-          <p className="min-w-0 flex-1 px-1 py-2 text-center text-xs leading-relaxed text-[#666666]">
+          <p className="min-w-0 flex-1 px-1 py-2 text-center text-xs leading-relaxed text-kj-secondary">
             {rangeTitle}
           </p>
         )}
       </div>
 
-      <section className="mx-4 mb-6 rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm sm:p-5">
-        <p className="text-xs font-medium text-[#666666]">
+      <section className="mx-4 mb-6 rounded-2xl border border-kj-border bg-kj-surface p-4 shadow-sm sm:p-5">
+        <p className="text-xs font-medium text-kj-secondary">
           {rangeMode === 'custom'
             ? '该时段汇总'
             : periodOffset === 0
@@ -631,65 +631,65 @@ export function StatsPage() {
         </p>
         <div className="mt-4 grid gap-6 sm:grid-cols-2">
           <div>
-            <p className="text-xs text-[#666666]">应收总金额（元）</p>
-            <p className="mt-1 text-3xl font-bold tabular-nums text-neutral-900">
+            <p className="text-xs text-kj-secondary">应收总金额（元）</p>
+            <p className="mt-1 text-3xl font-bold tabular-nums text-kj-primary">
               {amountId ? fmtMoney(totalAmount) : '—'}
             </p>
             {!amountId && (
-              <p className="mt-1 text-[11px] text-[#999999]">需「金额」列</p>
+              <p className="mt-1 text-[11px] text-kj-muted">需「金额」列</p>
             )}
           </div>
           <div>
-            <p className="text-xs text-[#666666]">未收款合计（元）</p>
-            <p className="mt-1 text-3xl font-bold tabular-nums text-amber-800">
+            <p className="text-xs text-kj-secondary">未收款合计（元）</p>
+            <p className="mt-1 text-3xl font-bold tabular-nums text-kj-warning-text">
               {amountId ? fmtMoney(totalOutstanding) : '—'}
             </p>
             {!amountId && (
-              <p className="mt-1 text-[11px] text-[#999999]">需金额列</p>
+              <p className="mt-1 text-[11px] text-kj-muted">需金额列</p>
             )}
           </div>
         </div>
 
-        <div className="mt-6 grid gap-4 border-t border-stone-100 pt-5 sm:grid-cols-2">
+        <div className="mt-6 grid gap-4 border-t border-kj-border pt-5 sm:grid-cols-2">
           <div>
-            <p className="text-xs text-[#666666]">{compareLabel} · 金额（元）</p>
+            <p className="text-xs text-kj-secondary">{compareLabel} · 金额（元）</p>
             <p
               className={`mt-1 text-xl font-bold tabular-nums ${
                 !amountId
-                  ? 'text-[#999999]'
+                  ? 'text-kj-muted'
                   : diffAmount > 0
                     ? 'text-[#2ecc71]'
                     : diffAmount < 0
                       ? 'text-rose-600'
-                      : 'text-neutral-800'
+                      : 'text-kj-primary'
               }`}
             >
               {amountId ? fmtSignedMoney(diffAmount) : '—'}
             </p>
           </div>
           <div>
-            <p className="text-xs text-[#666666]">{compareLabel} · 成交单数</p>
+            <p className="text-xs text-kj-secondary">{compareLabel} · 成交单数</p>
             <p
               className={`mt-1 text-xl font-bold tabular-nums ${
                 diffCount > 0
                   ? 'text-[#2ecc71]'
                   : diffCount < 0
                     ? 'text-rose-600'
-                    : 'text-neutral-800'
+                    : 'text-kj-primary'
               }`}
             >
               {fmtSignedInt(diffCount)}
             </p>
           </div>
         </div>
-        <p className="mt-4 border-t border-stone-100 pt-4 text-center text-[11px] leading-relaxed text-[#999999]">
+        <p className="mt-4 border-t border-kj-border pt-4 text-center text-[11px] leading-relaxed text-kj-muted">
           上期：{format(prevBounds.start, 'M月d日', { locale: zhCN })} —{' '}
           {format(prevBounds.end, 'M月d日', { locale: zhCN })}
         </p>
       </section>
 
       {currentRecords.length === 0 && (
-        <div className="mx-4 mb-6 flex items-center justify-center gap-2 rounded-2xl border border-dashed border-stone-300 bg-white py-10 text-sm text-[#666666]">
+        <div className="mx-4 mb-6 flex items-center justify-center gap-2 rounded-2xl border border-dashed border-kj-border bg-kj-surface py-10 text-sm text-kj-secondary">
           <span>
             {rangeMode === 'custom' ? '该时段暂无账单' : '本周期暂无账单'}
           </span>
@@ -700,7 +700,7 @@ export function StatsPage() {
         <>
           <section className="mx-4 mb-6">
             <div className="mb-1 flex items-center justify-between gap-2">
-              <h2 className="text-sm font-semibold text-neutral-900">
+              <h2 className="text-sm font-semibold text-kj-primary">
                 商品销售占比
               </h2>
               <StatsChartsFilter
@@ -722,25 +722,25 @@ export function StatsPage() {
                 }}
               />
             </div>
-            <p className="mb-3 text-[11px] leading-relaxed text-[#666666]">
+            <p className="mb-3 text-[11px] leading-relaxed text-kj-secondary">
               切换饼图或列表查看；饼图为前 10 项及「其他」，列表含斤数/金额明细与排序。
             </p>
-            <div className="overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-3 py-2.5">
+            <div className="overflow-hidden rounded-2xl border border-kj-border bg-kj-surface shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-kj-border px-3 py-2.5">
                 <StatsShareViewModeSwitch
                   mode={productShareView}
                   onChange={setProductShareView}
                 />
                 <div className="flex flex-wrap items-center gap-2">
                   {amountId && productShareView === 'chart' ? (
-                    <div className="flex gap-1 rounded-lg border border-stone-200 bg-[#fafafa] p-0.5">
+                    <div className="flex gap-1 rounded-lg border border-kj-border bg-kj-raised p-0.5">
                       <button
                         type="button"
                         onClick={() => setProductPieMetric('jin')}
                         className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
                           productPieMetricEffective === 'jin'
                             ? 'bg-[#2ecc71] text-white'
-                            : 'text-[#666666] hover:text-neutral-900'
+                            : 'text-kj-secondary hover:text-kj-primary'
                         }`}
                       >
                         按斤数
@@ -751,7 +751,7 @@ export function StatsPage() {
                         className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
                           productPieMetricEffective === 'amount'
                             ? 'bg-[#2ecc71] text-white'
-                            : 'text-[#666666] hover:text-neutral-900'
+                            : 'text-kj-secondary hover:text-kj-primary'
                         }`}
                       >
                         按金额
@@ -806,14 +806,14 @@ export function StatsPage() {
           </section>
 
           <section className="mx-4 mb-10">
-            <h2 className="text-sm font-semibold text-neutral-900">
+            <h2 className="text-sm font-semibold text-kj-primary">
               {buyerFieldName}汇总与未核账
             </h2>
-            <p className="mb-3 mt-1 text-[11px] leading-relaxed text-[#666666]">
+            <p className="mb-3 mt-1 text-[11px] leading-relaxed text-kj-secondary">
               横轴为购买方，柱状图展示总斤数、总金额与未核账；可切换柱状图/列表，点击图例可单独查看某条线。
             </p>
             {!hasBuyerStatsSection ? (
-              <div className="rounded-2xl border border-dashed border-stone-300 bg-white py-8 text-center text-sm text-[#666666]">
+              <div className="rounded-2xl border border-dashed border-kj-border bg-kj-surface py-8 text-center text-sm text-kj-secondary">
                 {!amountId
                   ? '需多行商品明细；未核账需金额列'
                   : buyerProductRows.length === 0
@@ -823,8 +823,8 @@ export function StatsPage() {
                       : '本周期暂无数据'}
               </div>
             ) : (
-              <div className="overflow-hidden rounded-2xl border border-stone-200/90 bg-white shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 px-3 py-2.5">
+              <div className="overflow-hidden rounded-2xl border border-kj-border bg-kj-surface shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-kj-border px-3 py-2.5">
                   <StatsShareViewModeSwitch
                     mode={buyerStatsView}
                     onChange={setBuyerStatsView}
@@ -880,7 +880,7 @@ export function StatsPage() {
               onClick={() => setCustomStatsOpen((o) => !o)}
               className={`rounded-xl px-4 py-2 text-sm font-semibold shadow-sm transition-colors ${
                 customStatsOpen
-                  ? 'border border-stone-200/90 bg-white text-[#666666] hover:bg-stone-50'
+                  ? 'border border-kj-border bg-kj-surface text-kj-secondary hover:bg-kj-hover'
                   : 'bg-[#2ecc71] text-white hover:bg-[#27ae60]'
               }`}
             >
@@ -970,7 +970,7 @@ function SortableShareMetricTh({
   return (
     <th
       scope="col"
-      className={`${thPad} pl-2 text-[#666666] ${widthClass}`}
+      className={`${thPad} pl-2 text-kj-secondary ${widthClass}`}
       aria-sort={
         active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'
       }
@@ -988,7 +988,7 @@ function SortableShareMetricTh({
                 : '点击改为降序'
               : '点击排序'
         }
-        className={`inline-flex max-w-full items-center gap-1 rounded-lg py-0.5 pr-1 text-left font-medium text-[#666666] transition-colors hover:bg-stone-100 hover:text-neutral-900 disabled:pointer-events-none disabled:opacity-40 ${relaxed ? 'text-sm' : 'text-xs'}`}
+        className={`inline-flex max-w-full items-center gap-1 rounded-lg py-0.5 pr-1 text-left font-medium text-kj-secondary transition-colors hover:bg-kj-hover hover:text-kj-primary disabled:pointer-events-none disabled:opacity-40 ${relaxed ? 'text-sm' : 'text-xs'}`}
       >
         <span className="min-w-0">{label}</span>
         <span
@@ -1021,14 +1021,14 @@ function StatsShareMetricCell({
     <div className="space-y-0.5">
       <div className={valLineClass}>{valueLine}</div>
       <div className="flex items-center gap-1">
-        <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-stone-100">
+        <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-kj-raised">
           <div
             className={`h-full rounded-full ${barClassName}`}
             style={{ width: `${Math.min(100, Math.max(0, barPct))}%` }}
           />
         </div>
         <span
-          className={`w-9 shrink-0 text-right tabular-nums text-[#999999] ${pctTextClass}`}
+          className={`w-9 shrink-0 text-right tabular-nums text-kj-muted ${pctTextClass}`}
         >
           {pct.toFixed(1)}%
         </span>
@@ -1062,7 +1062,7 @@ function SortableBuyerSummaryTh({
   return (
     <th
       scope="col"
-      className={`${thPad} pl-2 text-[#666666] ${widthClass}`}
+      className={`${thPad} pl-2 text-kj-secondary ${widthClass}`}
       aria-sort={
         active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'
       }
@@ -1080,7 +1080,7 @@ function SortableBuyerSummaryTh({
                 : '点击改为降序'
               : '点击排序'
         }
-        className={`inline-flex max-w-full items-center gap-1 rounded-lg py-0.5 pr-1 text-left font-medium text-[#666666] transition-colors hover:bg-stone-100 hover:text-neutral-900 disabled:pointer-events-none disabled:opacity-40 ${relaxed ? 'text-sm' : 'text-xs'}`}
+        className={`inline-flex max-w-full items-center gap-1 rounded-lg py-0.5 pr-1 text-left font-medium text-kj-secondary transition-colors hover:bg-kj-hover hover:text-kj-primary disabled:pointer-events-none disabled:opacity-40 ${relaxed ? 'text-sm' : 'text-xs'}`}
       >
         <span className="min-w-0">{label}</span>
         <span
@@ -1124,14 +1124,14 @@ function BuyerSummaryTable({
   relaxed?: boolean
 }) {
   const th = relaxed
-    ? 'px-2 py-2.5 text-left text-xs font-medium text-[#666666] sm:px-3 sm:py-3 sm:text-sm'
-    : 'px-1.5 py-2 text-left text-[11px] font-medium text-[#666666] sm:px-2'
+    ? 'px-2 py-2.5 text-left text-xs font-medium text-kj-secondary sm:px-3 sm:py-3 sm:text-sm'
+    : 'px-1.5 py-2 text-left text-[11px] font-medium text-kj-secondary sm:px-2'
   const tdText = relaxed
-    ? 'break-words px-1.5 py-2 text-xs font-medium text-neutral-900 sm:px-2 sm:py-2.5 sm:text-sm'
-    : 'break-words px-1 py-2 text-[11px] font-medium text-neutral-900 sm:px-1.5'
+    ? 'break-words px-1.5 py-2 text-xs font-medium text-kj-primary sm:px-2 sm:py-2.5 sm:text-sm'
+    : 'break-words px-1 py-2 text-[11px] font-medium text-kj-primary sm:px-1.5'
   const valLine = relaxed
-    ? 'text-sm tabular-nums text-neutral-700'
-    : 'text-[11px] tabular-nums text-neutral-700'
+    ? 'text-sm tabular-nums text-kj-secondary'
+    : 'text-[11px] tabular-nums text-kj-secondary'
   const pctText = relaxed ? 'text-sm' : 'text-xs'
   const metricTd = relaxed ? 'px-1 py-2 align-top sm:px-1.5' : 'px-0.5 py-2 align-top sm:px-1'
 
@@ -1140,7 +1140,7 @@ function BuyerSummaryTable({
 
   return (
     <table className="w-full table-fixed text-left text-xs sm:text-sm">
-      <thead className="sticky top-0 z-[1] bg-white shadow-[0_1px_0_0_rgb(245_245_244)]">
+      <thead className="sticky top-0 z-[1] bg-kj-surface shadow-[0_1px_0_0_rgb(245_245_244)]">
         <tr>
           <th className={`${th} ${hasOutCol ? 'w-[22%]' : 'w-[28%]'}`}>
             {buyerFieldName}
@@ -1211,7 +1211,7 @@ function BuyerSummaryTable({
                     pctTextClass={pctText}
                   />
                 ) : (
-                  <span className="text-[#999999]">—</span>
+                  <span className="text-kj-muted">—</span>
                 )}
               </td>
               <td className={metricTd}>
@@ -1226,10 +1226,10 @@ function BuyerSummaryTable({
                       pctTextClass={pctText}
                     />
                   ) : (
-                    <span className="text-[#999999]">—</span>
+                    <span className="text-kj-muted">—</span>
                   )
                 ) : (
-                  <span className="text-[#999999]">—</span>
+                  <span className="text-kj-muted">—</span>
                 )}
               </td>
               {hasOutCol ? (
@@ -1244,7 +1244,7 @@ function BuyerSummaryTable({
                       pctTextClass={pctText}
                     />
                   ) : (
-                    <span className="text-[#999999]">—</span>
+                    <span className="text-kj-muted">—</span>
                   )}
                 </td>
               ) : null}
@@ -1280,19 +1280,19 @@ function ProductSalesShareTable({
   relaxed?: boolean
 }) {
   const th = relaxed
-    ? 'px-3 py-3 text-left text-sm font-medium text-[#666666]'
-    : 'px-3 py-2.5 text-left text-xs font-medium text-[#666666]'
+    ? 'px-3 py-3 text-left text-sm font-medium text-kj-secondary'
+    : 'px-3 py-2.5 text-left text-xs font-medium text-kj-secondary'
   const tdName = relaxed
-    ? 'max-w-[42vw] truncate px-3 py-3 text-base font-medium text-neutral-900 sm:max-w-none'
-    : 'max-w-[36vw] truncate px-3 py-2.5 text-sm font-medium text-neutral-900 sm:max-w-none'
+    ? 'max-w-[42vw] truncate px-3 py-3 text-base font-medium text-kj-primary sm:max-w-none'
+    : 'max-w-[36vw] truncate px-3 py-2.5 text-sm font-medium text-kj-primary sm:max-w-none'
   const valLine = relaxed
-    ? 'text-sm tabular-nums text-neutral-700'
-    : 'text-[11px] tabular-nums text-neutral-700'
+    ? 'text-sm tabular-nums text-kj-secondary'
+    : 'text-[11px] tabular-nums text-kj-secondary'
   const pctText = relaxed ? 'text-sm' : 'text-xs'
 
   return (
     <table className="w-full text-left text-sm">
-      <thead className="sticky top-0 z-[1] bg-white shadow-[0_1px_0_0_rgb(245_245_244)]">
+      <thead className="sticky top-0 z-[1] bg-kj-surface shadow-[0_1px_0_0_rgb(245_245_244)]">
         <tr>
           <th className={th}>商品</th>
           <SortableShareMetricTh
@@ -1346,14 +1346,14 @@ function ProductSalesShareTable({
                 <div className="space-y-1">
                   <div className={valLine}>{fmtNum(row.jin)} 斤</div>
                   <div className="flex items-center gap-2">
-                    <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-stone-100">
+                    <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-kj-raised">
                       <div
                         className="h-full rounded-full bg-[#2ecc71]"
                         style={{ width: `${jinBar}%` }}
                       />
                     </div>
                     <span
-                      className={`w-12 shrink-0 text-right tabular-nums text-[#999999] ${pctText}`}
+                      className={`w-12 shrink-0 text-right tabular-nums text-kj-muted ${pctText}`}
                     >
                       {jinPct.toFixed(1)}%
                     </span>
@@ -1365,21 +1365,21 @@ function ProductSalesShareTable({
                   <div className="space-y-1">
                     <div className={valLine}>{fmtMoney(row.amount)} 元</div>
                     <div className="flex items-center gap-2">
-                      <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-stone-100">
+                      <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-kj-raised">
                         <div
                           className="h-full rounded-full bg-[#1a7f4c]"
                           style={{ width: `${amtBar}%` }}
                         />
                       </div>
                       <span
-                        className={`w-12 shrink-0 text-right tabular-nums text-[#999999] ${pctText}`}
+                        className={`w-12 shrink-0 text-right tabular-nums text-kj-muted ${pctText}`}
                       >
                         {amtPct.toFixed(1)}%
                       </span>
                     </div>
                   </div>
                 ) : (
-                  <span className="text-[#999999]">—</span>
+                  <span className="text-kj-muted">—</span>
                 )}
               </td>
             </tr>
@@ -1429,7 +1429,7 @@ function StatsChartsFilter({
         className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-semibold shadow-sm transition-colors ${
           filtered
             ? 'border-[#2ecc71] bg-emerald-50 text-[#1a7f4c] hover:bg-emerald-100'
-            : 'border-stone-200/90 bg-white text-[#666666] hover:bg-stone-50'
+            : 'border-kj-border bg-kj-surface text-kj-secondary hover:bg-kj-hover'
         }`}
       >
         <svg
@@ -1450,22 +1450,22 @@ function StatsChartsFilter({
       </button>
       {open ? (
         <div
-          className="absolute right-0 top-[calc(100%+6px)] z-50 w-[min(calc(100vw-2rem),18rem)] rounded-2xl border border-stone-200/90 bg-white p-3 shadow-lg"
+          className="absolute right-0 top-[calc(100%+6px)] z-50 w-[min(calc(100vw-2rem),18rem)] rounded-2xl border border-kj-border bg-kj-surface p-3 shadow-lg"
           role="dialog"
           aria-label="筛选条件"
         >
-          <p className="mb-3 text-[11px] leading-relaxed text-[#666666]">
+          <p className="mb-3 text-[11px] leading-relaxed text-kj-secondary">
             下方图表共用；两条件为「且」。筛{productFieldName}时，未核账仍按整单计。
           </p>
           <div className="flex flex-col gap-3">
             <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-[#666666]">
+              <span className="text-xs font-medium text-kj-secondary">
                 {buyerFieldName}
               </span>
               <select
                 value={buyer}
                 onChange={(e) => onBuyerChange(e.target.value)}
-                className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900"
+                className="w-full rounded-xl border border-kj-border bg-kj-raised px-3 py-2.5 text-sm text-kj-primary"
               >
                 <option value="">全部</option>
                 {buyerOptions.map((b) => (
@@ -1476,13 +1476,13 @@ function StatsChartsFilter({
               </select>
             </label>
             <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-[#666666]">
+              <span className="text-xs font-medium text-kj-secondary">
                 {productFieldName}
               </span>
               <select
                 value={product}
                 onChange={(e) => onProductChange(e.target.value)}
-                className="w-full rounded-xl border border-stone-200 bg-[#fafafa] px-3 py-2.5 text-sm text-neutral-900"
+                className="w-full rounded-xl border border-kj-border bg-kj-raised px-3 py-2.5 text-sm text-kj-primary"
               >
                 <option value="">全部</option>
                 {productOptions.map((p) => (
@@ -1497,7 +1497,7 @@ function StatsChartsFilter({
             <button
               type="button"
               onClick={onClear}
-              className="mt-3 w-full rounded-lg border border-stone-200 py-2 text-xs font-medium text-[#666666] hover:bg-stone-50"
+              className="mt-3 w-full rounded-lg border border-kj-border py-2 text-xs font-medium text-kj-secondary hover:bg-kj-hover"
             >
               清除筛选
             </button>
@@ -1546,19 +1546,19 @@ function StatsDetailModal({
       onClick={onClose}
     >
       <div
-        className="flex max-h-[min(92dvh,40rem)] w-full max-w-lg flex-col rounded-t-2xl bg-white shadow-2xl sm:max-h-[85vh] sm:rounded-2xl"
+        className="flex max-h-[min(92dvh,40rem)] w-full max-w-lg flex-col rounded-t-2xl bg-kj-surface shadow-2xl sm:max-h-[85vh] sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-stone-100 px-4 py-3">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-kj-border px-4 py-3">
           <h3
             id="stats-detail-modal-title"
-            className="min-w-0 flex-1 text-base font-semibold text-neutral-900"
+            className="min-w-0 flex-1 text-base font-semibold text-kj-primary"
           >
             {title}
           </h3>
           <button
             type="button"
-            className="shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium text-[#666666] hover:bg-stone-100"
+            className="shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium text-kj-secondary hover:bg-kj-hover"
             onClick={onClose}
           >
             关闭

@@ -100,15 +100,15 @@ function renderSlicePercentLabel(
   const sin = Math.sin(-midAngle * RADIAN)
   const sx = cx + (outerRadius + 1) * cos
   const sy = cy + (outerRadius + 1) * sin
-  const mx = cx + (outerRadius + 10) * cos
-  const my = cy + (outerRadius + 10) * sin
-  const ex = mx + (cos >= 0 ? 1 : -1) * 5
+  const mx = cx + (outerRadius + 14) * cos
+  const my = cy + (outerRadius + 14) * sin
+  const ex = mx + (cos >= 0 ? 1 : -1) * 10
   const ey = my
   const pctText =
     percent >= 0.1
       ? `${Math.round(percent * 100)}%`
       : `${(percent * 100).toFixed(1)}%`
-  const textX = ex + (cos >= 0 ? 4 : -4)
+  const textX = ex + (cos >= 0 ? 5 : -5)
   const textAnchor = cos >= 0 ? 'start' : 'end'
 
   return (
@@ -176,9 +176,9 @@ export function StatsSharePieChart({
 
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-stretch">
-      <div className="mx-auto h-[220px] w-full max-w-[200px] shrink-0 sm:mx-0">
+      <div className="mx-auto h-[240px] w-full max-w-[320px] shrink-0 sm:mx-0">
         <ResponsiveContainer width="100%" height="100%">
-          <PieChart margin={{ top: 6, right: 32, bottom: 6, left: 32 }}>
+          <PieChart margin={{ top: 10, right: 56, bottom: 10, left: 56 }}>
             <Pie
               data={data}
               dataKey="value"
