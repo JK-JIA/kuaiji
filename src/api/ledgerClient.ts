@@ -1,4 +1,5 @@
 import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
+import type { VoiceProductCorrection } from '../utils/voiceProductCorrections'
 import type { DoubaoParseResult } from '../types/voiceParse'
 
 const TOKEN_KEY = 'ledger_auth_token'
@@ -172,6 +173,8 @@ export type LedgerPayload = {
   records: LedgerRecord[]
   productCatalog?: ProductCatalogEntry[]
   productCatalogSuppressed?: string[]
+  /** 用户语音纠错学习（每用户独立，有上限，不进入 AI prompt） */
+  voiceProductCorrections?: VoiceProductCorrection[]
 }
 
 export type LedgerApiResponse = LedgerPayload & {
@@ -311,7 +314,10 @@ export async function parseVoiceLedger(
   token: string,
   text: string,
   fields: Array<{ id: string; name: string; key?: string }>,
-  productCatalog?: string[],
+  catalogOpts?: {
+    productCatalog?: string[]
+    productCatalogPromptSection?: string
+  },
 ): Promise<VoiceLedgerParseResponse> {
   const res = await fetchWithTimeout(
     `${base.replace(/\/$/, '')}/api/voice/parse`,
@@ -321,7 +327,13 @@ export async function parseVoiceLedger(
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ text, fields, productCatalog }),
+      body: JSON.stringify({
+        text,
+        fields,
+        productCatalog: catalogOpts?.productCatalog,
+        productCatalogPromptSection:
+          catalogOpts?.productCatalogPromptSection,
+      }),
     },
   )
   let data: DoubaoParseResult & { error?: string }

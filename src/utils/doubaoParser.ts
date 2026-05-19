@@ -7,6 +7,7 @@
 
 import { getApiBase, getStoredToken, parseVoiceLedger } from '../api/ledgerClient'
 import type { DoubaoParseResult, DoubaoProductLine } from '../types/voiceParse'
+import { normalizeAiProductField } from './productAliasHelpers'
 import { computedLineAmountFromUnitAndQty } from './recordHelpers'
 
 export type { DoubaoParseResult, DoubaoProductLine }
@@ -433,7 +434,10 @@ function splitLegacyListStrings(
 export type DoubaoParseOptions = {
   apiBase?: string | null
   token?: string | null
+  /** @deprecated 使用 productCatalogPromptSection */
   productCatalog?: string[]
+  /** 客户端生成的候选商品说明（含规范名与误识别参考） */
+  productCatalogPromptSection?: string
 }
 
 function hasClientDoubaoKey(): boolean {
@@ -447,7 +451,7 @@ function normalizeProductCatalogForPrompt(productCatalog?: string[]): string[] {
   const seen = new Set<string>()
   const out: string[] = []
   for (const raw of productCatalog ?? []) {
-    const t = raw.normalize('NFKC').trim()
+    const t = raw.normalize('NFKC').trim().slice(0, 120)
     if (!t || seen.has(t)) continue
     seen.add(t)
     out.push(t)
@@ -475,7 +479,10 @@ export async function parseWithDoubao(
         token,
         text,
         fields,
-        opts?.productCatalog,
+        {
+          productCatalogPromptSection: opts?.productCatalogPromptSection,
+          productCatalog: opts?.productCatalog,
+        },
       )
       if (
         !result.success &&
@@ -486,7 +493,7 @@ export async function parseWithDoubao(
           '[doubao] 服务端解析不可用，使用客户端兜底',
           httpStatus,
         )
-        return parseWithDoubaoDirect(text, fields, opts?.productCatalog)
+        return parseWithDoubaoDirect(text, fields, opts)
       }
       if (!result.success && httpStatus === 404) {
         return {
@@ -499,7 +506,7 @@ export async function parseWithDoubao(
     } catch (e) {
       if (hasClientDoubaoKey()) {
         console.warn('[doubao] 请求解析服务失败，使用客户端兜底', e)
-        return parseWithDoubaoDirect(text, fields, opts?.productCatalog)
+        return parseWithDoubaoDirect(text, fields, opts)
       }
       return {
         success: false,
@@ -516,13 +523,13 @@ export async function parseWithDoubao(
     }
   }
 
-    return parseWithDoubaoDirect(text, fields, opts?.productCatalog)
+    return parseWithDoubaoDirect(text, fields, opts)
 }
 
 async function parseWithDoubaoDirect(
   text: string,
   fields: Array<{ id: string; name: string; key?: string }>,
-  productCatalog?: string[],
+  opts?: DoubaoParseOptions,
 ): Promise<DoubaoParseResult> {
   try {
     // 构建字段说明
@@ -544,10 +551,16 @@ async function parseWithDoubaoDirect(
       fields.find((f) => f.key === 'amount')?.name?.trim() || '金额'
     const buyerLabel =
       fields.find((f) => f.key === 'plate')?.name?.trim() || '购买方'
-    const productCandidates = normalizeProductCatalogForPrompt(productCatalog)
-    const productCatalogBlock = productCandidates.length
-      ? `\n【候选商品列表】\n以下是当前用户维护的商品列表。商品字段必须优先从这些候选商品中选择规范名称：\n${productCandidates.join('、')}\n- 如果用户原话或识别文本中的商品名与候选商品读音相近、字形相近、简称相近或包含关系明显，请输出候选商品中的规范名称。\n- 不要编造候选列表外的商品名；只有完全无法对应时，才保留用户原话中的商品名称。\n`
-      : ''
+    const productCatalogBlock =
+      opts?.productCatalogPromptSection?.trim() ||
+      (() => {
+        const productCandidates = normalizeProductCatalogForPrompt(
+          opts?.productCatalog,
+        )
+        return productCandidates.length
+          ? `\n【候选商品】商品字段只能填下列规范名之一：\n${productCandidates.join('、')}\n`
+          : ''
+      })()
 
     const prompt = `你是一个批发记账助手，从用户口语中提取结构化信息，输出严格 JSON。
 
@@ -661,7 +674,9 @@ async function parseWithDoubaoDirect(
                 ? normalizeMoneyDigits(lineAmountRaw)
                 : computed || undefined
             return {
-              product: String(o['商品'] ?? o['名称'] ?? '').trim(),
+              product: normalizeAiProductField(
+                String(o['商品'] ?? o['名称'] ?? '').trim(),
+              ),
               quantity: qtyStr,
               unitPrice: unitPriceRaw || undefined,
               lineAmount: lineAmountFinal,
@@ -672,7 +687,9 @@ async function parseWithDoubaoDirect(
         .filter((r) => r.product)
     }
 
-    const flatProduct = String(parsed['商品'] ?? '').trim()
+    const flatProduct = normalizeAiProductField(
+      String(parsed['商品'] ?? '').trim(),
+    )
     const flatQty = String(parsed['数量'] ?? '').trim()
 
     if (!productLines || productLines.length === 0) {

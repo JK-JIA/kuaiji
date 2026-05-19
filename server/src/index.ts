@@ -38,6 +38,7 @@ const LedgerPutSchema = z.object({
   records: z.array(z.unknown()),
   productCatalog: z.array(z.unknown()).optional(),
   productCatalogSuppressed: z.array(z.string()).optional(),
+  voiceProductCorrections: z.array(z.unknown()).optional(),
 })
 
 function jsonArrayUnknown(raw: unknown): unknown[] {
@@ -71,7 +72,8 @@ const VoiceParseSchema = z.object({
       key: z.string().max(64).optional(),
     }),
   ),
-  productCatalog: z.array(z.string().min(1).max(80)).max(300).optional(),
+  productCatalog: z.array(z.string().min(1).max(120)).max(300).optional(),
+  productCatalogPromptSection: z.string().max(12_000).optional(),
 })
 
 const lastSmsSend = new Map<string, number>()
@@ -210,7 +212,11 @@ app.post('/api/voice/parse', async (req, res) => {
     const result = await parseVoiceOnServer(
       parsed.data.text,
       parsed.data.fields,
-      parsed.data.productCatalog,
+      {
+        productCatalog: parsed.data.productCatalog,
+        productCatalogPromptSection:
+          parsed.data.productCatalogPromptSection,
+      },
     )
     res.status(result.success ? 200 : 502).json(result)
   } catch (e) {
@@ -491,6 +497,9 @@ app.get('/api/ledger', async (req, res) => {
     productCatalogSuppressed: jsonStringArray(
       ledger.productCatalogSuppressedJson,
     ),
+    voiceProductCorrections: jsonArrayUnknown(
+      ledger.voiceProductCorrectionsJson,
+    ),
     updatedAt: ledger.updatedAt.toISOString(),
   })
 })
@@ -519,13 +528,19 @@ app.put('/api/ledger', async (req, res) => {
     res.status(400).json({ error: '请求体须包含 fields、records 数组' })
     return
   }
-  const { fields, records, productCatalog, productCatalogSuppressed } =
-    parsed.data
+  const {
+    fields,
+    records,
+    productCatalog,
+    productCatalogSuppressed,
+    voiceProductCorrections,
+  } = parsed.data
   const data: {
     fieldsJson: object[]
     recordsJson: object[]
     productCatalogJson?: object[]
     productCatalogSuppressedJson?: string[]
+    voiceProductCorrectionsJson?: object[]
   } = {
     fieldsJson: fields as object[],
     recordsJson: records as object[],
@@ -535,6 +550,9 @@ app.put('/api/ledger', async (req, res) => {
   }
   if (productCatalogSuppressed !== undefined) {
     data.productCatalogSuppressedJson = productCatalogSuppressed
+  }
+  if (voiceProductCorrections !== undefined) {
+    data.voiceProductCorrectionsJson = voiceProductCorrections as object[]
   }
   const ledger = await prisma.ledger.update({
     where: { userId },
@@ -546,6 +564,9 @@ app.put('/api/ledger', async (req, res) => {
     productCatalog: jsonArrayUnknown(ledger.productCatalogJson),
     productCatalogSuppressed: jsonStringArray(
       ledger.productCatalogSuppressedJson,
+    ),
+    voiceProductCorrections: jsonArrayUnknown(
+      ledger.voiceProductCorrectionsJson,
     ),
     updatedAt: ledger.updatedAt.toISOString(),
   })

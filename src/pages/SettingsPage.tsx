@@ -26,14 +26,17 @@ import {
   persistReceiptExportHd,
   readReceiptExportHd,
 } from '../utils/receiptExport'
+import { collectAsrHotwordsFromLedger } from '../utils/asrHotwordsFromLedger'
 import { normalizeToken } from '../utils/voiceHistoryFuzzy'
 import { SETTINGS_CARD_CLASS } from './settings/SettingsSection'
 import { SettingsAboutYouScreen } from './settings/SettingsAboutYouScreen'
+import { VoiceLexiconSettingsScreen } from './settings/VoiceLexiconSettingsScreen'
 import { ProBenefitsSheet, ProRedeemSheet } from './settings/ProMembershipSheets'
 import { SettingsProfileCard } from './settings/SettingsProfileCard'
 import {
   IconBell,
   IconBox,
+  IconMic,
   IconFields,
   IconFontSize,
   IconImportExport,
@@ -409,6 +412,7 @@ type SettingsPanel =
   | 'account'
   | 'display'
   | 'catalog'
+  | 'voiceLexicon'
   | 'fields'
 
 export function SettingsPage() {
@@ -464,6 +468,17 @@ export function SettingsPage() {
         : `共 ${sortedProductCatalog.length} 条 · 管理商品与库存`,
     [sortedProductCatalog.length],
   )
+
+  const voiceLexiconSubtitle = useMemo(() => {
+    const hotwords = collectAsrHotwordsFromLedger(records, fields, {
+      productCatalog,
+    })
+    const aliasCount = productCatalog.reduce(
+      (n, e) => n + (e.aliases?.length ?? 0),
+      0,
+    )
+    return `热词 ${hotwords.length} 个 · 别名 ${aliasCount} 条`
+  }, [records, fields, productCatalog])
 
   const fieldsRowSubtitle = useMemo(
     () => `${sorted.length} 个字段 · 支持自定义`,
@@ -788,6 +803,17 @@ export function SettingsPage() {
     )
   }
 
+  if (panel === 'voiceLexicon') {
+    return (
+      <VoiceLexiconSettingsScreen
+        records={records}
+        fields={fields}
+        productCatalog={productCatalog}
+        onBack={() => setPanel('main')}
+      />
+    )
+  }
+
   if (panel === 'catalog') {
     return (
       <div className={SETTINGS_SHELL_BG}>
@@ -838,9 +864,16 @@ export function SettingsPage() {
                     key={row.id}
                     className="flex flex-wrap items-center gap-2 rounded-xl border border-kj-border bg-kj-raised px-3 py-2 text-sm"
                   >
-                    <span className="min-w-0 flex-1 truncate font-medium text-kj-primary">
-                      {row.name}
-                    </span>
+                    <div className="min-w-0 flex-1">
+                      <span className="block truncate font-medium text-kj-primary">
+                        {row.name}
+                      </span>
+                      {(row.aliases?.length ?? 0) > 0 ? (
+                        <span className="mt-0.5 block truncate text-[10px] text-amber-800/90 dark:text-amber-200/80">
+                          别名：{row.aliases!.join('、')}
+                        </span>
+                      ) : null}
+                    </div>
                     <label className="flex w-[4.5rem] shrink-0 items-center gap-1 text-xs text-kj-secondary">
                       <span className="shrink-0">单位</span>
                       <input
@@ -970,11 +1003,17 @@ export function SettingsPage() {
               onClick={() => setPanel('fields')}
             />
             <SettingsNavRowButton
-              last
               icon={<IconBox className="h-[18px] w-[18px]" />}
               title="商品管理"
               subtitle={catalogRowSubtitle}
               onClick={() => setPanel('catalog')}
+            />
+            <SettingsNavRowButton
+              last
+              icon={<IconMic className="h-[18px] w-[18px]" />}
+              title="语音热词与别名"
+              subtitle={voiceLexiconSubtitle}
+              onClick={() => setPanel('voiceLexicon')}
             />
           </SettingsInsetList>
         </section>

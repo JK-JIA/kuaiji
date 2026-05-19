@@ -1,18 +1,13 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useHoldVolcTranscript } from '../hooks/useHoldVolcTranscript'
 import { useAuth } from '../context/AuthContext'
-import type { DoubaoParseResult, DoubaoProductLine } from '../utils/doubaoParser'
-import { isDoubaoConfigured, parseWithDoubao } from '../utils/doubaoParser'
-import {
-  applyVoiceParsedToDraft,
-  createEmptyLineForm,
-  emptyLedgerFieldValues,
-  getLedgerFormLayout,
-  type LedgerLineForm,
-} from '../utils/ledgerRecordDraft'
+import type { DoubaoProductLine } from '../utils/doubaoParser'
+import { isDoubaoConfigured } from '../utils/doubaoParser'
+import type { LedgerLineForm } from '../utils/ledgerRecordDraft'
 import { messageIfPremiumFeatureBlocked } from '../utils/premiumGate'
-import { applyVoiceHistoryFuzzyMatch } from '../utils/voiceHistoryFuzzy'
+import { runVoiceParsePipeline } from '../utils/voiceParsePipeline'
 import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
+import { useLedger } from '../context/LedgerContext'
 
 function lineFormsToDoubaoLines(lines: LedgerLineForm[]): DoubaoProductLine[] {
   return lines
@@ -47,6 +42,10 @@ export function VoiceInputSection({
   onFillFirstLine,
 }: Props) {
   const { apiBase, token, membershipActive } = useAuth()
+  const {
+    voiceProductCorrections,
+    mergeVoiceCatalogAliases,
+  } = useLedger()
   const premiumBlocked = useMemo(
     () =>
       messageIfPremiumFeatureBlocked({
@@ -99,40 +98,26 @@ export function VoiceInputSection({
     setBusy(true)
     setHint(null)
     try {
-      const r: DoubaoParseResult = await parseWithDoubao(text, fields, {
+      const pipeline = await runVoiceParsePipeline({
+        asrText: text,
+        asrHotwords: asrHotwords ?? [],
+        fields,
+        records,
+        productCatalog,
+        productCorrections: voiceProductCorrections,
         apiBase,
         token,
-        productCatalog: productCatalog.map((p) => p.name),
       })
-      if (!r.success || !r.data) {
-        setHint(r.error ?? '解析失败')
+      if (!pipeline.success) {
+        setHint(pipeline.error ?? '解析失败')
         return
       }
-      const layout = getLedgerFormLayout(fields)
-      const emptyVals = emptyLedgerFieldValues(layout.sortedFields)
-      const emptyLines = [createEmptyLineForm()]
-      let { values, lines } = applyVoiceParsedToDraft(
-        layout,
-        emptyVals,
-        emptyLines,
-        r.data,
-        r.productLines,
-      )
-      const fuzzy = applyVoiceHistoryFuzzyMatch({
-        layout,
-        values,
-        lines,
-        records,
-        fields,
-        productCatalog,
-      })
-      const overlay: Record<string, string> = {}
-      for (const k of Object.keys(r.data)) {
-        if (fuzzy.values[k] !== undefined) overlay[k] = fuzzy.values[k]
+      onApplyParsed(pipeline.values, lineFormsToDoubaoLines(pipeline.lines))
+      if (pipeline.catalogWithAliases) {
+        void mergeVoiceCatalogAliases(pipeline.catalogWithAliases)
       }
-      onApplyParsed(overlay, lineFormsToDoubaoLines(fuzzy.lines))
-      if (fuzzy.needConfirm) {
-        setHint(fuzzy.confirmHint ?? '请核对购买方与商品后再保存')
+      if (pipeline.needConfirm) {
+        setHint(pipeline.confirmHint ?? '请核对购买方与商品后再保存')
       }
     } finally {
       setBusy(false)
@@ -142,6 +127,9 @@ export function VoiceInputSection({
     fields,
     records,
     productCatalog,
+    asrHotwords,
+    voiceProductCorrections,
+    mergeVoiceCatalogAliases,
     onApplyParsed,
     onFillFirstLine,
     apiBase,

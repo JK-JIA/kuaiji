@@ -58,4 +58,9 @@ export interface ProductCatalogEntry {
   /** 如 斤、包、箱 */
   unit: string
   source: 'manual' | 'auto'
+  /**
+   * 读音/错别字/口语别名（系统静默维护，不在设置页展示）
+   * 用于 ASR 热词、AI 解析与 fuzzy 对齐
+   */
+  aliases?: string[]
 }

@@ -1,6 +1,10 @@
 import { pinyin } from 'pinyin-pro'
 import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
 import type { LedgerFormLayout, LedgerLineForm } from './ledgerRecordDraft'
+import {
+  resolveProductViaAlias,
+  shouldAutoLearnAlias,
+} from './productAliasHelpers'
 import { getPlateValue } from './recordHelpers'
 
 /** 低于此相似度且已有足够历史样本时，要求用户进表单确认 */
@@ -48,7 +52,31 @@ function levenshtein(a: string, b: string): number {
   return dp[n]!
 }
 
-function fuzzyScore(a: string, b: string): number {
+/** 判断 token 是否可当作 canonical 的别名（读音相近或仅一字之差） */
+export function scoreAliasLearnPotential(
+  aliasCandidate: string,
+  canonicalName: string,
+): number {
+  const a = normalizeToken(aliasCandidate)
+  const c = normalizeToken(canonicalName)
+  if (!a || !c || a === c) return 0
+  const cache = new Map<string, PinyinSig | null>()
+  const { best, score, ambiguous } = bestPinyinLexiconMatch(
+    aliasCandidate,
+    [canonicalName],
+    cache,
+  )
+  if (!ambiguous && best === canonicalName && score >= PY_MIN_REPLACE_SCORE) {
+    return score
+  }
+  const ch = fuzzyScore(aliasCandidate, canonicalName)
+  if (ch >= 0.45 && ch < 0.985 && aliasCandidate.length === canonicalName.length) {
+    return 0.95
+  }
+  return 0
+}
+
+export function fuzzyScore(a: string, b: string): number {
   const A = normalizeToken(a)
   const B = normalizeToken(b)
   if (!A || !B) return 0
@@ -363,11 +391,32 @@ function bestPinyinLexiconMatch(
   }
 }
 
+export type VoiceFuzzyProductStep = {
+  lineIndex: number
+  stage:
+    | 'alias'
+    | 'catalogExact'
+    | 'charFuzzy'
+    | 'pinyin'
+  raw: string
+  result: string
+  score?: number
+}
+
+export type VoiceAliasAttachCandidate = {
+  canonical: string
+  alias: string
+  pinyinScore?: number
+}
+
 export type VoiceHistoryFuzzyResult = {
   values: Record<string, string>
   lines: LedgerLineForm[]
   needConfirm: boolean
   confirmHint?: string
+  productSteps?: VoiceFuzzyProductStep[]
+  /** fuzzy 后建议静默写入商品 aliases */
+  aliasAttachCandidates?: VoiceAliasAttachCandidate[]
 }
 
 /**
@@ -404,7 +453,13 @@ export function applyVoiceHistoryFuzzyMatch(input: {
   for (const e of productCatalog) {
     const k = normalizeToken(e.name)
     if (k && !catalogByNorm.has(k)) catalogByNorm.set(k, e)
+    for (const a of e.aliases ?? []) {
+      const ak = normalizeToken(a)
+      if (ak && !catalogByNorm.has(ak)) catalogByNorm.set(ak, e)
+    }
   }
+  const productSteps: VoiceFuzzyProductStep[] = []
+  const aliasAttachCandidates: VoiceAliasAttachCandidate[] = []
   const pinyinSigCache = new Map<string, PinyinSig | null>()
   const frequentBuyers = topFrequentBuyerNames(
     records,
@@ -414,6 +469,18 @@ export function applyVoiceHistoryFuzzyMatch(input: {
 
   let needConfirm = false
   const hints: string[] = []
+  /** 按行记录商品相关提示；拼音高置信纠正后会清除该行，避免误报「需核对」 */
+  const productHintsByLine = new Map<number, string[]>()
+
+  const addProductHint = (lineIndex: number, msg: string) => {
+    const arr = productHintsByLine.get(lineIndex) ?? []
+    arr.push(msg)
+    productHintsByLine.set(lineIndex, arr)
+  }
+
+  const clearProductHintsForLine = (lineIndex: number) => {
+    productHintsByLine.delete(lineIndex)
+  }
 
   const nextValues = { ...values }
   const nextLines = lines.map((l) => ({ ...l }))
@@ -474,11 +541,32 @@ export function applyVoiceHistoryFuzzyMatch(input: {
     for (let i = 0; i < nextLines.length; i++) {
       const raw = nextLines[i]!.product.trim()
       if (!raw) continue
+      const viaAlias = resolveProductViaAlias(raw, productCatalog)
+      if (viaAlias && normalizeToken(viaAlias) !== normalizeToken(raw)) {
+        nextLines[i]!.product = viaAlias
+        if (i === 0) nextValues[prodId] = viaAlias
+        skipProductFuzzyPinyin.add(i)
+        productSteps.push({
+          lineIndex: i,
+          stage: 'alias',
+          raw,
+          result: viaAlias,
+        })
+        continue
+      }
       const hit = catalogByNorm.get(normalizeToken(raw))
       if (hit) {
         nextLines[i]!.product = hit.name
         if (i === 0) nextValues[prodId] = hit.name
         skipProductFuzzyPinyin.add(i)
+        if (normalizeToken(hit.name) !== normalizeToken(raw)) {
+          productSteps.push({
+            lineIndex: i,
+            stage: 'catalogExact',
+            raw,
+            result: hit.name,
+          })
+        }
       }
     }
 
@@ -492,20 +580,36 @@ export function applyVoiceHistoryFuzzyMatch(input: {
         preferredCatalogNorms,
       )
       if (ambiguous) {
-        needConfirm = true
-        hints.push(`第 ${i + 1} 行商品识别存在多个相近名称，请核对`)
+        addProductHint(
+          i,
+          `第 ${i + 1} 行商品识别存在多个相近名称，请核对`,
+        )
       }
       if (productsMerged.length >= MIN_DISTINCT_PRODUCTS) {
         if (score >= HIGH_REPLACE && best && best !== raw && !ambiguous) {
           nextLines[i]!.product = best
           if (i === 0) nextValues[prodId] = best
+          productSteps.push({
+            lineIndex: i,
+            stage: 'charFuzzy',
+            raw,
+            result: best,
+            score,
+          })
+          if (shouldAutoLearnAlias(raw, best)) {
+            aliasAttachCandidates.push({ canonical: best, alias: raw })
+          }
           if (score < REPLACE_CONFIRM_BELOW) {
-            needConfirm = true
-            hints.push(`第 ${i + 1} 行商品已按账本用语修正，请确认`)
+            addProductHint(
+              i,
+              `第 ${i + 1} 行商品已按账本用语修正，请确认`,
+            )
           }
         } else if (score < LOW_CONFIDENCE) {
-          needConfirm = true
-          hints.push(`第 ${i + 1} 行商品与账本常用名差异较大，请核对`)
+          addProductHint(
+            i,
+            `第 ${i + 1} 行商品与账本常用名差异较大，请核对`,
+          )
         }
       } else if (
         best &&
@@ -515,9 +619,21 @@ export function applyVoiceHistoryFuzzyMatch(input: {
       ) {
         nextLines[i]!.product = best
         if (i === 0) nextValues[prodId] = best
+        productSteps.push({
+          lineIndex: i,
+          stage: 'charFuzzy',
+          raw,
+          result: best,
+          score,
+        })
+        if (shouldAutoLearnAlias(raw, best)) {
+          aliasAttachCandidates.push({ canonical: best, alias: raw })
+        }
         if (score < REPLACE_CONFIRM_BELOW) {
-          needConfirm = true
-          hints.push(`第 ${i + 1} 行商品已按账本用语修正，请确认`)
+          addProductHint(
+            i,
+            `第 ${i + 1} 行商品已按账本用语修正，请确认`,
+          )
         }
       }
     }
@@ -564,8 +680,8 @@ export function applyVoiceHistoryFuzzyMatch(input: {
         pinyinSigCache,
       )
       if (ambiguous) {
-        needConfirm = true
-        hints.push(
+        addProductHint(
+          i,
           `第 ${i + 1} 行商品在历史账单中有多个读音相同的名称，请核对`,
         )
         continue
@@ -577,13 +693,36 @@ export function applyVoiceHistoryFuzzyMatch(input: {
       ) {
         nextLines[i]!.product = best
         if (i === 0) nextValues[prodId] = best
-        hints.push(`第 ${i + 1} 行商品已按历史账单读音相近用语修正`)
-        if (score < 0.999) {
-          needConfirm = true
-          hints.push(`请确认第 ${i + 1} 行商品名称`)
+        productSteps.push({
+          lineIndex: i,
+          stage: 'pinyin',
+          raw,
+          result: best,
+          score,
+        })
+        aliasAttachCandidates.push({
+          canonical: best,
+          alias: raw,
+          pinyinScore: score,
+        })
+        if (score >= 0.999) {
+          /** 读音完全一致（如 鼹鼠→烟薯），清除汉字层误报的「需核对」 */
+          clearProductHintsForLine(i)
+        } else {
+          addProductHint(
+            i,
+            `第 ${i + 1} 行商品已按历史账单读音相近用语修正，请确认`,
+          )
         }
       }
     }
+  }
+
+  for (const lineHints of productHintsByLine.values()) {
+    hints.push(...lineHints)
+  }
+  if (productHintsByLine.size > 0) {
+    needConfirm = true
   }
 
   const confirmHint =
@@ -594,5 +733,8 @@ export function applyVoiceHistoryFuzzyMatch(input: {
     lines: nextLines,
     needConfirm,
     confirmHint,
+    productSteps,
+    aliasAttachCandidates:
+      aliasAttachCandidates.length > 0 ? aliasAttachCandidates : undefined,
   }
 }

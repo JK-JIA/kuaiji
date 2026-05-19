@@ -401,7 +401,7 @@ function normalizeProductCatalogForPrompt(productCatalog?: string[]): string[] {
   const seen = new Set<string>()
   const out: string[] = []
   for (const raw of productCatalog ?? []) {
-    const t = raw.normalize('NFKC').trim()
+    const t = raw.normalize('NFKC').trim().slice(0, 120)
     if (!t || seen.has(t)) continue
     seen.add(t)
     out.push(t)
@@ -410,10 +410,23 @@ function normalizeProductCatalogForPrompt(productCatalog?: string[]): string[] {
   return out
 }
 
+function normalizeAiProductField(raw: string): string {
+  const t = raw.normalize('NFKC').trim()
+  if (!t) return t
+  const wrapped = t.match(/^(.+?)\s*[（(]\s*.+\s*[）)]\s*$/)
+  if (wrapped) return wrapped[1]!.trim()
+  const idx = t.search(/[（(]/)
+  if (idx > 0) return t.slice(0, idx).trim()
+  return t
+}
+
 function buildVoiceParsePrompt(
   text: string,
   fields: VoiceFieldMeta[],
-  productCatalog?: string[],
+  catalogOpts?: {
+    productCatalog?: string[]
+    productCatalogPromptSection?: string
+  },
 ): string {
   const fieldDescriptions = fields
     .filter(
@@ -429,10 +442,16 @@ function buildVoiceParsePrompt(
     fields.find((f) => f.key === 'amount')?.name?.trim() || '金额'
   const buyerLabel =
     fields.find((f) => f.key === 'plate')?.name?.trim() || '购买方'
-  const productCandidates = normalizeProductCatalogForPrompt(productCatalog)
-  const productCatalogBlock = productCandidates.length
-    ? `\n【候选商品列表】\n以下是当前用户维护的商品列表。商品字段必须优先从这些候选商品中选择规范名称：\n${productCandidates.join('、')}\n- 如果用户原话或识别文本中的商品名与候选商品读音相近、字形相近、简称相近或包含关系明显，请输出候选商品中的规范名称。\n- 不要编造候选列表外的商品名；只有完全无法对应时，才保留用户原话中的商品名称。\n`
-    : ''
+  const productCatalogBlock =
+    catalogOpts?.productCatalogPromptSection?.trim() ||
+    (() => {
+      const productCandidates = normalizeProductCatalogForPrompt(
+        catalogOpts?.productCatalog,
+      )
+      return productCandidates.length
+        ? `\n【候选商品】商品字段只能填下列规范名之一：\n${productCandidates.join('、')}\n`
+        : ''
+    })()
 
   return `你是一个批发记账助手，从用户口语中提取结构化信息，输出严格 JSON。
 
@@ -529,7 +548,9 @@ function mapModelContentToResult(
               ? normalizeMoneyDigits(lineAmountRaw)
               : computed || undefined
           return {
-            product: String(o['商品'] ?? o['名称'] ?? '').trim(),
+            product: normalizeAiProductField(
+              String(o['商品'] ?? o['名称'] ?? '').trim(),
+            ),
             quantity: qtyStr,
             unitPrice: unitPriceRaw || undefined,
             lineAmount: lineAmountFinal,
@@ -540,7 +561,9 @@ function mapModelContentToResult(
       .filter((r) => r.product)
   }
 
-  const flatProduct = String(parsed['商品'] ?? '').trim()
+  const flatProduct = normalizeAiProductField(
+    String(parsed['商品'] ?? '').trim(),
+  )
   const flatQty = String(parsed['数量'] ?? '').trim()
 
   if (!productLines || productLines.length === 0) {
@@ -602,7 +625,10 @@ function mapModelContentToResult(
 export async function parseVoiceOnServer(
   text: string,
   fields: VoiceFieldMeta[],
-  productCatalog?: string[],
+  catalogOpts?: {
+    productCatalog?: string[]
+    productCatalogPromptSection?: string
+  },
 ): Promise<VoiceParseResult> {
   if (!doubaoEnvReady()) {
     return {
@@ -612,7 +638,7 @@ export async function parseVoiceOnServer(
     }
   }
 
-  const prompt = buildVoiceParsePrompt(text.trim(), fields, productCatalog)
+  const prompt = buildVoiceParsePrompt(text.trim(), fields, catalogOpts)
   const api = await callDoubaoModel(prompt, DOUBAO_MODEL)
   if (!api.ok) {
     console.error(

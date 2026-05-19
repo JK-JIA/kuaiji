@@ -6,7 +6,7 @@ const MAX_RECORDS_SCAN = 250
 
 /**
  * 从近期账单收集购买方、商品名，供语音识别热词（经服务端合并与截断）。
- * 目录商品名优先加入。
+ * 目录**规范商品名**优先；**勿把别名写入热词**（别名是误识别写法，只用于解析纠正）。
  */
 export function collectAsrHotwordsFromLedger(
   records: LedgerRecord[],

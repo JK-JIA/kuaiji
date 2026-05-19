@@ -2,6 +2,8 @@ import Dexie, { type Table } from 'dexie'
 import { getDefaultFieldDefs } from '../constants/defaultLedgerFields'
 import { mergeMissingDefaultFields } from '../constants/mergeBuiltinFields'
 import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
+import type { VoiceProductCorrection } from '../utils/voiceProductCorrections'
+import { parseVoiceProductCorrections } from '../utils/voiceProductCorrections'
 import { DEFAULT_FIELD_KEYS } from '../types'
 import { normalizeCatalogEntry } from '../utils/productCatalogHelpers'
 
@@ -10,11 +12,17 @@ export type ProductCatalogSettingsRow = {
   suppressedNormalizedNames: string[]
 }
 
+export type VoiceCorrectionsSettingsRow = {
+  id: 'singleton'
+  corrections: VoiceProductCorrection[]
+}
+
 export class LedgerDatabase extends Dexie {
   fields!: Table<FieldDef>
   records!: Table<LedgerRecord>
   productCatalog!: Table<ProductCatalogEntry>
   productCatalogSettings!: Table<ProductCatalogSettingsRow>
+  voiceCorrectionsSettings!: Table<VoiceCorrectionsSettingsRow>
 
   constructor() {
     super('personal_ledger_db')
@@ -53,6 +61,13 @@ export class LedgerDatabase extends Dexie {
       records: '&id, date, createdAt',
       productCatalog: '&id, name',
       productCatalogSettings: '&id',
+    })
+    this.version(5).stores({
+      fields: '&id, order',
+      records: '&id, date, createdAt',
+      productCatalog: '&id, name',
+      productCatalogSettings: '&id',
+      voiceCorrectionsSettings: '&id',
     })
   }
 }
@@ -133,5 +148,21 @@ export async function replaceProductCatalogInDb(
       id: CATALOG_SETTINGS_ID,
       suppressedNormalizedNames: [...suppressedNormalizedNames],
     })
+  })
+}
+
+export async function getVoiceProductCorrectionsFromDb(): Promise<
+  VoiceProductCorrection[]
+> {
+  const row = await db.voiceCorrectionsSettings.get(CATALOG_SETTINGS_ID)
+  return parseVoiceProductCorrections(row?.corrections ?? [])
+}
+
+export async function replaceVoiceProductCorrectionsInDb(
+  corrections: VoiceProductCorrection[],
+): Promise<void> {
+  await db.voiceCorrectionsSettings.put({
+    id: CATALOG_SETTINGS_ID,
+    corrections: [...corrections],
   })
 }

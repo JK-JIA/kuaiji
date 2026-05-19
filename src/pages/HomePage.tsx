@@ -32,16 +32,13 @@ import {
 } from '../utils/statsDrillDown'
 import { recordMatchesHomeSearch } from '../utils/homeRecordSearch'
 import { collectAsrHotwordsFromLedger } from '../utils/asrHotwordsFromLedger'
-import { isDoubaoConfigured, parseWithDoubao } from '../utils/doubaoParser'
-import { applyVoiceHistoryFuzzyMatch } from '../utils/voiceHistoryFuzzy'
+import { isDoubaoConfigured } from '../utils/doubaoParser'
 import {
-  applyVoiceParsedToDraft,
   buildLedgerRecordForSave,
-  createEmptyLineForm,
-  emptyLedgerFieldValues,
   getLedgerFormLayout,
   validateRecordForm,
 } from '../utils/ledgerRecordDraft'
+import { runVoiceParsePipeline } from '../utils/voiceParsePipeline'
 import { messageIfPremiumFeatureBlocked } from '../utils/premiumGate'
 import { findFieldIdByName, sumAmount } from '../utils/stats'
 import type { FieldDef, LedgerRecord, ReconcilePayload } from '../types'
@@ -56,8 +53,17 @@ export function HomePage() {
     token,
     membershipActive,
   } = useAuth()
-  const { ready, fields, records, saveRecord, removeRecord, setRecordPayment, productCatalog } =
-    useLedger()
+  const {
+    ready,
+    fields,
+    records,
+    saveRecord,
+    removeRecord,
+    setRecordPayment,
+    productCatalog,
+    voiceProductCorrections,
+    mergeVoiceCatalogAliases,
+  } = useLedger()
   const [modalOpen, setModalOpen] = useState(false)
   const [editingRecord, setEditingRecord] = useState<LedgerRecord | null>(null)
   const [reconcileId, setReconcileId] = useState<string | null>(null)
@@ -213,36 +219,27 @@ export function HomePage() {
             },
       )
       try {
-        const r = await parseWithDoubao(text, ledgerLayout.sortedFields, {
+        const pipeline = await runVoiceParsePipeline({
+          asrText: text,
+          asrHotwords: voiceAsrHotwords,
+          fields: ledgerLayout.sortedFields,
+          records,
+          productCatalog,
+          productCorrections: voiceProductCorrections,
           apiBase,
           token,
-          productCatalog: productCatalog.map((p) => p.name),
         })
-        if (!r.success || !r.data) {
-          setVoiceBanner(`${r.error ?? '解析失败'}\n\n请重新语音录入`)
+        if (!pipeline.success) {
+          setVoiceBanner(`${pipeline.error ?? '解析失败'}\n\n请重新语音录入`)
           return
         }
 
-        const emptyVals = emptyLedgerFieldValues(ledgerLayout.sortedFields)
-        const emptyLines = [createEmptyLineForm()]
-        let { values, lines } = applyVoiceParsedToDraft(
-          ledgerLayout,
-          emptyVals,
-          emptyLines,
-          r.data,
-          r.productLines,
-        )
+        if (pipeline.catalogWithAliases) {
+          await mergeVoiceCatalogAliases(pipeline.catalogWithAliases)
+        }
 
-        const fuzzy = applyVoiceHistoryFuzzyMatch({
-          layout: ledgerLayout,
-          values,
-          lines,
-          records,
-          fields,
-          productCatalog,
-        })
-        values = fuzzy.values
-        lines = fuzzy.lines
+        let { values, lines } = pipeline
+        const fuzzy = pipeline
 
         const err = validateRecordForm(ledgerLayout, {
           values,
@@ -318,6 +315,9 @@ export function HomePage() {
       records,
       fields,
       productCatalog,
+      voiceProductCorrections,
+      voiceAsrHotwords,
+      mergeVoiceCatalogAliases,
     ],
   )
 
@@ -1151,6 +1151,7 @@ export function HomePage() {
           window.setTimeout(() => scrollToDate(jumpDate), 120)
         }}
       />
+
     </div>
   )
 }

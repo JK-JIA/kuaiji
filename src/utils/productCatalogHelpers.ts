@@ -1,4 +1,8 @@
 import type { ProductCatalogEntry } from '../types'
+import {
+  normalizeAliasList,
+  sanitizeAliasesForProduct,
+} from './productAliasHelpers'
 import { normalizeToken } from './voiceHistoryFuzzy'
 
 /**
@@ -15,7 +19,17 @@ export function normalizeCatalogEntry(
   const inferredAuto =
     raw.source === 'auto' || (typeof id === 'string' && id.startsWith('auto_'))
   const source: 'manual' | 'auto' = inferredAuto ? 'auto' : 'manual'
-  return { id, name, unit, source }
+  const aliases = sanitizeAliasesForProduct(
+    name,
+    normalizeAliasList((raw as ProductCatalogEntry).aliases, name),
+  )
+  return {
+    id,
+    name,
+    unit,
+    source,
+    ...(aliases.length > 0 ? { aliases } : {}),
+  }
 }
 
 export function parseProductCatalogEntries(raw: unknown): ProductCatalogEntry[] {

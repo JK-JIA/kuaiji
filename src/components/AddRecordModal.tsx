@@ -30,6 +30,10 @@ import {
   type LedgerLineForm,
 } from '../utils/ledgerRecordDraft'
 import { collectAsrHotwordsFromLedger } from '../utils/asrHotwordsFromLedger'
+import {
+  clearLastVoicePipelineProducts,
+  getLastVoicePipelineProducts,
+} from '../utils/voiceParseDebug'
 import { CalendarPickerModal } from './CalendarPickerModal'
 import { VoiceInputSection } from './VoiceInputSection'
 
@@ -89,7 +93,7 @@ export function AddRecordModal({
     [qtyField],
   )
 
-  const { records, productCatalog } = useLedger()
+  const { records, productCatalog, learnVoiceProductFromSave } = useLedger()
 
   const [recordDate, setRecordDate] = useState(() =>
     format(new Date(), 'yyyy-MM-dd'),
@@ -195,8 +199,20 @@ export function AddRecordModal({
     if (open) setFormError(null)
   }, [open])
 
+  /** 防止保存别名目录 refresh 时因 sortedFields 引用变化而清空已填入的表单 */
+  const modalSessionKeyRef = useRef<string | null>(null)
+
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      modalSessionKeyRef.current = null
+      return
+    }
+    const sessionKey = recordToEdit?.id ?? `new:${voiceFormPrefillKey}`
+    if (modalSessionKeyRef.current === sessionKey) {
+      return
+    }
+    modalSessionKeyRef.current = sessionKey
+
     if (recordToEdit && prodId && qtyId) {
       lastVoicePrefillKeyRef.current = 0
       setRecordDate(recordToEdit.date)
@@ -287,7 +303,6 @@ export function AddRecordModal({
     }
   }, [
     open,
-    sortedFields,
     recordToEdit?.id,
     prodId,
     qtyId,
@@ -295,6 +310,8 @@ export function AddRecordModal({
     canonicalAmountId,
     voiceFormPrefill,
     voiceFormPrefillKey,
+    sortedFields,
+    recordToEdit,
   ])
 
   const validate = (): string | null =>
@@ -324,6 +341,12 @@ export function AddRecordModal({
         recordToEdit,
         liveRecord: live,
       })
+      const beforeVoice = getLastVoicePipelineProducts()
+      const afterProducts = lines.map((l) => l.product.trim()).filter(Boolean)
+      if (beforeVoice.length > 0 && afterProducts.length > 0) {
+        await learnVoiceProductFromSave(beforeVoice, afterProducts)
+      }
+      clearLastVoicePipelineProducts()
       await onSave(rec)
       onClose()
     } catch (saveErr) {
@@ -420,6 +443,7 @@ export function AddRecordModal({
               if (productLines?.length && prodId && qtyId) {
                 setLines(mapDoubaoProductLinesToLineForms(productLines))
               }
+              setFormError(null)
             }}
             onFillFirstLine={(product, quantity) => {
               setLines((prev) => applyVoiceFillFirstLine(prev, product, quantity))
