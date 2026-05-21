@@ -83,7 +83,8 @@ export function buildXfyunFirstFrame(opts: XfyunFirstFrameOptions): string {
     eos: 1800,
     ptt: 1,
     nunum: 1,
-    ltc: 0,
+    /** 1=不筛选中英文 2=仅中文 3=仅英文（文档取值 1|2|3，不可为 0） */
+    ltc: 1,
     vinfo: 1,
   }
   if (opts.enableDynamicCorrection !== false) iat.dwa = 'wpgs'
