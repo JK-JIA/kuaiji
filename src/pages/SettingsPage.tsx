@@ -30,7 +30,9 @@ import { collectAsrHotwordsFromLedger } from '../utils/asrHotwordsFromLedger'
 import { normalizeToken } from '../utils/voiceHistoryFuzzy'
 import { SETTINGS_CARD_CLASS } from './settings/SettingsSection'
 import { SettingsAboutYouScreen } from './settings/SettingsAboutYouScreen'
+import { AsrProviderSettingsScreen } from './settings/AsrProviderSettingsScreen'
 import { VoiceLexiconSettingsScreen } from './settings/VoiceLexiconSettingsScreen'
+import { asrProviderLabel, readAsrProvider } from '../utils/asrProvider'
 import { ProBenefitsSheet, ProRedeemSheet } from './settings/ProMembershipSheets'
 import { SettingsProfileCard } from './settings/SettingsProfileCard'
 import {
@@ -347,7 +349,6 @@ function SettingsHomeAccountSection({
                         try {
                           await sendSms(phone)
                           setSmsWaitSec(60)
-                          alert('验证码已发送')
                         } catch (e) {
                           alert(e instanceof Error ? e.message : '发送失败')
                         } finally {
@@ -413,6 +414,7 @@ type SettingsPanel =
   | 'display'
   | 'catalog'
   | 'voiceLexicon'
+  | 'asrProvider'
   | 'fields'
 
 export function SettingsPage() {
@@ -479,6 +481,11 @@ export function SettingsPage() {
     )
     return `热词 ${hotwords.length} 个 · 别名 ${aliasCount} 条`
   }, [records, fields, productCatalog])
+
+  const asrProviderSubtitle = useMemo(
+    () => `当前：${asrProviderLabel(readAsrProvider())}`,
+    [panel],
+  )
 
   const fieldsRowSubtitle = useMemo(
     () => `${sorted.length} 个字段 · 支持自定义`,
@@ -814,6 +821,10 @@ export function SettingsPage() {
     )
   }
 
+  if (panel === 'asrProvider') {
+    return <AsrProviderSettingsScreen onBack={() => setPanel('main')} />
+  }
+
   if (panel === 'catalog') {
     return (
       <div className={SETTINGS_SHELL_BG}>
@@ -1009,11 +1020,17 @@ export function SettingsPage() {
               onClick={() => setPanel('catalog')}
             />
             <SettingsNavRowButton
-              last
               icon={<IconMic className="h-[18px] w-[18px]" />}
               title="语音热词与别名"
               subtitle={voiceLexiconSubtitle}
               onClick={() => setPanel('voiceLexicon')}
+            />
+            <SettingsNavRowButton
+              last
+              icon={<IconMic className="h-[18px] w-[18px]" />}
+              title="语音识别引擎"
+              subtitle={asrProviderSubtitle}
+              onClick={() => setPanel('asrProvider')}
             />
           </SettingsInsetList>
         </section>

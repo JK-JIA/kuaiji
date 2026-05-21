@@ -50,22 +50,29 @@ import {
 import { mergeAutoProductCatalog } from '../utils/productCatalogSync'
 import { useAuth } from './AuthContext'
 
-type LedgerContextValue = {
-  ready: boolean
+type FieldsContextValue = {
   fields: FieldDef[]
+  saveFields: (next: FieldDef[]) => Promise<void>
+}
+
+type RecordsContextValue = {
+  ready: boolean
   records: LedgerRecord[]
-  productCatalog: ProductCatalogEntry[]
-  productCatalogSuppressed: string[]
   refresh: () => Promise<void>
   saveRecord: (rec: LedgerRecord) => Promise<void>
   removeRecord: (id: string) => Promise<void>
   setRecordPayment: (id: string, payload: ReconcilePayload) => Promise<void>
-  saveFields: (next: FieldDef[]) => Promise<void>
+  restoreFullBackup: (fields: FieldDef[], records: LedgerRecord[]) => Promise<void>
+}
+
+type CatalogContextValue = {
+  productCatalog: ProductCatalogEntry[]
+  productCatalogSuppressed: string[]
+  voiceProductCorrections: VoiceProductCorrection[]
   saveProductCatalog: (
     next: ProductCatalogEntry[],
     nextSuppressed: string[],
   ) => Promise<void>
-  voiceProductCorrections: VoiceProductCorrection[]
   /** 用户保存时：对比语音填入与最终商品名，写入纠错表 */
   learnVoiceProductFromSave: (
     beforeProducts: string[],
@@ -75,10 +82,13 @@ type LedgerContextValue = {
   mergeVoiceCatalogAliases: (
     nextCatalog: ProductCatalogEntry[],
   ) => Promise<void>
-  restoreFullBackup: (fields: FieldDef[], records: LedgerRecord[]) => Promise<void>
 }
 
-const LedgerContext = createContext<LedgerContextValue | null>(null)
+type LedgerContextValue = FieldsContextValue & RecordsContextValue & CatalogContextValue
+
+const FieldsContext = createContext<FieldsContextValue | null>(null)
+const RecordsContext = createContext<RecordsContextValue | null>(null)
+const CatalogContext = createContext<CatalogContextValue | null>(null)
 
 function sortRecordsDesc(recs: LedgerRecord[]): LedgerRecord[] {
   return [...recs].sort((a, b) => b.createdAt - a.createdAt)
@@ -547,52 +557,64 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [useRemoteLedger, apiBase, token, refresh, ledgerExtras],
   )
 
-  const value = useMemo(
+  const fieldsValue = useMemo(
+    () => ({ fields, saveFields }),
+    [fields, saveFields],
+  )
+
+  const recordsValue = useMemo(
+    () => ({ ready, records, refresh, saveRecord, removeRecord, setRecordPayment, restoreFullBackup }),
+    [ready, records, refresh, saveRecord, removeRecord, setRecordPayment, restoreFullBackup],
+  )
+
+  const catalogValue = useMemo(
     () => ({
-      ready,
-      fields,
-      records,
       productCatalog,
       productCatalogSuppressed,
       voiceProductCorrections,
-      refresh,
-      saveRecord,
-      removeRecord,
-      setRecordPayment,
-      saveFields,
       saveProductCatalog,
       learnVoiceProductFromSave,
       mergeVoiceCatalogAliases,
-      restoreFullBackup,
     }),
     [
-      ready,
-      fields,
-      records,
       productCatalog,
       productCatalogSuppressed,
       voiceProductCorrections,
-      refresh,
-      saveRecord,
-      removeRecord,
-      setRecordPayment,
-      saveFields,
       saveProductCatalog,
       learnVoiceProductFromSave,
       mergeVoiceCatalogAliases,
-      restoreFullBackup,
     ],
   )
 
   return (
-    <LedgerContext.Provider value={value}>{children}</LedgerContext.Provider>
+    <FieldsContext.Provider value={fieldsValue}>
+      <RecordsContext.Provider value={recordsValue}>
+        <CatalogContext.Provider value={catalogValue}>
+          {children}
+        </CatalogContext.Provider>
+      </RecordsContext.Provider>
+    </FieldsContext.Provider>
   )
 }
 
-export function useLedger(): LedgerContextValue {
-  const ctx = useContext(LedgerContext)
-  if (!ctx) {
-    throw new Error('useLedger must be used within LedgerProvider')
-  }
+export function useFields(): FieldsContextValue {
+  const ctx = useContext(FieldsContext)
+  if (!ctx) throw new Error('useFields must be used within LedgerProvider')
   return ctx
+}
+
+export function useRecords(): RecordsContextValue {
+  const ctx = useContext(RecordsContext)
+  if (!ctx) throw new Error('useRecords must be used within LedgerProvider')
+  return ctx
+}
+
+export function useCatalog(): CatalogContextValue {
+  const ctx = useContext(CatalogContext)
+  if (!ctx) throw new Error('useCatalog must be used within LedgerProvider')
+  return ctx
+}
+
+export function useLedger(): LedgerContextValue {
+  return { ...useFields(), ...useRecords(), ...useCatalog() }
 }

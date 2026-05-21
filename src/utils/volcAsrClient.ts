@@ -1,4 +1,5 @@
 import { getAsrWebSocketUrl } from '../api/ledgerClient'
+import type { AsrProviderId } from './asrProvider'
 import { APP_VERSION } from '../version'
 import { asrDiagLog } from './asrDiagLog'
 import { formatAsrUserFacingError } from './asrUserFacingError'
@@ -47,9 +48,14 @@ function micAccessErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : '无法访问麦克风'
 }
 
-async function runPreflight(apiBase: string, wsUrl: string, tokenLen: number) {
+async function runPreflight(
+  apiBase: string,
+  wsUrl: string,
+  tokenLen: number,
+  provider: AsrProviderId,
+) {
   const base = apiBase.replace(/\/$/, '')
-  asrDiagLog(`—— 开始诊断 APP_VERSION=${APP_VERSION} ——`)
+  asrDiagLog(`—— 开始诊断 APP_VERSION=${APP_VERSION} provider=${provider} ——`)
   try {
     asrDiagLog(
       `location.href=${typeof globalThis.location !== 'undefined' ? globalThis.location.href : '(none)'}`,
@@ -87,7 +93,7 @@ async function runPreflight(apiBase: string, wsUrl: string, tokenLen: number) {
 }
 
 /**
- * 通过自建后端 WebSocket 代理连接火山流式 ASR。
+ * 通过自建后端 WebSocket 代理连接流式 ASR（豆包火山 / 讯飞方言等）。
  * 鉴权在连接后首条 JSON 完成，避免 JWT 放在 URL 触发网关 400。
  */
 export function startVolcAsrSession(
@@ -98,13 +104,14 @@ export function startVolcAsrSession(
     onError: (message: string) => void
     onEnded?: () => void
   },
-  options?: { hotwords?: string[] },
+  options?: { hotwords?: string[]; provider?: AsrProviderId },
 ): Promise<VolcAsrSession> {
-  const url = getAsrWebSocketUrl(apiBase)
+  const provider = options?.provider ?? 'volc'
+  const url = getAsrWebSocketUrl(apiBase, provider)
 
   return new Promise((resolve, reject) => {
     void (async () => {
-      await runPreflight(apiBase, url, token.length)
+      await runPreflight(apiBase, url, token.length, provider)
 
       const ws = new WebSocket(url)
       ws.binaryType = 'arraybuffer'

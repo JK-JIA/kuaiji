@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { messageIfPremiumFeatureBlocked } from '../utils/premiumGate'
 import { formatAsrUserFacingError } from '../utils/asrUserFacingError'
+import { readAsrProvider } from '../utils/asrProvider'
 import { startVolcAsrSession } from '../utils/volcAsrClient'
 
 /** 按住超过此时长后开始录音，避免误触 */
@@ -149,6 +150,7 @@ export function useHoldVolcTranscript({
       setRecording(true)
       try {
         let endedNotified = false
+        const asrProvider = readAsrProvider()
         const session = await startVolcAsrSession(
           apiBase,
           token,
@@ -167,9 +169,12 @@ export function useHoldVolcTranscript({
               onSessionFinalizedRef.current?.(transcriptRef.current)
             },
           },
-          asrHotwordsRef.current.length
-            ? { hotwords: [...asrHotwordsRef.current] }
-            : undefined,
+          {
+            provider: asrProvider,
+            ...(asrHotwordsRef.current.length
+              ? { hotwords: [...asrHotwordsRef.current] }
+              : {}),
+          },
         )
         if (epochAtStart !== holdEpochRef.current) {
           session.stop()

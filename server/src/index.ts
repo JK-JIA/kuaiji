@@ -11,7 +11,11 @@ import {
   sendAliyunSmsVerifyCode,
   verifyAliyunSmsCode,
 } from './aliyunSms.js'
-import { attachAsrWebSocket, volcAsrEnvReady } from './asrStream.js'
+import {
+  attachAsrWebSocket,
+  volcAsrEnvReady,
+  xfyunAsrEnvReady,
+} from './asrStream.js'
 import { doubaoEnvReady, parseVoiceOnServer } from './voiceParse.js'
 
 const prisma = new PrismaClient()
@@ -168,8 +172,12 @@ app.get('/api/asr/health', (_req, res) => {
   res.json({
     ok: true,
     volcAsrEnvReady: volcAsrEnvReady(),
+    xfyunAsrEnvReady: xfyunAsrEnvReady(),
     doubaoEnvReady: doubaoEnvReady(),
-    websocketPath: '/api/asr/stream',
+    websocketPaths: {
+      volc: '/api/asr/stream',
+      xfyun: '/api/asr/xfyun/stream',
+    },
     handshakeNotes:
       'After WS connect, send first text JSON: type auth + JWT token field',
     node: process.version,
@@ -614,6 +622,13 @@ async function bootstrap() {
   } else {
     console.log(
       `[ledger-api] 豆包语音解析已启用，模型=${process.env.DOUBAO_MODEL?.trim() || 'doubao-seed-1-8-251228'}`,
+    )
+  }
+  if (xfyunAsrEnvReady()) {
+    console.log(
+      `[ledger-api] 讯飞方言识别大模型已启用 url=${
+        process.env.XFYUN_ASR_WS_URL?.trim() || 'wss://iat.cn-huabei-1.xf-yun.com/v1'
+      }`,
     )
   }
   await ensureDefaultAdmin()

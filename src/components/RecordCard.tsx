@@ -1,5 +1,6 @@
 import { format } from 'date-fns'
 import { useCallback, useRef, useState } from 'react'
+import ReactDOM from 'react-dom'
 import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
 import { ReceiptModal } from './ReceiptModal'
 import {
@@ -527,8 +528,8 @@ export function RecordCard({
         </div>
       </div>
 
-      {deleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4">
+      {deleteConfirm && ReactDOM.createPortal(
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 px-4">
           <div
             className="w-full max-w-sm rounded-2xl bg-kj-surface p-5 shadow-xl"
             role="dialog"
@@ -564,7 +565,8 @@ export function RecordCard({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       <ReceiptModal

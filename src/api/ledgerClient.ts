@@ -1,6 +1,7 @@
 import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
 import type { VoiceProductCorrection } from '../utils/voiceProductCorrections'
 import type { DoubaoParseResult } from '../types/voiceParse'
+import type { AsrProviderId } from '../utils/asrProvider'
 
 const TOKEN_KEY = 'ledger_auth_token'
 const EMAIL_KEY = 'ledger_auth_email'
@@ -17,11 +18,20 @@ export function getApiBase(): string | undefined {
   return undefined
 }
 
-/** 与账本 API 同源的语音识别 WebSocket（需后端配置火山 ASR 环境变量） */
-export function getAsrWebSocketUrl(base: string): string {
+const ASR_WS_PATH: Record<AsrProviderId, string> = {
+  volc: '/api/asr/stream',
+  xfyun: '/api/asr/xfyun/stream',
+}
+
+/** 与账本 API 同源的语音识别 WebSocket（需后端配置对应 ASR 环境变量） */
+export function getAsrWebSocketUrl(
+  base: string,
+  provider: AsrProviderId = 'volc',
+): string {
   const b = base.replace(/\/$/, '')
-  if (b.startsWith('https://')) return `wss://${b.slice(8)}/api/asr/stream`
-  return `ws://${b.replace(/^http:\/\//, '')}/api/asr/stream`
+  const path = ASR_WS_PATH[provider]
+  if (b.startsWith('https://')) return `wss://${b.slice(8)}${path}`
+  return `ws://${b.replace(/^http:\/\//, '')}${path}`
 }
 
 export function getStoredToken(): string | null {
