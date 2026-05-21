@@ -61,6 +61,7 @@ export function HomePage() {
     removeRecord,
     setRecordPayment,
     productCatalog,
+    asrHotwordsSuppressed,
     voiceProductCorrections,
     mergeVoiceCatalogAliases,
   } = useLedger()
@@ -138,8 +139,9 @@ export function HomePage() {
     () =>
       collectAsrHotwordsFromLedger(records, fields, {
         productCatalog,
+        asrHotwordsSuppressed,
       }),
-    [records, fields, productCatalog],
+    [records, fields, productCatalog, asrHotwordsSuppressed],
   )
 
   const openAddRecordModal = useCallback(() => {

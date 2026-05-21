@@ -93,7 +93,12 @@ export function AddRecordModal({
     [qtyField],
   )
 
-  const { records, productCatalog, learnVoiceProductFromSave } = useLedger()
+  const {
+    records,
+    productCatalog,
+    asrHotwordsSuppressed,
+    learnVoiceProductFromSave,
+  } = useLedger()
 
   const [recordDate, setRecordDate] = useState(() =>
     format(new Date(), 'yyyy-MM-dd'),
@@ -152,8 +157,9 @@ export function AddRecordModal({
     () =>
       collectAsrHotwordsFromLedger(records, fields, {
         productCatalog,
+        asrHotwordsSuppressed,
       }),
-    [records, fields, productCatalog],
+    [records, fields, productCatalog, asrHotwordsSuppressed],
   )
 
   const dateCompactLabel = useMemo(() => {

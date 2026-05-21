@@ -28,6 +28,7 @@ import {
   db,
   deleteRecord,
   ensureDefaultFields,
+  getAsrHotwordsSuppressedFromDb,
   getProductCatalogFromDb,
   getProductCatalogSuppressedFromDb,
   getVoiceProductCorrectionsFromDb,
@@ -37,6 +38,7 @@ import {
   updateFields,
 } from '../db/ledgerDb'
 import {
+  parseAsrHotwordsSuppressed,
   parseProductCatalogEntries,
   parseProductCatalogSuppressed,
 } from '../utils/productCatalogHelpers'
@@ -47,6 +49,7 @@ import {
   parseVoiceProductCorrections,
   type VoiceProductCorrection,
 } from '../utils/voiceProductCorrections'
+import { sanitizeAllCatalogAliases } from '../utils/productAliasHelpers'
 import { mergeAutoProductCatalog } from '../utils/productCatalogSync'
 import { useAuth } from './AuthContext'
 
@@ -68,10 +71,12 @@ type RecordsContextValue = {
 type CatalogContextValue = {
   productCatalog: ProductCatalogEntry[]
   productCatalogSuppressed: string[]
+  asrHotwordsSuppressed: string[]
   voiceProductCorrections: VoiceProductCorrection[]
   saveProductCatalog: (
     next: ProductCatalogEntry[],
     nextSuppressed: string[],
+    nextAsrHotwordsSuppressed: string[],
   ) => Promise<void>
   /** 用户保存时：对比语音填入与最终商品名，写入纠错表 */
   learnVoiceProductFromSave: (
@@ -104,6 +109,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const [productCatalogSuppressed, setProductCatalogSuppressed] = useState<
     string[]
   >([])
+  const [asrHotwordsSuppressed, setAsrHotwordsSuppressed] = useState<string[]>(
+    [],
+  )
   const [voiceProductCorrections, setVoiceProductCorrections] = useState<
     VoiceProductCorrection[]
   >([])
@@ -115,15 +123,22 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
    */
   const lastRemoteCatalogRef = useRef<ProductCatalogEntry[]>([])
   const lastRemoteSuppressedRef = useRef<string[]>([])
+  const lastRemoteAsrHotwordsSuppressedRef = useRef<string[]>([])
   const lastRemoteCorrectionsRef = useRef<VoiceProductCorrection[]>([])
 
   const ledgerExtras = useCallback(
     () => ({
       productCatalog,
       productCatalogSuppressed,
+      asrHotwordsSuppressed,
       voiceProductCorrections,
     }),
-    [productCatalog, productCatalogSuppressed, voiceProductCorrections],
+    [
+      productCatalog,
+      productCatalogSuppressed,
+      asrHotwordsSuppressed,
+      voiceProductCorrections,
+    ],
   )
 
   const loadLocalSnapshot = useCallback(async () => {
@@ -142,6 +157,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
 
     let catalogLocal = await getProductCatalogFromDb()
     let suppressedLocal = await getProductCatalogSuppressedFromDb()
+    const asrHotwordsLocal = await getAsrHotwordsSuppressedFromDb()
     const prodIdLocal = mergedFields.find((x) => x.key === 'product')?.id
     const mergedLocal = mergeAutoProductCatalog({
       records: r,
@@ -150,11 +166,16 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       suppressedNormalizedNames: suppressedLocal,
     })
     if (!catalogsEqual(mergedLocal, catalogLocal)) {
-      await replaceProductCatalogInDb(mergedLocal, suppressedLocal)
+      await replaceProductCatalogInDb(
+        mergedLocal,
+        suppressedLocal,
+        asrHotwordsLocal,
+      )
       catalogLocal = mergedLocal
     }
     setProductCatalog(catalogLocal)
     setProductCatalogSuppressed(suppressedLocal)
+    setAsrHotwordsSuppressed(asrHotwordsLocal)
     const correctionsLocal = await getVoiceProductCorrectionsFromDb()
     setVoiceProductCorrections(correctionsLocal)
     setReady(true)
@@ -167,6 +188,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       const raw = data as Record<string, unknown>
       const hasCatalogKey = 'productCatalog' in raw
       const hasSuppressedKey = 'productCatalogSuppressed' in raw
+      const hasAsrHotwordsKey = 'asrHotwordsSuppressed' in raw
       const hasCorrectionsKey = 'voiceProductCorrections' in raw
 
       let fieldsNext = data.fields as FieldDef[]
@@ -177,12 +199,18 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       let suppressedNext = hasSuppressedKey
         ? parseProductCatalogSuppressed(raw.productCatalogSuppressed)
         : [...lastRemoteSuppressedRef.current]
+      let asrHotwordsNext = hasAsrHotwordsKey
+        ? parseAsrHotwordsSuppressed(raw.asrHotwordsSuppressed)
+        : [...lastRemoteAsrHotwordsSuppressedRef.current]
       let correctionsNext = hasCorrectionsKey
         ? parseVoiceProductCorrections(raw.voiceProductCorrections)
         : [...lastRemoteCorrectionsRef.current]
 
       if (hasCatalogKey) lastRemoteCatalogRef.current = catalogNext
       if (hasSuppressedKey) lastRemoteSuppressedRef.current = suppressedNext
+      if (hasAsrHotwordsKey) {
+        lastRemoteAsrHotwordsSuppressedRef.current = asrHotwordsNext
+      }
       if (hasCorrectionsKey) lastRemoteCorrectionsRef.current = correctionsNext
 
       const persistRemote = async (
@@ -190,6 +218,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         r: LedgerRecord[],
         c: ProductCatalogEntry[],
         s: string[],
+        hw: string[],
         vc: VoiceProductCorrection[],
       ) => {
         return putLedger(apiBase, token, {
@@ -197,6 +226,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           records: r,
           productCatalog: c,
           productCatalogSuppressed: s,
+          asrHotwordsSuppressed: hw,
           voiceProductCorrections: vc,
         })
       }
@@ -208,6 +238,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           recordsNext,
           catalogNext,
           suppressedNext,
+          asrHotwordsNext,
           correctionsNext,
         )
       } else if (!fieldsNext.some((f) => f.key === 'unitPrice')) {
@@ -217,6 +248,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           recordsNext,
           catalogNext,
           suppressedNext,
+          asrHotwordsNext,
           correctionsNext,
         )
       }
@@ -231,6 +263,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           recordsNext,
           catalogNext,
           suppressedNext,
+          asrHotwordsNext,
           correctionsNext,
         )
         fieldsNext = normalized
@@ -253,6 +286,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
             recordsNext,
             mergedCatalog,
             suppressedNext,
+            asrHotwordsNext,
             correctionsNext,
           )
           catalogNext = mergedCatalog
@@ -266,9 +300,11 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       setRecords(recordsNext)
       setProductCatalog(catalogNext)
       setProductCatalogSuppressed(suppressedNext)
+      setAsrHotwordsSuppressed(asrHotwordsNext)
       setVoiceProductCorrections(correctionsNext)
       lastRemoteCatalogRef.current = catalogNext
       lastRemoteSuppressedRef.current = suppressedNext
+      lastRemoteAsrHotwordsSuppressedRef.current = asrHotwordsNext
       lastRemoteCorrectionsRef.current = correctionsNext
       setReady(true)
       return
@@ -285,6 +321,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         setRecords([])
         setProductCatalog([])
         setProductCatalogSuppressed([])
+        setAsrHotwordsSuppressed([])
         setReady(true)
       }
     }
@@ -455,39 +492,69 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   )
 
   const saveProductCatalog = useCallback(
-    async (next: ProductCatalogEntry[], nextSuppressed: string[]) => {
+    async (
+      next: ProductCatalogEntry[],
+      nextSuppressed: string[],
+      nextAsrHotwordsSuppressed: string[],
+    ) => {
+      const catalogSanitized = sanitizeAllCatalogAliases(next)
       if (useRemoteLedger && apiBase && token) {
         const data = await putLedger(apiBase, token, {
           fields,
           records,
-          productCatalog: next,
+          productCatalog: catalogSanitized,
           productCatalogSuppressed: nextSuppressed,
+          asrHotwordsSuppressed: nextAsrHotwordsSuppressed,
           voiceProductCorrections,
         })
         const rawPut = data as Record<string, unknown>
         const catParsed =
           'productCatalog' in rawPut
             ? parseProductCatalogEntries(rawPut.productCatalog)
-            : next
+            : catalogSanitized
         const supParsed =
           'productCatalogSuppressed' in rawPut
             ? parseProductCatalogSuppressed(rawPut.productCatalogSuppressed)
             : nextSuppressed
+        const hwParsed =
+          'asrHotwordsSuppressed' in rawPut
+            ? parseAsrHotwordsSuppressed(rawPut.asrHotwordsSuppressed)
+            : nextAsrHotwordsSuppressed
         const catFinal =
-          next.length > catParsed.length ? next : catParsed
+          catalogSanitized.length > catParsed.length
+            ? catalogSanitized
+            : catParsed
         const supFinal =
           nextSuppressed.length > supParsed.length ? nextSuppressed : supParsed
+        const hwFinal =
+          nextAsrHotwordsSuppressed.length > hwParsed.length
+            ? nextAsrHotwordsSuppressed
+            : hwParsed
         lastRemoteCatalogRef.current = catFinal
         lastRemoteSuppressedRef.current = supFinal
+        lastRemoteAsrHotwordsSuppressedRef.current = hwFinal
         setProductCatalog(catFinal)
         setProductCatalogSuppressed(supFinal)
+        setAsrHotwordsSuppressed(hwFinal)
         return
       }
-      await replaceProductCatalogInDb(next, nextSuppressed)
-      setProductCatalog(next)
+      await replaceProductCatalogInDb(
+        catalogSanitized,
+        nextSuppressed,
+        nextAsrHotwordsSuppressed,
+      )
+      setProductCatalog(catalogSanitized)
       setProductCatalogSuppressed(nextSuppressed)
+      setAsrHotwordsSuppressed(nextAsrHotwordsSuppressed)
     },
-    [fields, records, voiceProductCorrections, useRemoteLedger, apiBase, token],
+    [
+      fields,
+      records,
+      voiceProductCorrections,
+      useRemoteLedger,
+      apiBase,
+      token,
+    ],
   )
 
   const persistVoiceCorrections = useCallback(
@@ -499,6 +566,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           records,
           productCatalog,
           productCatalogSuppressed,
+          asrHotwordsSuppressed,
           voiceProductCorrections: next,
         })
         lastRemoteCorrectionsRef.current = next
@@ -511,6 +579,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       records,
       productCatalog,
       productCatalogSuppressed,
+      asrHotwordsSuppressed,
       useRemoteLedger,
       apiBase,
       token,
@@ -535,9 +604,18 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const mergeVoiceCatalogAliases = useCallback(
     async (nextCatalog: ProductCatalogEntry[]) => {
       if (catalogsEqual(nextCatalog, productCatalog)) return
-      await saveProductCatalog(nextCatalog, productCatalogSuppressed)
+      await saveProductCatalog(
+        nextCatalog,
+        productCatalogSuppressed,
+        asrHotwordsSuppressed,
+      )
     },
-    [productCatalog, productCatalogSuppressed, saveProductCatalog],
+    [
+      productCatalog,
+      productCatalogSuppressed,
+      asrHotwordsSuppressed,
+      saveProductCatalog,
+    ],
   )
 
   const restoreFullBackup = useCallback(
@@ -571,6 +649,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     () => ({
       productCatalog,
       productCatalogSuppressed,
+      asrHotwordsSuppressed,
       voiceProductCorrections,
       saveProductCatalog,
       learnVoiceProductFromSave,
@@ -579,6 +658,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     [
       productCatalog,
       productCatalogSuppressed,
+      asrHotwordsSuppressed,
       voiceProductCorrections,
       saveProductCatalog,
       learnVoiceProductFromSave,

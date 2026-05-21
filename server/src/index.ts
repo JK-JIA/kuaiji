@@ -43,6 +43,7 @@ const LedgerPutSchema = z.object({
   productCatalog: z.array(z.unknown()).optional(),
   productCatalogSuppressed: z.array(z.string()).optional(),
   voiceProductCorrections: z.array(z.unknown()).optional(),
+  asrHotwordsSuppressed: z.array(z.string()).optional(),
 })
 
 function jsonArrayUnknown(raw: unknown): unknown[] {
@@ -508,6 +509,9 @@ app.get('/api/ledger', async (req, res) => {
     voiceProductCorrections: jsonArrayUnknown(
       ledger.voiceProductCorrectionsJson,
     ),
+    asrHotwordsSuppressed: jsonStringArray(
+      ledger.asrHotwordsSuppressedJson,
+    ),
     updatedAt: ledger.updatedAt.toISOString(),
   })
 })
@@ -542,6 +546,7 @@ app.put('/api/ledger', async (req, res) => {
     productCatalog,
     productCatalogSuppressed,
     voiceProductCorrections,
+    asrHotwordsSuppressed,
   } = parsed.data
   const data: {
     fieldsJson: object[]
@@ -549,6 +554,7 @@ app.put('/api/ledger', async (req, res) => {
     productCatalogJson?: object[]
     productCatalogSuppressedJson?: string[]
     voiceProductCorrectionsJson?: object[]
+    asrHotwordsSuppressedJson?: string[]
   } = {
     fieldsJson: fields as object[],
     recordsJson: records as object[],
@@ -561,6 +567,9 @@ app.put('/api/ledger', async (req, res) => {
   }
   if (voiceProductCorrections !== undefined) {
     data.voiceProductCorrectionsJson = voiceProductCorrections as object[]
+  }
+  if (asrHotwordsSuppressed !== undefined) {
+    data.asrHotwordsSuppressedJson = asrHotwordsSuppressed
   }
   const ledger = await prisma.ledger.update({
     where: { userId },
@@ -575,6 +584,9 @@ app.put('/api/ledger', async (req, res) => {
     ),
     voiceProductCorrections: jsonArrayUnknown(
       ledger.voiceProductCorrectionsJson,
+    ),
+    asrHotwordsSuppressed: jsonStringArray(
+      ledger.asrHotwordsSuppressedJson,
     ),
     updatedAt: ledger.updatedAt.toISOString(),
   })

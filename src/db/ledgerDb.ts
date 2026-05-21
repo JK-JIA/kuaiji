@@ -10,6 +10,7 @@ import { normalizeCatalogEntry } from '../utils/productCatalogHelpers'
 export type ProductCatalogSettingsRow = {
   id: 'singleton'
   suppressedNormalizedNames: string[]
+  asrHotwordsSuppressed?: string[]
 }
 
 export type VoiceCorrectionsSettingsRow = {
@@ -137,9 +138,17 @@ export async function getProductCatalogSuppressedFromDb(): Promise<string[]> {
     : []
 }
 
+export async function getAsrHotwordsSuppressedFromDb(): Promise<string[]> {
+  const row = await db.productCatalogSettings.get(CATALOG_SETTINGS_ID)
+  return row?.asrHotwordsSuppressed?.length
+    ? [...row.asrHotwordsSuppressed]
+    : []
+}
+
 export async function replaceProductCatalogInDb(
   entries: ProductCatalogEntry[],
   suppressedNormalizedNames: string[],
+  asrHotwordsSuppressed: string[] = [],
 ): Promise<void> {
   await db.transaction('rw', db.productCatalog, db.productCatalogSettings, async () => {
     await db.productCatalog.clear()
@@ -147,6 +156,7 @@ export async function replaceProductCatalogInDb(
     await db.productCatalogSettings.put({
       id: CATALOG_SETTINGS_ID,
       suppressedNormalizedNames: [...suppressedNormalizedNames],
+      asrHotwordsSuppressed: [...asrHotwordsSuppressed],
     })
   })
 }

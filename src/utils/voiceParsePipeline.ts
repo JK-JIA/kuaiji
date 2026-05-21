@@ -233,6 +233,7 @@ export async function runVoiceParsePipeline(
       debug.afterDraft?.lines.map((l) => l.product) ??
       lines.map((l) => l.product),
     finalProducts: fuzzy.lines.map((l) => l.product),
+    productCatalog,
   })
   const aliasCandidates: AliasAttachCandidate[] = [
     ...aliasFromFuzzy,

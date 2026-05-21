@@ -28,11 +28,39 @@ export function isPlausibleProductAlias(
 }
 
 /**
+ * 别名不得占用：① 其它商品的规范名；② 其它商品已登记的别名。
+ */
+export function isAliasAllowedInCatalog(
+  catalog: ProductCatalogEntry[],
+  canonicalName: string,
+  alias: string,
+): boolean {
+  if (!isPlausibleProductAlias(alias, canonicalName)) return false
+  const aliasKey = normalizeToken(alias)
+  const selfKey = normalizeToken(canonicalName)
+  if (!aliasKey || !selfKey) return false
+
+  for (const e of catalog) {
+    const nameKey = normalizeToken(e.name)
+    if (!nameKey) continue
+    const isSelf = nameKey === selfKey
+    if (!isSelf && nameKey === aliasKey) return false
+    if (!isSelf) {
+      for (const a of e.aliases ?? []) {
+        if (normalizeToken(a) === aliasKey) return false
+      }
+    }
+  }
+  return true
+}
+
+/**
  * 清洗别名列表：去掉无效项；将「烟薯(鼹鼠)」拆成只保留「鼹鼠」
  */
 export function sanitizeAliasesForProduct(
   canonicalName: string,
   rawAliases: string[],
+  catalog?: ProductCatalogEntry[],
 ): string[] {
   const canonKey = normalizeToken(canonicalName)
   const seen = new Set<string>()
@@ -41,6 +69,9 @@ export function sanitizeAliasesForProduct(
   const push = (t: string) => {
     const s = t.normalize('NFKC').trim()
     if (!s || !isPlausibleProductAlias(s, canonicalName)) return
+    if (catalog?.length && !isAliasAllowedInCatalog(catalog, canonicalName, s)) {
+      return
+    }
     const k = normalizeToken(s)
     if (!k || seen.has(k)) return
     seen.add(k)
@@ -65,6 +96,24 @@ export function sanitizeAliasesForProduct(
   return out
 }
 
+/** 按全目录规则清洗每个商品的别名（加载/同步后去重、去冲突） */
+export function sanitizeAllCatalogAliases(
+  catalog: ProductCatalogEntry[],
+): ProductCatalogEntry[] {
+  return catalog.map((e) => {
+    const cleaned = sanitizeAliasesForProduct(
+      e.name,
+      e.aliases ?? [],
+      catalog,
+    )
+    if (cleaned.length === 0) {
+      const { aliases: _a, ...rest } = e
+      return rest
+    }
+    return { ...e, aliases: cleaned }
+  })
+}
+
 export function normalizeAliasList(
   raw: unknown,
   canonicalName?: string,
@@ -72,7 +121,7 @@ export function normalizeAliasList(
   if (!Array.isArray(raw)) return []
   const items = raw.filter((x): x is string => typeof x === 'string')
   if (canonicalName?.trim()) {
-    return sanitizeAliasesForProduct(canonicalName, items)
+    return sanitizeAliasesForProduct(canonicalName, items, undefined)
   }
   const seen = new Set<string>()
   const out: string[] = []
@@ -140,7 +189,7 @@ export function buildAiProductCatalogPromptSection(
     if (!k || seen.has(k)) continue
     seen.add(k)
     names.push(name)
-    const als = sanitizeAliasesForProduct(name, e.aliases ?? [])
+    const als = sanitizeAliasesForProduct(name, e.aliases ?? [], catalog)
     if (als.length) {
       hintParts.push(`「${als.join('」「')}」→${name}`)
     }
@@ -188,7 +237,7 @@ export function buildProductCatalogPromptLines(
     const key = normalizeToken(name)
     if (!key || seen.has(key)) continue
     seen.add(key)
-    const aliases = sanitizeAliasesForProduct(name, e.aliases ?? []).filter(
+    const aliases = sanitizeAliasesForProduct(name, e.aliases ?? [], catalog).filter(
       (a) => {
         const ak = normalizeToken(a)
         return ak && ak !== key
@@ -204,6 +253,36 @@ export function buildProductCatalogPromptLines(
   return out
 }
 
+/** 两字商品名无共同汉字时（如 白薯 vs 紫薯）不自动记别名，避免误学 */
+function shareHanCharacters(a: string, b: string): boolean {
+  for (const ch of a) {
+    if (/\p{Script=Han}/u.test(ch) && b.includes(ch)) return true
+  }
+  return false
+}
+
+export function removeAliasFromCatalog(
+  catalog: ProductCatalogEntry[],
+  productId: string,
+  aliasToRemove: string,
+): ProductCatalogEntry[] {
+  const key = normalizeToken(aliasToRemove)
+  if (!key) return catalog
+  const next = catalog.map((e) => {
+    if (e.id !== productId) return e
+    const nextAliases = (e.aliases ?? []).filter(
+      (a) => normalizeToken(a) !== key,
+    )
+    const cleaned = sanitizeAliasesForProduct(e.name, nextAliases, catalog)
+    if (cleaned.length === 0) {
+      const { aliases: _a, ...rest } = e
+      return rest
+    }
+    return { ...e, aliases: cleaned }
+  })
+  return sanitizeAllCatalogAliases(next)
+}
+
 export function shouldAutoLearnAlias(
   aliasCandidate: string,
   canonicalName: string,
@@ -212,6 +291,15 @@ export function shouldAutoLearnAlias(
   const c = normalizeToken(canonicalName)
   if (!a || !c || a === c) return false
   if (aliasCandidate.trim().length > 20) return false
+  const rawA = aliasCandidate.normalize('NFKC').trim()
+  const rawC = canonicalName.normalize('NFKC').trim()
+  if (
+    rawA.length <= 4 &&
+    rawC.length <= 4 &&
+    !shareHanCharacters(rawA, rawC)
+  ) {
+    return false
+  }
   return fuzzyScore(aliasCandidate, canonicalName) >= ALIAS_AUTO_MIN_SCORE
 }
 
@@ -278,13 +366,18 @@ export function collectAliasCandidatesFromUtterance(input: {
   utterance: string
   draftProducts: string[]
   finalProducts: string[]
+  productCatalog?: ProductCatalogEntry[]
 }): AliasAttachCandidate[] {
-  const { utterance, draftProducts, finalProducts } = input
+  const { utterance, draftProducts, finalProducts, productCatalog } = input
   const out: AliasAttachCandidate[] = []
   const seen = new Set<string>()
 
   const push = (canonicalName: string, alias: string, pinyinScore: number) => {
-    if (!isPlausibleProductAlias(alias, canonicalName)) return
+    if (productCatalog?.length) {
+      if (!isAliasAllowedInCatalog(productCatalog, canonicalName, alias)) return
+    } else if (!isPlausibleProductAlias(alias, canonicalName)) {
+      return
+    }
     const key = `${normalizeToken(canonicalName)}|${normalizeToken(alias)}`
     if (seen.has(key)) return
     seen.add(key)
@@ -334,7 +427,7 @@ export function attachAliasesToCatalog(
   }
 
   for (const { canonicalName, alias, pinyinScore } of candidates) {
-    if (!isPlausibleProductAlias(alias, canonicalName)) continue
+    if (!isAliasAllowedInCatalog(next, canonicalName, alias)) continue
     const ok =
       pinyinScore != null
         ? shouldAutoLearnAliasFromPinyin(alias, canonicalName, pinyinScore)
@@ -356,5 +449,22 @@ export function attachAliasesToCatalog(
     changed = true
   }
 
-  return { catalog: next, changed }
+  const sanitized = sanitizeAllCatalogAliases(next)
+  return { catalog: sanitized, changed: changed || !catalogsAliasEqual(catalog, sanitized) }
+}
+
+function catalogsAliasEqual(
+  a: ProductCatalogEntry[],
+  b: ProductCatalogEntry[],
+): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    const ea = a[i]!
+    const eb = b.find((x) => x.id === ea.id)
+    if (!eb) return false
+    const aa = (ea.aliases ?? []).map(normalizeToken).join('|')
+    const ab = (eb.aliases ?? []).map(normalizeToken).join('|')
+    if (aa !== ab) return false
+  }
+  return true
 }

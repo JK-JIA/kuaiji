@@ -438,6 +438,7 @@ export function SettingsPage() {
     saveFields,
     productCatalog,
     productCatalogSuppressed,
+    asrHotwordsSuppressed,
     saveProductCatalog,
   } = useLedger()
   const [name, setName] = useState('')
@@ -474,13 +475,14 @@ export function SettingsPage() {
   const voiceLexiconSubtitle = useMemo(() => {
     const hotwords = collectAsrHotwordsFromLedger(records, fields, {
       productCatalog,
+      asrHotwordsSuppressed,
     })
     const aliasCount = productCatalog.reduce(
       (n, e) => n + (e.aliases?.length ?? 0),
       0,
     )
     return `热词 ${hotwords.length} 个 · 别名 ${aliasCount} 条`
-  }, [records, fields, productCatalog])
+  }, [records, fields, productCatalog, asrHotwordsSuppressed])
 
   const asrProviderSubtitle = useMemo(
     () => `当前：${asrProviderLabel(readAsrProvider())}`,
@@ -576,6 +578,7 @@ export function SettingsPage() {
               : e,
           ),
           productCatalogSuppressed,
+          asrHotwordsSuppressed,
         )
         setNewProductName('')
         setNewProductUnit('斤')
@@ -601,6 +604,7 @@ export function SettingsPage() {
           },
         ],
         productCatalogSuppressed,
+        asrHotwordsSuppressed,
       )
       setNewProductName('')
       setNewProductUnit('斤')
@@ -621,7 +625,7 @@ export function SettingsPage() {
         const k = normalizeToken(e.name)
         if (k && !suppressed.includes(k)) suppressed = [...suppressed, k]
       }
-      await saveProductCatalog(next, suppressed)
+      await saveProductCatalog(next, suppressed, asrHotwordsSuppressed)
     } finally {
       setBusy(false)
     }
@@ -640,7 +644,7 @@ export function SettingsPage() {
             }
           : x,
       )
-      await saveProductCatalog(next, productCatalogSuppressed)
+      await saveProductCatalog(next, productCatalogSuppressed, asrHotwordsSuppressed)
     } finally {
       setBusy(false)
     }
@@ -816,6 +820,14 @@ export function SettingsPage() {
         records={records}
         fields={fields}
         productCatalog={productCatalog}
+        asrHotwordsSuppressed={asrHotwordsSuppressed}
+        onSaveLexicon={async (catalog, hotwordsSuppressed) => {
+          await saveProductCatalog(
+            catalog,
+            productCatalogSuppressed,
+            hotwordsSuppressed,
+          )
+        }}
         onBack={() => setPanel('main')}
       />
     )

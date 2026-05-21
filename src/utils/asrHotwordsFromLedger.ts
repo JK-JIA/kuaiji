@@ -1,5 +1,6 @@
 import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
 import { getPlateValue } from './recordHelpers'
+import { normalizeToken } from './voiceHistoryFuzzy'
 
 const DEFAULT_MAX_TERMS = 40
 const MAX_RECORDS_SCAN = 250
@@ -11,17 +12,26 @@ const MAX_RECORDS_SCAN = 250
 export function collectAsrHotwordsFromLedger(
   records: LedgerRecord[],
   fields: FieldDef[],
-  options?: { maxTerms?: number; productCatalog?: ProductCatalogEntry[] },
+  options?: {
+    maxTerms?: number
+    productCatalog?: ProductCatalogEntry[]
+    /** 用户手动排除的热词（归一化 token） */
+    asrHotwordsSuppressed?: string[]
+  },
 ): string[] {
   const maxTerms = options?.maxTerms ?? DEFAULT_MAX_TERMS
   const prodId = fields.find((f) => f.key === 'product')?.id
   const catalog = options?.productCatalog ?? []
+  const suppressed = new Set(
+    (options?.asrHotwordsSuppressed ?? []).map((s) => normalizeToken(s)),
+  )
 
   const seen = new Set<string>()
   const out: string[] = []
   const push = (raw: string) => {
     const t = raw.normalize('NFKC').trim()
     if (!t || seen.has(t)) return
+    if (suppressed.has(normalizeToken(t))) return
     seen.add(t)
     out.push(t)
   }

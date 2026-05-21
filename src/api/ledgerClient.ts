@@ -185,6 +185,8 @@ export type LedgerPayload = {
   productCatalogSuppressed?: string[]
   /** 用户语音纠错学习（每用户独立，有上限，不进入 AI prompt） */
   voiceProductCorrections?: VoiceProductCorrection[]
+  /** 手动排除的 ASR 热词（归一化 token） */
+  asrHotwordsSuppressed?: string[]
 }
 
 export type LedgerApiResponse = LedgerPayload & {

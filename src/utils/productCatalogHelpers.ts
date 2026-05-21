@@ -2,6 +2,7 @@ import type { ProductCatalogEntry } from '../types'
 import {
   normalizeAliasList,
   sanitizeAliasesForProduct,
+  sanitizeAllCatalogAliases,
 } from './productAliasHelpers'
 import { normalizeToken } from './voiceHistoryFuzzy'
 
@@ -40,10 +41,19 @@ export function parseProductCatalogEntries(raw: unknown): ProductCatalogEntry[] 
     const n = normalizeCatalogEntry(x as ProductCatalogEntry)
     if (n) out.push(n)
   }
-  return out
+  return sanitizeAllCatalogAliases(out)
 }
 
 export function parseProductCatalogSuppressed(raw: unknown): string[] {
+  return parseNormalizedStringList(raw)
+}
+
+/** 用户手动排除的 ASR 热词（存归一化 token，展示时仍用原文） */
+export function parseAsrHotwordsSuppressed(raw: unknown): string[] {
+  return parseNormalizedStringList(raw)
+}
+
+function parseNormalizedStringList(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
   const seen = new Set<string>()
   const out: string[] = []
