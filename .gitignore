@@ -32,3 +32,5 @@ com.example.kuaiji_*.zip
 com.ledgernotes.app_*.zip
 android/sdk-number-auth/
 android/app/libs/*.aar
+android/app/libs/classes.jar
+android/app/libs/res/

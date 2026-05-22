@@ -76,9 +76,11 @@ function LegalModal({
 /** 本机号码一键登录面板（Android App 可用；浏览器仅展示样式并引导短信） */
 function OneClickLoginPanel({
   busy,
-  preparing,
+  phoneLoading,
+  sdkReady,
   nativeAvailable,
   serverOneClickReady,
+  oneClickReady,
   displayPhone,
   carrierHint,
   onLogin,
@@ -86,7 +88,9 @@ function OneClickLoginPanel({
   onOpenLegal,
 }: {
   busy: boolean
-  preparing: boolean
+  phoneLoading: boolean
+  sdkReady: boolean
+  oneClickReady: boolean
   nativeAvailable: boolean
   serverOneClickReady: boolean
   displayPhone: string
@@ -96,7 +100,10 @@ function OneClickLoginPanel({
   onOpenLegal: (key: 'agreement' | 'privacy' | 'numberAuth') => void
 }) {
   const btnDisabled =
-    busy || (nativeAvailable && preparing) || (nativeAvailable && !serverOneClickReady)
+    busy ||
+    (nativeAvailable && !sdkReady) ||
+    (nativeAvailable && !oneClickReady) ||
+    (nativeAvailable && !serverOneClickReady)
 
   return (
     <div className="flex flex-col py-2">
@@ -106,7 +113,7 @@ function OneClickLoginPanel({
         </p>
         {carrierHint ? (
           <p className="mt-2 text-[12px] text-stone-400 dark:text-zinc-500">{carrierHint}</p>
-        ) : preparing ? (
+        ) : phoneLoading ? (
           <p className="mt-2 text-[12px] text-stone-400 dark:text-zinc-500">正在识别本机号码…</p>
         ) : null}
         {nativeAvailable && !serverOneClickReady ? (
@@ -122,11 +129,7 @@ function OneClickLoginPanel({
         onClick={onLogin}
         className={primaryBtn}
       >
-        {busy
-          ? '登录中…'
-          : preparing
-            ? '准备中…'
-            : '手机号一键登录'}
+        {busy ? '登录中…' : '手机号一键登录'}
       </button>
 
       <p className="mt-4 text-center text-[11px] leading-relaxed text-stone-500 dark:text-zinc-400">
@@ -200,7 +203,8 @@ export function LoginPage() {
   >(null)
   const [showSmsFallback, setShowSmsFallback] = useState(false)
   const [oneClickReady, setOneClickReady] = useState(!nativeOneClick)
-  const [preparing, setPreparing] = useState(false)
+  const [sdkReady, setSdkReady] = useState(!nativeOneClick)
+  const [phoneLoading, setPhoneLoading] = useState(nativeOneClick)
   const [carrierHint, setCarrierHint] = useState('')
   const [maskedPhone, setMaskedPhone] = useState('')
   const [serverOneClick, setServerOneClick] = useState(true)
@@ -235,7 +239,7 @@ export function LoginPage() {
     if (!nativeOneClick) return
     let cancelled = false
     ;(async () => {
-      setPreparing(true)
+      setPhoneLoading(true)
       setErrorMsg('')
       try {
         if (apiBase) {
@@ -243,10 +247,13 @@ export function LoginPage() {
           if (!cancelled) setServerOneClick(h.oneClickLogin === true)
           if (!h.oneClickLogin) {
             setOneClickReady(false)
+            setSdkReady(true)
+            setPhoneLoading(false)
             return
           }
         }
         await NumberAuth.initialize()
+        if (!cancelled) setSdkReady(true)
         const pre = await NumberAuth.preLogin()
         if (cancelled) return
         setOneClickReady(pre.available)
@@ -257,13 +264,14 @@ export function LoginPage() {
       } catch (e) {
         if (!cancelled) {
           setOneClickReady(false)
+          setSdkReady(true)
           setShowSmsFallback(true)
           setErrorMsg(
             e instanceof Error ? e.message : '一键登录环境不可用，请用短信登录',
           )
         }
       } finally {
-        if (!cancelled) setPreparing(false)
+        if (!cancelled) setPhoneLoading(false)
       }
     })()
     return () => {
@@ -447,7 +455,9 @@ export function LoginPage() {
               <>
                 <OneClickLoginPanel
                   busy={authBusy}
-                  preparing={nativeOneClick && preparing && !oneClickReady}
+                  phoneLoading={nativeOneClick && phoneLoading && !displayPhone}
+                  sdkReady={sdkReady}
+                  oneClickReady={oneClickReady}
                   nativeAvailable={nativeOneClick}
                   displayPhone={displayPhone}
                   carrierHint={carrierHintDisplay}
