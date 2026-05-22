@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">记账本</string>
     <string name="title_activity_main">记账本</string>
-    <string name="package_name">com.ledgernotes.app</string>
-    <string name="custom_url_scheme">com.ledgernotes.app</string>
+    <string name="package_name">com.example.kuaiji</string>
+    <string name="custom_url_scheme">com.example.kuaiji</string>
 </resources>

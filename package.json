@@ -1,7 +1,7 @@
 {
   "name": "ledger-notes",
   "private": true,
-  "version": "1.0.53",
+  "version": "1.0.57",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "cap:sync": "npm run build && npx cap sync",
-    "bundle:ota": "npm run build && npx -y @capgo/cli@latest bundle zip com.ledgernotes.app --path dist",
+    "bundle:ota": "npm run build && npx -y @capgo/cli@latest bundle zip com.example.kuaiji --path dist",
     "cap:android": "npm run cap:sync && npx cap open android"
   },
   "dependencies": {

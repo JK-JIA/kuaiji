@@ -28,4 +28,7 @@ dist-ssr
 server/data/redeem-codes/redeem-codes.txt
 
 # Capgo CLI 生成的网页热更包（根目录）
+com.example.kuaiji_*.zip
 com.ledgernotes.app_*.zip
+android/sdk-number-auth/
+android/app/libs/*.aar

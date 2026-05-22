@@ -1,0 +1,7 @@
+# 复制为 android/local.properties（该文件勿提交 Git）
+# SDK 路径（Android Studio 常会自动生成）
+# sdk.dir=C\:\\Users\\admin\\AppData\\Local\\Android\\Sdk
+
+# 阿里云号码认证「方案密钥」（控制台 → 号码认证 → 方案管理 → 密钥），整段粘贴，勿加引号
+# 方案 Code 仅作记录，密钥字符串内已包含，无需单独配置：FC220000012910079
+# ALIYUN_AUTH_SECRET=你的方案密钥字符串

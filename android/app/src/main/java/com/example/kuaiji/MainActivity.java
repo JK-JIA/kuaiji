@@ -1,4 +1,4 @@
-package com.ledgernotes.app;
+package com.example.kuaiji;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
@@ -24,6 +24,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(InstallApkPlugin.class);
         registerPlugin(KuaijiHttpPlugin.class);
+        registerPlugin(NumberAuthPlugin.class);
         super.onCreate(savedInstanceState);
         applyWebViewSettings();
         new Handler(Looper.getMainLooper()).post(this::applyWebViewSettings);

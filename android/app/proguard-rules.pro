@@ -19,3 +19,8 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+-keep class androidx.appcompat.app.AppCompatActivity
+-keep class androidx.core.content.ContextCompat { *; }
+-keep class com.mobile.auth.** { *; }
+-keep class com.example.kuaiji.NumberAuthPlugin { *; }

@@ -1,4 +1,4 @@
-package com.ledgernotes.app;
+package com.example.kuaiji;
 
 import android.content.Intent;
 import android.net.Uri;

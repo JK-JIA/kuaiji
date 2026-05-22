@@ -9,6 +9,7 @@ import {
 } from 'react'
 import {
   apiLogin,
+  apiOneClickLogin,
   apiRegister,
   apiSmsLogin,
   clearSession,
@@ -36,6 +37,7 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string) => Promise<void>
   smsLogin: (phone: string, code: string) => Promise<void>
+  oneClickLogin: (accessToken: string) => Promise<void>
   sendSms: (phone: string) => Promise<void>
   redeem: (code: string) => Promise<void>
   refreshProfile: () => Promise<void>
@@ -113,6 +115,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [apiBase, applySession],
   )
 
+  const oneClickLogin = useCallback(
+    async (accessToken: string) => {
+      if (!apiBase) throw new Error('未配置 VITE_API_URL')
+      const r = await apiOneClickLogin(apiBase, accessToken)
+      applySession(r.token, r.email, r.membershipExpiresAt, r.phone)
+    },
+    [apiBase, applySession],
+  )
+
   const sendSms = useCallback(
     async (phone: string) => {
       if (!apiBase) throw new Error('未配置 VITE_API_URL')
@@ -149,6 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       register,
       smsLogin,
+      oneClickLogin,
       sendSms,
       redeem,
       refreshProfile,
@@ -164,6 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       register,
       smsLogin,
+      oneClickLogin,
       sendSms,
       redeem,
       refreshProfile,

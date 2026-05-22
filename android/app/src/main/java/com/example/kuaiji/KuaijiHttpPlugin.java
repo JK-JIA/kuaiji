@@ -1,4 +1,4 @@
-package com.ledgernotes.app;
+package com.example.kuaiji;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;

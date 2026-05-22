@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli'
 import { APP_VERSION } from './src/version'
 
 const config: CapacitorConfig = {
-  appId: 'com.ledgernotes.app',
+  appId: 'com.example.kuaiji',
   appName: '记账本',
   webDir: 'dist',
   plugins: {

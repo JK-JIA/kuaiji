@@ -146,6 +146,37 @@ export async function sendSmsCode(base: string, phone: string): Promise<void> {
   if (!res.ok) throw new Error(await parseErr(res))
 }
 
+export async function apiOneClickLogin(
+  base: string,
+  accessToken: string,
+): Promise<{
+  token: string
+  email: string
+  membershipExpiresAt: string | null
+  phone: string | null
+}> {
+  const res = await fetch(`${base.replace(/\/$/, '')}/auth/oneclick/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accessToken: accessToken.trim() }),
+  })
+  if (!res.ok) throw new Error(await parseErr(res))
+  const j = (await res.json()) as {
+    token: string
+    user: {
+      email: string
+      phone: string | null
+      membershipExpiresAt: string | null
+    }
+  }
+  return {
+    token: j.token,
+    email: j.user.email,
+    membershipExpiresAt: j.user.membershipExpiresAt,
+    phone: j.user.phone,
+  }
+}
+
 export async function apiSmsLogin(
   base: string,
   phone: string,
@@ -193,7 +224,27 @@ export type LedgerApiResponse = LedgerPayload & {
   updatedAt?: string
 }
 
+export type ApiHealth = {
+  ok: boolean
+  smsLogin?: boolean
+  oneClickLogin?: boolean
+}
+
+/** 探测服务端是否已部署一键登录等新接口 */
+export async function fetchApiHealth(base: string): Promise<ApiHealth> {
+  try {
+    const res = await fetch(`${base.replace(/\/$/, '')}/health`)
+    if (!res.ok) return { ok: false }
+    return (await res.json()) as ApiHealth
+  } catch {
+    return { ok: false }
+  }
+}
+
 async function parseErr(res: Response): Promise<string> {
+  if (res.status === 404) {
+    return '服务端接口未找到（HTTP 404），请在服务器执行 git pull 后 docker compose up -d --build 更新 API'
+  }
   try {
     const j = (await res.json()) as { error?: string }
     return j.error ?? `HTTP ${res.status}`

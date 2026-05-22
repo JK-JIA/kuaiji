@@ -7,6 +7,10 @@ import http from 'http'
 import jwt from 'jsonwebtoken'
 import { z } from 'zod'
 import {
+  aliyunOneClickConfigured,
+  getPhoneFromAccessToken,
+} from './aliyunOneClick.js'
+import {
   aliyunSmsConfigured,
   sendAliyunSmsVerifyCode,
   verifyAliyunSmsCode,
@@ -62,6 +66,10 @@ const SmsSendSchema = z.object({
 const SmsLoginSchema = z.object({
   phone: z.string().min(10).max(20),
   code: z.string().min(4).max(12),
+})
+
+const OneClickLoginSchema = z.object({
+  accessToken: z.string().min(8).max(4096),
 })
 
 const RedeemSchema = z.object({
@@ -134,6 +142,40 @@ function userJson(user: {
   }
 }
 
+async function loginOrRegisterByPhone(phone: string) {
+  const email = smsEmailForPhone(phone)
+  let user = await prisma.user.findFirst({
+    where: { OR: [{ phone }, { email }] },
+  })
+
+  if (!user) {
+    const passwordHash = await bcrypt.hash(randomBytes(24).toString('hex'), 10)
+    user = await prisma.user.create({
+      data: {
+        email,
+        phone,
+        phoneVerifiedAt: new Date(),
+        passwordHash,
+        membershipExpiresAt: null,
+        ledger: {
+          create: {
+            fieldsJson: [],
+            recordsJson: [],
+          },
+        },
+      },
+    })
+  } else {
+    user = await prisma.user.update({
+      where: { id: user.id },
+      data: { phone, phoneVerifiedAt: new Date() },
+    })
+  }
+
+  const token = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' })
+  return { token, user }
+}
+
 const app = express()
 app.use(
   cors({
@@ -144,7 +186,11 @@ app.use(
 app.use(express.json({ limit: '8mb' }))
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true })
+  res.json({
+    ok: true,
+    smsLogin: true,
+    oneClickLogin: true,
+  })
 })
 
 /** 私发 APK 应用内更新：公开接口，无需登录；未配置环境变量时返回 enabled: false */
@@ -354,36 +400,43 @@ app.post('/auth/sms/login', async (req, res) => {
     return
   }
 
-  const email = smsEmailForPhone(phone)
-  let user = await prisma.user.findFirst({
-    where: { OR: [{ phone }, { email }] },
+  const { token, user } = await loginOrRegisterByPhone(phone)
+  res.json({
+    token,
+    user: userJson(user),
   })
+})
 
-  if (!user) {
-    const passwordHash = await bcrypt.hash(randomBytes(24).toString('hex'), 10)
-    user = await prisma.user.create({
-      data: {
-        email,
-        phone,
-        phoneVerifiedAt: new Date(),
-        passwordHash,
-        membershipExpiresAt: null,
-        ledger: {
-          create: {
-            fieldsJson: [],
-            recordsJson: [],
-          },
-        },
-      },
-    })
-  } else {
-    user = await prisma.user.update({
-      where: { id: user.id },
-      data: { phone, phoneVerifiedAt: new Date() },
-    })
+app.post('/auth/oneclick/login', async (req, res) => {
+  const parsed = OneClickLoginSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: 'accessToken 无效' })
+    return
   }
 
-  const token = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' })
+  if (!aliyunOneClickConfigured()) {
+    res.status(503).json({ error: '服务端未配置阿里云 AccessKey' })
+    return
+  }
+
+  let phone: string
+  try {
+    phone = await getPhoneFromAccessToken(parsed.data.accessToken)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '取号失败'
+    console.error('[oneclick] GetMobile failed', msg)
+    res.status(401).json({ error: msg })
+    return
+  }
+
+  const normalized = normalizeCnPhone(phone)
+  if (!normalized) {
+    res.status(400).json({ error: '手机号格式无效' })
+    return
+  }
+
+  console.log('[oneclick] login ok', maskPhone11(normalized))
+  const { token, user } = await loginOrRegisterByPhone(normalized)
   res.json({
     token,
     user: userJson(user),
