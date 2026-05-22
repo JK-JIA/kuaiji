@@ -56,6 +56,7 @@ public class NumberAuthPlugin extends Plugin {
     private String lastAuthSecret = "";
     private boolean envOk = false;
     private PluginCall pendingCall;
+    private PluginCall pendingMaskCall;
 
     @Override
     public void load() {
@@ -108,15 +109,15 @@ public class NumberAuthPlugin extends Plugin {
         return "";
     }
 
-    /** 展示格式：前三位 + *** + 后四位 */
+    /** 展示格式：前三位 + **** + 后四位（与运营商 SDK 一致） */
     private static String normalizeMaskDisplay(String mask) {
         if (TextUtils.isEmpty(mask)) return "";
         String t = mask.trim();
         if (t.matches("^1\\d{10}$")) {
-            return t.substring(0, 3) + "***" + t.substring(7);
+            return t.substring(0, 3) + "****" + t.substring(7);
         }
         if (t.matches("^1\\d{2}\\*+\\d{4}$")) {
-            return t.replaceAll("\\*+", "***");
+            return t.replaceAll("\\*+", "****");
         }
         return t;
     }
@@ -202,7 +203,15 @@ public class NumberAuthPlugin extends Plugin {
                         .setSloganTextColor(Color.parseColor("#6b7280"))
                         .setVendorPrivacyPrefix("《")
                         .setVendorPrivacySuffix("》")
-                        .setPageBackgroundDrawable(new ColorDrawable(Color.WHITE))
+                        .setPageBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT))
+                        .setDialogWidth(1)
+                        .setDialogHeight(1)
+                        .setDialogAlpha(0.01f)
+                        .setDialogOffsetX(0)
+                        .setDialogOffsetY(0)
+                        .setTapAuthPageMaskClosePage(false)
+                        .setAuthPageActIn("no_anim", "no_anim")
+                        .setAuthPageActOut("no_anim", "no_anim")
                         .setScreenOrientation(authPageOrientation)
                         .create());
         helper.expandAuthPageCheckedScope(true);
@@ -210,9 +219,11 @@ public class NumberAuthPlugin extends Plugin {
 
     /** 授权页唤起后自动点「一键登录」，用户几乎无感 */
     private void scheduleAutoConfirmLogin() {
-        mainHandler.postDelayed(this::tryAutoClickAuthLogin, 50);
-        mainHandler.postDelayed(this::tryAutoClickAuthLogin, 180);
-        mainHandler.postDelayed(this::tryAutoClickAuthLogin, 400);
+        mainHandler.postDelayed(this::tryAutoClickAuthLogin, 0);
+        mainHandler.postDelayed(this::tryAutoClickAuthLogin, 60);
+        mainHandler.postDelayed(this::tryAutoClickAuthLogin, 150);
+        mainHandler.postDelayed(this::tryAutoClickAuthLogin, 320);
+        mainHandler.postDelayed(this::tryAutoClickAuthLogin, 600);
     }
 
     private void tryAutoClickAuthLogin() {
@@ -252,6 +263,15 @@ public class NumberAuthPlugin extends Plugin {
         String label = carrierLabel(vendor);
         if (label.isEmpty()) return "运营商提供认证服务";
         return label + "提供认证服务";
+    }
+
+    private void pushMaskUpdate(String mask) {
+        if (TextUtils.isEmpty(mask)) return;
+        maskedPhone = mask;
+        JSObject data = new JSObject();
+        data.put("maskedPhone", mask);
+        data.put("carrierHint", carrierServiceLine(carrierVendor));
+        notifyListeners("maskPhoneUpdate", data);
     }
 
     private void refreshCarrierFromHelper(PhoneNumberAuthHelper helper) {
@@ -326,6 +346,86 @@ public class NumberAuthPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void getMaskedPhone(PluginCall call) {
+        String secret = resolveSecret(call);
+        if (secret.isEmpty()) {
+            call.reject("NO_SECRET", "未配置 ALIYUN_AUTH_SECRET");
+            return;
+        }
+        Activity activity = requireActivity(call);
+        if (activity == null) return;
+
+        if (!TextUtils.isEmpty(maskedPhone)) {
+            JSObject ret = new JSObject();
+            ret.put("maskedPhone", maskedPhone);
+            ret.put("carrier", carrierLabel(carrierVendor));
+            ret.put("carrierHint", carrierServiceLine(carrierVendor));
+            call.resolve(ret);
+            return;
+        }
+
+        pendingMaskCall = call;
+        lastAuthSecret = secret;
+        activity.runOnUiThread(
+                () -> {
+                    PhoneNumberAuthHelper helper = getOrCreateHelper();
+                    helper.setAuthSDKInfo(secret);
+                    refreshCarrierFromHelper(helper);
+                    helper.setAuthListener(
+                            new TokenResultListener() {
+                                @Override
+                                public void onTokenSuccess(String s) {
+                                    try {
+                                        TokenRet ret = TokenRet.fromJson(s);
+                                        if (ResultCode.CODE_ERROR_ENV_CHECK_SUCCESS.equals(
+                                                ret.getCode())) {
+                                            new Thread(
+                                                            () -> {
+                                                                String m =
+                                                                        fetchLoginMaskPhone(
+                                                                                helper,
+                                                                                lastAuthSecret);
+                                                                if (!m.isEmpty()) {
+                                                                    pushMaskUpdate(m);
+                                                                }
+                                                                finishGetMaskedPhone(m);
+                                                            },
+                                                            "NumberAuth-getMask")
+                                                    .start();
+                                        }
+                                    } catch (Exception e) {
+                                        finishGetMaskedPhone("");
+                                    }
+                                }
+
+                                @Override
+                                public void onTokenFailed(String s) {
+                                    finishGetMaskedPhone("");
+                                }
+                            });
+                    helper.checkEnvAvailable(PhoneNumberAuthHelper.SERVICE_TYPE_LOGIN);
+                });
+    }
+
+    private void finishGetMaskedPhone(String mask) {
+        PluginCall call = pendingMaskCall;
+        pendingMaskCall = null;
+        if (call == null) return;
+
+        JSObject ret = new JSObject();
+        if (!TextUtils.isEmpty(mask)) ret.put("maskedPhone", mask);
+        ret.put("carrier", carrierLabel(carrierVendor));
+        ret.put("carrierHint", carrierServiceLine(carrierVendor));
+
+        Activity activity = getActivity();
+        if (activity != null) {
+            activity.runOnUiThread(() -> call.resolve(ret));
+        } else {
+            call.resolve(ret);
+        }
+    }
+
+    @PluginMethod
     public void preLogin(PluginCall call) {
         String secret = resolveSecret(call);
         if (secret.isEmpty()) {
@@ -380,7 +480,10 @@ public class NumberAuthPlugin extends Plugin {
         new Thread(
                         () -> {
                             String m = fetchLoginMaskPhone(helper, lastAuthSecret);
-                            if (!m.isEmpty()) maskAsync.set(m);
+                            if (!m.isEmpty()) {
+                                maskAsync.set(m);
+                                pushMaskUpdate(m);
+                            }
                         },
                         "NumberAuth-mask")
                 .start();
@@ -424,7 +527,10 @@ public class NumberAuthPlugin extends Plugin {
                 if (mask.isEmpty()) {
                     mask = waitMaskAsync(maskAsync, 900);
                 }
-                if (!mask.isEmpty()) maskedPhone = mask;
+                if (!mask.isEmpty()) {
+                    maskedPhone = mask;
+                    pushMaskUpdate(mask);
+                }
                 finishPreLogin(true, carrierVendor, null);
             }
 

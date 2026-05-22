@@ -10,16 +10,25 @@ import {
 } from '../constants/legalTexts'
 import { isNumberAuthNative, NumberAuth } from '../plugins/numberAuth'
 
-/** 展示用脱敏：前三位 + *** + 后四位，如 191***7776 */
+/** 展示用脱敏：前三位 + **** + 后四位，如 191****7776 */
 function maskPhoneDisplay(phone: string): string {
   const s = phone.replace(/\s/g, '')
   const digits = s.replace(/\D/g, '')
   if (/^1\d{10}$/.test(digits)) {
-    return `${digits.slice(0, 3)}***${digits.slice(-4)}`
+    return `${digits.slice(0, 3)}****${digits.slice(-4)}`
   }
   const masked = s.match(/^(\d{3})\*+(\d{4})$/)
-  if (masked) return `${masked[1]}***${masked[2]}`
+  if (masked) return `${masked[1]}****${masked[2]}`
   return ''
+}
+
+function applyMaskFromNative(
+  raw: string | undefined,
+  setMaskedPhone: (v: string) => void,
+) {
+  if (!raw) return
+  const shown = maskPhoneDisplay(raw) || raw
+  if (shown) setMaskedPhone(shown)
 }
 
 const inputCls =
@@ -84,6 +93,7 @@ function OneClickLoginPanel({
   displayPhone,
   carrierHint,
   onLogin,
+  onEditPhone,
   onSmsFallback,
   onOpenLegal,
 }: {
@@ -96,6 +106,7 @@ function OneClickLoginPanel({
   displayPhone: string
   carrierHint: string
   onLogin: () => void
+  onEditPhone: () => void
   onSmsFallback: () => void
   onOpenLegal: (key: 'agreement' | 'privacy' | 'numberAuth') => void
 }) {
@@ -108,9 +119,34 @@ function OneClickLoginPanel({
   return (
     <div className="flex flex-col py-2">
       <div className="mb-6 text-center">
-        <p className="font-mono text-[32px] font-semibold tracking-[0.2em] text-stone-900 dark:text-white">
-          {displayPhone || '本机号码'}
-        </p>
+        <div className="flex items-center justify-center gap-2">
+          <p className="font-mono text-[34px] font-bold tabular-nums tracking-[0.12em] text-stone-900 dark:text-white">
+            {displayPhone || (phoneLoading ? '······' : '本机号码')}
+          </p>
+          {displayPhone && !phoneLoading ? (
+            <button
+              type="button"
+              onClick={onEditPhone}
+              aria-label="更换手机号"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-100 hover:text-emerald-600 dark:hover:bg-zinc-700 dark:hover:text-emerald-400"
+            >
+              <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden>
+                <path
+                  d="M16.862 3.487a2.1 2.1 0 0 1 2.97 2.97L7.5 18.79l-4.01 1.004 1.004-4.01 12.368-12.297Z"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M14.5 6.5l3 3"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          ) : null}
+        </div>
         {carrierHint ? (
           <p className="mt-2 text-[12px] text-stone-400 dark:text-zinc-500">{carrierHint}</p>
         ) : phoneLoading ? (
@@ -129,7 +165,7 @@ function OneClickLoginPanel({
         onClick={onLogin}
         className={primaryBtn}
       >
-        {busy ? '登录中…' : '手机号一键登录'}
+        {busy ? '登录中…' : '本机号码一键登录'}
       </button>
 
       <p className="mt-4 text-center text-[11px] leading-relaxed text-stone-500 dark:text-zinc-400">
@@ -238,6 +274,16 @@ export function LoginPage() {
   useEffect(() => {
     if (!nativeOneClick) return
     let cancelled = false
+    let maskListener: { remove: () => void } | null = null
+
+    void NumberAuth.addListener('maskPhoneUpdate', (data) => {
+      if (cancelled) return
+      applyMaskFromNative(data.maskedPhone, setMaskedPhone)
+      if (data.carrierHint) setCarrierHint(data.carrierHint)
+    }).then((h) => {
+      maskListener = h
+    })
+
     ;(async () => {
       setPhoneLoading(true)
       setErrorMsg('')
@@ -254,13 +300,19 @@ export function LoginPage() {
         }
         await NumberAuth.initialize()
         if (!cancelled) setSdkReady(true)
-        const pre = await NumberAuth.preLogin()
+
+        const prePromise = NumberAuth.preLogin()
+        const mask = await NumberAuth.getMaskedPhone()
+        if (cancelled) return
+        applyMaskFromNative(mask.maskedPhone, setMaskedPhone)
+        setCarrierHint(mask.carrierHint || mask.carrier || '')
+        setPhoneLoading(false)
+
+        const pre = await prePromise
         if (cancelled) return
         setOneClickReady(pre.available)
-        setCarrierHint(pre.carrierHint || pre.carrier || '')
-        if (pre.maskedPhone) {
-          setMaskedPhone(maskPhoneDisplay(pre.maskedPhone) || pre.maskedPhone)
-        }
+        setCarrierHint((prev) => prev || pre.carrierHint || pre.carrier || '')
+        applyMaskFromNative(pre.maskedPhone, setMaskedPhone)
       } catch (e) {
         if (!cancelled) {
           setOneClickReady(false)
@@ -274,10 +326,17 @@ export function LoginPage() {
         if (!cancelled) setPhoneLoading(false)
       }
     })()
+
     return () => {
       cancelled = true
+      maskListener?.remove()
     }
   }, [nativeOneClick, apiBase])
+
+  function handleEditPhone() {
+    setShowSmsFallback(true)
+    setErrorMsg('')
+  }
 
   async function handleOneClickLogin() {
     if (!nativeOneClick) {
@@ -462,6 +521,7 @@ export function LoginPage() {
                   displayPhone={displayPhone}
                   carrierHint={carrierHintDisplay}
                   onLogin={() => void handleOneClickLogin()}
+                  onEditPhone={handleEditPhone}
                   onSmsFallback={() => {
                     setShowSmsFallback(true)
                     setErrorMsg('')
