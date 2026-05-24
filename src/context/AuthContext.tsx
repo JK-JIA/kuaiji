@@ -12,6 +12,7 @@ import {
   apiOneClickLogin,
   apiRegister,
   apiSmsLogin,
+  cancelMembership,
   clearSession,
   fetchMe,
   getApiBase,
@@ -40,6 +41,7 @@ type AuthContextValue = {
   oneClickLogin: (accessToken: string) => Promise<void>
   sendSms: (phone: string) => Promise<void>
   redeem: (code: string) => Promise<void>
+  cancelMembership: () => Promise<void>
   refreshProfile: () => Promise<void>
   logout: () => void
 }
@@ -142,6 +144,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [apiBase, token],
   )
 
+  const cancelMembershipFn = useCallback(async () => {
+    if (!apiBase || !token) throw new Error('未登录')
+    const me = await cancelMembership(apiBase, token)
+    setMembershipExpiresAt(me.membershipExpiresAt)
+    setStoredMembershipExpires(me.membershipExpiresAt)
+  }, [apiBase, token])
+
   const logout = useCallback(() => {
     clearSession()
     setToken(null)
@@ -163,6 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       oneClickLogin,
       sendSms,
       redeem,
+      cancelMembership: cancelMembershipFn,
       refreshProfile,
       logout,
     }),
@@ -179,6 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       oneClickLogin,
       sendSms,
       redeem,
+      cancelMembershipFn,
       refreshProfile,
       logout,
     ],

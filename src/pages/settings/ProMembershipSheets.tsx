@@ -162,6 +162,7 @@ export function ProRedeemSheet({
   onNeedLogin,
   onRedeem,
   onPurchaseSuccess,
+  onCancelMembership,
 }: {
   open: boolean
   onClose: () => void
@@ -172,9 +173,11 @@ export function ProRedeemSheet({
   onNeedLogin: () => void
   onRedeem: (code: string) => Promise<void>
   onPurchaseSuccess?: () => Promise<void>
+  onCancelMembership?: () => Promise<void>
 }) {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
+  const [cancelBusy, setCancelBusy] = useState(false)
   const [purchaseBusy, setPurchaseBusy] = useState<MembershipPlanId | null>(null)
   const [plans, setPlans] = useState<MembershipPlanInfo[]>([])
   const [alipayReady, setAlipayReady] = useState(false)
@@ -283,6 +286,26 @@ export function ProRedeemSheet({
 
   const showPurchase =
     apiBase && hasToken && alipayReady && isAlipayPayNative() && plans.length > 0
+
+  const cancelMembership = () => {
+    if (cancelBusy || busy || purchaseBusy) return
+    if (
+      !window.confirm(
+        '确定取消当前账号的专业版会员？取消后可重新用兑换码或支付宝开通（测试用，不退款）。',
+      )
+    ) {
+      return
+    }
+    setCancelBusy(true)
+    void onCancelMembership?.()
+      .then(() => {
+        setPayMsg('已取消会员，可重新购买或兑换')
+      })
+      .catch((e) => {
+        setPayMsg(e instanceof Error ? e.message : '取消失败')
+      })
+      .finally(() => setCancelBusy(false))
+  }
 
   return (
     <SheetOverlay open={open} onClose={onClose} ariaLabel="兑换专业版">
@@ -393,6 +416,16 @@ export function ProRedeemSheet({
               关闭
             </button>
           )}
+          {apiBase && hasToken && membershipActive ? (
+            <button
+              type="button"
+              disabled={cancelBusy || busy || purchaseBusy !== null}
+              onClick={cancelMembership}
+              className="w-full rounded-2xl border border-white/15 py-2.5 text-[13px] font-medium text-stone-400 transition-colors hover:border-red-400/40 hover:text-red-300 disabled:opacity-45"
+            >
+              {cancelBusy ? '取消中…' : '取消会员（测试）'}
+            </button>
+          ) : null}
         </div>
       </div>
     </SheetOverlay>

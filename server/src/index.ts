@@ -587,6 +587,25 @@ app.post(
   },
 )
 
+/** 清除当前账号会员（用于联调/测试；不退款） */
+app.post('/api/membership/cancel', async (req, res) => {
+  const token = authHeader(req)
+  if (!token) {
+    res.status(401).json({ error: '未登录' })
+    return
+  }
+  const userId = userIdFromToken(token)
+  if (!userId) {
+    res.status(401).json({ error: '无效令牌' })
+    return
+  }
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data: { membershipExpiresAt: null },
+  })
+  res.json(userJson(user))
+})
+
 app.post('/api/membership/redeem', async (req, res) => {
   const token = authHeader(req)
   if (!token) {

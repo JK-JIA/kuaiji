@@ -425,6 +425,7 @@ export function SettingsPage() {
     email: cloudEmail,
     membershipExpiresAt,
     redeem,
+    cancelMembership,
     refreshProfile,
   } = useAuth()
   const [fontPct, setFontPct] = useState(() => readFontSizePercent())
@@ -1008,6 +1009,7 @@ export function SettingsPage() {
           onNeedLogin={() => setPanel('account')}
           onRedeem={handleRedeem}
           onPurchaseSuccess={refreshProfile}
+          onCancelMembership={cancelMembership}
         />
 
         <section>

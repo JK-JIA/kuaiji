@@ -137,6 +137,18 @@ export async function redeemMembership(
   return (await res.json()) as MeResponse
 }
 
+export async function cancelMembership(
+  base: string,
+  token: string,
+): Promise<MeResponse> {
+  const res = await fetch(`${base.replace(/\/$/, '')}/api/membership/cancel`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(await parseErr(res))
+  return (await res.json()) as MeResponse
+}
+
 export async function fetchMembershipPlans(
   base: string,
 ): Promise<MembershipPlansResponse> {
