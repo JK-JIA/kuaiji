@@ -33,6 +33,7 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile
+    image: kuaiji-server
     restart: unless-stopped
     ports:
       - '3001:3001'
@@ -80,9 +81,10 @@ services:
         condition: service_healthy
 
   redeem-daily:
-    build:
-      context: ./server
-      dockerfile: Dockerfile
+    #build:
+    #  context: ./server
+    #  dockerfile: Dockerfile
+    image: kuaiji-server
     restart: unless-stopped
     environment:
       DATABASE_URL: mysql://ledger:ledger@db:3306/ledger
