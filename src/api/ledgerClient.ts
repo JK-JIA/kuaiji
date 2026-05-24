@@ -137,6 +137,48 @@ export async function redeemMembership(
   return (await res.json()) as MeResponse
 }
 
+export async function fetchMembershipPlans(
+  base: string,
+): Promise<MembershipPlansResponse> {
+  const res = await fetch(`${base.replace(/\/$/, '')}/api/membership/plans`)
+  if (!res.ok) throw new Error(await parseErr(res))
+  return (await res.json()) as MembershipPlansResponse
+}
+
+export async function createMembershipPurchase(
+  base: string,
+  token: string,
+  planId: MembershipPlanId,
+): Promise<MembershipPurchaseCreateResponse> {
+  const res = await fetch(
+    `${base.replace(/\/$/, '')}/api/membership/purchase/create`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ planId }),
+    },
+  )
+  if (!res.ok) throw new Error(await parseErr(res))
+  return (await res.json()) as MembershipPurchaseCreateResponse
+}
+
+export async function fetchMembershipPurchaseStatus(
+  base: string,
+  token: string,
+  outTradeNo: string,
+): Promise<MembershipPurchaseStatusResponse> {
+  const q = new URLSearchParams({ outTradeNo })
+  const res = await fetch(
+    `${base.replace(/\/$/, '')}/api/membership/purchase/status?${q}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!res.ok) throw new Error(await parseErr(res))
+  return (await res.json()) as MembershipPurchaseStatusResponse
+}
+
 export async function sendSmsCode(base: string, phone: string): Promise<void> {
   const res = await fetch(`${base.replace(/\/$/, '')}/auth/sms/send`, {
     method: 'POST',
@@ -228,6 +270,40 @@ export type ApiHealth = {
   ok: boolean
   smsLogin?: boolean
   oneClickLogin?: boolean
+  alipayPay?: boolean
+  alipaySandbox?: boolean
+}
+
+export type MembershipPlanId = 'monthly' | 'quarterly' | 'yearly'
+
+export type MembershipPlanInfo = {
+  id: MembershipPlanId
+  label: string
+  priceYuan: string
+  grantedDays: number
+}
+
+export type MembershipPlansResponse = {
+  plans: MembershipPlanInfo[]
+  alipayReady: boolean
+}
+
+export type MembershipPurchaseCreateResponse = {
+  outTradeNo: string
+  orderString: string
+  planId: MembershipPlanId
+  amountYuan: string
+  subject: string
+  sandbox: boolean
+}
+
+export type MembershipPurchaseStatusResponse = {
+  outTradeNo: string
+  status: string
+  planId: MembershipPlanId
+  amountYuan: string
+  paidAt: string | null
+  membershipExpiresAt: string | null
 }
 
 /** 探测服务端是否已部署一键登录等新接口 */

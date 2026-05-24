@@ -24,3 +24,5 @@
 -keep class androidx.core.content.ContextCompat { *; }
 -keep class com.mobile.auth.** { *; }
 -keep class com.example.kuaiji.NumberAuthPlugin { *; }
+-keep class com.alipay.sdk.app.PayTask { *; }
+-keep class com.example.kuaiji.AlipayPlugin { *; }

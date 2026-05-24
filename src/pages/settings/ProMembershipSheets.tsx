@@ -1,4 +1,18 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import {
+  createMembershipPurchase,
+  fetchMembershipPlans,
+  fetchMembershipPurchaseStatus,
+  getApiBase,
+  getStoredToken,
+  type MembershipPlanId,
+  type MembershipPlanInfo,
+} from '../../api/ledgerClient'
+import {
+  AlipayPay,
+  alipaySyncSuccess,
+  isAlipayPayNative,
+} from '../../plugins/alipayPay'
 
 const PRO_CARD =
   'rounded-3xl bg-gradient-to-br from-stone-800 via-stone-900 to-stone-950 text-left shadow-xl ring-1 ring-amber-500/10'
@@ -147,6 +161,7 @@ export function ProRedeemSheet({
   membershipExpiresAt,
   onNeedLogin,
   onRedeem,
+  onPurchaseSuccess,
 }: {
   open: boolean
   onClose: () => void
@@ -156,13 +171,36 @@ export function ProRedeemSheet({
   membershipExpiresAt: string | null
   onNeedLogin: () => void
   onRedeem: (code: string) => Promise<void>
+  onPurchaseSuccess?: () => Promise<void>
 }) {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
+  const [purchaseBusy, setPurchaseBusy] = useState<MembershipPlanId | null>(null)
+  const [plans, setPlans] = useState<MembershipPlanInfo[]>([])
+  const [alipayReady, setAlipayReady] = useState(false)
+  const [payMsg, setPayMsg] = useState('')
 
   useEffect(() => {
-    if (open) setCode('')
+    if (open) {
+      setCode('')
+      setPayMsg('')
+    }
   }, [open])
+
+  useEffect(() => {
+    if (!open || !apiBase) return
+    const base = getApiBase()
+    if (!base) return
+    void fetchMembershipPlans(base)
+      .then((j) => {
+        setPlans(j.plans)
+        setAlipayReady(j.alipayReady)
+      })
+      .catch(() => {
+        setPlans([])
+        setAlipayReady(false)
+      })
+  }, [open, apiBase])
 
   const expiryLabel = (() => {
     if (!membershipExpiresAt) return null
@@ -181,6 +219,70 @@ export function ProRedeemSheet({
     setBusy(true)
     void onRedeem(trimmed).finally(() => setBusy(false))
   }
+
+  const purchase = async (planId: MembershipPlanId) => {
+    if (purchaseBusy) return
+    if (!hasToken) {
+      onNeedLogin()
+      return
+    }
+    if (!isAlipayPayNative()) {
+      setPayMsg('请在 Android 应用内使用支付宝支付')
+      return
+    }
+    const base = getApiBase()
+    const token = getStoredToken()
+    if (!base || !token) {
+      setPayMsg('请先登录')
+      return
+    }
+
+    setPurchaseBusy(planId)
+    setPayMsg('')
+    try {
+      const created = await createMembershipPurchase(base, token, planId)
+      const payResult = await AlipayPay.pay({ orderString: created.orderString })
+      if (!alipaySyncSuccess(payResult.resultStatus)) {
+        setPayMsg(
+          payResult.memo?.trim() ||
+            (payResult.resultStatus === '6001'
+              ? '已取消支付'
+              : `支付未完成（${payResult.resultStatus || '未知'}）`),
+        )
+        return
+      }
+
+      let status = await fetchMembershipPurchaseStatus(
+        base,
+        token,
+        created.outTradeNo,
+      )
+      if (status.status !== 'paid') {
+        await new Promise((r) => setTimeout(r, 1200))
+        status = await fetchMembershipPurchaseStatus(
+          base,
+          token,
+          created.outTradeNo,
+        )
+      }
+
+      if (status.status !== 'paid') {
+        setPayMsg('支付结果确认中，请稍后在设置页刷新会员状态')
+        return
+      }
+
+      await onPurchaseSuccess?.()
+      setPayMsg('支付成功，专业版已开通')
+      setTimeout(() => onClose(), 800)
+    } catch (e) {
+      setPayMsg(e instanceof Error ? e.message : '支付失败')
+    } finally {
+      setPurchaseBusy(null)
+    }
+  }
+
+  const showPurchase =
+    apiBase && hasToken && alipayReady && isAlipayPayNative() && plans.length > 0
 
   return (
     <SheetOverlay open={open} onClose={onClose} ariaLabel="兑换专业版">
@@ -213,6 +315,35 @@ export function ProRedeemSheet({
             </svg>
           </button>
         </div>
+
+        {showPurchase ? (
+          <div className="mb-4 space-y-2">
+            <p className="text-[12px] font-medium text-kj-muted">支付宝购买</p>
+            {plans.map((plan) => (
+              <button
+                key={plan.id}
+                type="button"
+                disabled={purchaseBusy !== null}
+                onClick={() => void purchase(plan.id)}
+                className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-kj-surface/5 px-4 py-3 text-left transition-colors hover:bg-white/5 disabled:opacity-50"
+              >
+                <span className="text-[15px] font-medium text-amber-100/95">
+                  专业版 · {plan.label}
+                </span>
+                <span className="text-[15px] font-semibold text-amber-300">
+                  {purchaseBusy === plan.id ? '支付中…' : `¥${plan.priceYuan}`}
+                </span>
+              </button>
+            ))}
+            {payMsg ? (
+              <p className="text-[12px] leading-relaxed text-amber-200/90">{payMsg}</p>
+            ) : (
+              <p className="text-[11px] leading-relaxed text-kj-muted">
+                沙箱测试请使用支付宝沙箱版 App 与沙箱买家账号。
+              </p>
+            )}
+          </div>
+        ) : null}
 
         {apiBase && hasToken ? (
           <label className="block">

@@ -1007,6 +1007,7 @@ export function SettingsPage() {
           membershipExpiresAt={membershipExpiresAt}
           onNeedLogin={() => setPanel('account')}
           onRedeem={handleRedeem}
+          onPurchaseSuccess={refreshProfile}
         />
 
         <section>

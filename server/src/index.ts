@@ -21,6 +21,14 @@ import {
   xfyunAsrEnvReady,
 } from './asrStream.js'
 import { doubaoEnvReady, parseVoiceOnServer } from './voiceParse.js'
+import { alipayEnvReady, alipaySandboxMode } from './alipay.js'
+import {
+  createMembershipPurchaseOrder,
+  getMembershipPurchaseOrder,
+  handleAlipayNotify,
+  markMembershipOrderPaidFromClient,
+  membershipPlansJson,
+} from './membershipPayment.js'
 
 const prisma = new PrismaClient()
 
@@ -74,6 +82,14 @@ const OneClickLoginSchema = z.object({
 
 const RedeemSchema = z.object({
   code: z.string().min(4).max(64),
+})
+
+const PurchaseCreateSchema = z.object({
+  planId: z.enum(['monthly', 'quarterly', 'yearly']),
+})
+
+const PurchaseStatusSchema = z.object({
+  outTradeNo: z.string().min(8).max(64),
 })
 
 const VoiceParseSchema = z.object({
@@ -190,6 +206,8 @@ app.get('/health', (_req, res) => {
     ok: true,
     smsLogin: true,
     oneClickLogin: true,
+    alipayPay: alipayEnvReady(),
+    alipaySandbox: alipaySandboxMode(),
   })
 })
 
@@ -462,6 +480,113 @@ app.get('/api/me', async (req, res) => {
   res.json(userJson(user))
 })
 
+app.get('/api/membership/plans', (_req, res) => {
+  res.json({ plans: membershipPlansJson(), alipayReady: alipayEnvReady() })
+})
+
+app.post('/api/membership/purchase/create', async (req, res) => {
+  const token = authHeader(req)
+  if (!token) {
+    res.status(401).json({ error: '未登录' })
+    return
+  }
+  const userId = userIdFromToken(token)
+  if (!userId) {
+    res.status(401).json({ error: '无效令牌' })
+    return
+  }
+  if (!alipayEnvReady()) {
+    res.status(503).json({ error: '服务端未配置支付宝支付' })
+    return
+  }
+  const parsed = PurchaseCreateSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: '无效的会员套餐' })
+    return
+  }
+  try {
+    const { order, orderString, sandbox } = await createMembershipPurchaseOrder(
+      prisma,
+      userId,
+      parsed.data.planId,
+    )
+    res.json({
+      outTradeNo: order.outTradeNo,
+      orderString,
+      planId: order.planId,
+      amountYuan: order.amountYuan,
+      subject: order.subject,
+      sandbox,
+    })
+  } catch (e) {
+    console.error('[ledger-api][membership/purchase/create]', e)
+    res.status(500).json({ error: '创建支付订单失败' })
+  }
+})
+
+app.get('/api/membership/purchase/status', async (req, res) => {
+  const token = authHeader(req)
+  if (!token) {
+    res.status(401).json({ error: '未登录' })
+    return
+  }
+  const userId = userIdFromToken(token)
+  if (!userId) {
+    res.status(401).json({ error: '无效令牌' })
+    return
+  }
+  const parsed = PurchaseStatusSchema.safeParse({
+    outTradeNo: req.query.outTradeNo,
+  })
+  if (!parsed.success) {
+    res.status(400).json({ error: '缺少订单号' })
+    return
+  }
+  let order = await getMembershipPurchaseOrder(
+    prisma,
+    userId,
+    parsed.data.outTradeNo,
+  )
+  if (!order) {
+    res.status(404).json({ error: '订单不存在' })
+    return
+  }
+  if (order.status !== 'paid' && alipayEnvReady()) {
+    order =
+      (await markMembershipOrderPaidFromClient(
+        prisma,
+        userId,
+        parsed.data.outTradeNo,
+      )) ?? order
+  }
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  res.json({
+    outTradeNo: order.outTradeNo,
+    status: order.status,
+    planId: order.planId,
+    amountYuan: order.amountYuan,
+    paidAt: order.paidAt?.toISOString() ?? null,
+    membershipExpiresAt: user?.membershipExpiresAt?.toISOString() ?? null,
+  })
+})
+
+app.post(
+  '/api/payment/alipay/notify',
+  express.urlencoded({ extended: false }),
+  async (req, res) => {
+    try {
+      const result = await handleAlipayNotify(
+        prisma,
+        req.body as Record<string, string>,
+      )
+      res.type('text/plain').send(result)
+    } catch (e) {
+      console.error('[ledger-api][alipay-notify]', e)
+      res.type('text/plain').send('fail')
+    }
+  },
+)
+
 app.post('/api/membership/redeem', async (req, res) => {
   const token = authHeader(req)
   if (!token) {
@@ -694,6 +819,15 @@ async function bootstrap() {
       `[ledger-api] 讯飞方言识别大模型已启用 url=${
         process.env.XFYUN_ASR_WS_URL?.trim() || 'wss://iat.cn-huabei-1.xf-yun.com/v1'
       }`,
+    )
+  }
+  if (alipayEnvReady()) {
+    console.log(
+      `[ledger-api] 支付宝会员支付已启用 sandbox=${alipaySandboxMode()}`,
+    )
+  } else {
+    console.warn(
+      '[ledger-api] 未配置 ALIPAY_APP_ID / ALIPAY_PRIVATE_KEY / ALIPAY_PUBLIC_KEY：会员支付不可用',
     )
   }
   await ensureDefaultAdmin()

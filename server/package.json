@@ -14,6 +14,7 @@
     "@alicloud/dypnsapi20170525": "^2.0.0",
     "@alicloud/openapi-core": "^1.0.7",
     "@prisma/client": "^6.19.0",
+    "alipay-sdk": "^4.14.0",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "express": "^4.21.2",

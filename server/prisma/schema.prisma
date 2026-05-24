@@ -42,3 +42,20 @@ model RedeemCode {
   grantLifetime Boolean  @default(false)
   batchId       String?
 }
+
+model MembershipOrder {
+  id            String    @id @default(cuid())
+  outTradeNo    String    @unique
+  userId        String
+  planId        String
+  amountYuan    String
+  grantedDays   Int
+  subject       String
+  status        String    @default("pending")
+  alipayTradeNo String?
+  paidAt        DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId])
+}

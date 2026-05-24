@@ -435,25 +435,12 @@ export function LoginPage() {
 
       <div className="relative z-10 mx-auto flex w-[92%] max-w-[520px] flex-1 flex-col justify-center px-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(2.75rem,calc(env(safe-area-inset-top,0px)+1.25rem))] sm:w-[90%]">
         <div className="mb-5 flex flex-col items-center text-center">
-          <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-[22px] bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-lg shadow-emerald-500/25">
-            <svg viewBox="0 0 48 48" fill="none" className="h-9 w-9" aria-hidden>
-              <rect x="8" y="11" width="32" height="4.5" rx="2.25" fill="white" fillOpacity="0.95" />
-              <rect x="8" y="21.5" width="22" height="4.5" rx="2.25" fill="white" fillOpacity="0.7" />
-              <rect x="8" y="32" width="14" height="4.5" rx="2.25" fill="white" fillOpacity="0.45" />
-              <circle cx="38" cy="35" r="7.5" fill="white" fillOpacity="0.95" />
-              <path
-                d="M35 35l2.2 2.2 4.3-4.3"
-                stroke="#10b981"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </div>
-          <h1 className="text-[30px] font-bold tracking-tight text-stone-800 dark:text-white">
-            记账本
-          </h1>
-          <p className="mt-1.5 text-[15px] font-semibold text-emerald-600 dark:text-emerald-400">
+          <img
+            src="/app-icon.png"
+            alt="kuaiji"
+            className="mb-3 h-20 w-20 rounded-[22px] shadow-lg shadow-emerald-500/25"
+          />
+          <p className="text-[22px] font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
             批发场景随时记
           </p>
           {showOneClickPanel ? (
