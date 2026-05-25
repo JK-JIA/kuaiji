@@ -17,6 +17,8 @@ ALIPAY_NOTIFY_URL=https://kuaijipf.com/api/payment/alipay/notify
 
 密钥在开放平台 → **沙箱应用** → 开发信息 → **系统默认密钥** 中获取。
 
+**不要用正式应用的密钥。** 桌面文件夹 `kuaiji_支付宝_密钥20260524194945`（APPID `2021006155694550`）是正式应用密钥，沙箱 App 无法使用，会报「商家订单参数异常」。
+
 部署后重启 API：
 
 ```bash
@@ -29,7 +31,23 @@ docker compose up -d --build
 curl -s http://127.0.0.1:3001/health
 ```
 
-应包含 `"alipayPay":true,"alipaySandbox":true`。
+应包含 `"alipayPay":true,"alipaySandbox":true`，且 `alipayAppId` 应为 `9021000164606067`。
+
+## 6. 报错「商家订单参数异常」
+
+常见原因（按优先级排查）：
+
+1. **服务器密钥与 APPID 不匹配**  
+   沙箱联调必须使用沙箱控制台 → **系统默认密钥**（不是正式应用 `202100…` 的密钥）。  
+   执行 `curl http://127.0.0.1:3001/health`，确认 `alipayAppId` 为 `9021000164606067`，`alipayWarnings` 为空。
+
+2. **手机未安装支付宝沙箱版**  
+   正式版支付宝无法处理沙箱订单，需安装[沙箱调试说明](https://opendocs.alipay.com/open/00dn7d?pathHash=f5e7ce65)中的 **沙箱版 App**，并用沙箱买家账号付款。
+
+3. **私钥格式**  
+   `.env` 中 `ALIPAY_PRIVATE_KEY` 填 **应用私钥**（不是应用公钥），`ALIPAY_PUBLIC_KEY` 填 **支付宝公钥**（不是应用公钥）。支持 PKCS8 一行或多行 PEM。
+
+参考：[商家订单参数异常排查](https://opendocs.alipay.com/support/04ows2)
 
 ## 2. 手机端：安装沙箱支付宝
 

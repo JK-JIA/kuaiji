@@ -7,7 +7,7 @@ export type AlipayPayResult = {
 }
 
 export interface AlipayPayPlugin {
-  pay(options: { orderString: string }): Promise<AlipayPayResult>
+  pay(options: { orderString: string; sandbox?: boolean }): Promise<AlipayPayResult>
 }
 
 export const AlipayPay = registerPlugin<AlipayPayPlugin>('AlipayPay')

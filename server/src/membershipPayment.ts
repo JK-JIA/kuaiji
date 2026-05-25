@@ -1,6 +1,9 @@
 import { randomBytes } from 'crypto'
 import type { PrismaClient } from '@prisma/client'
 import {
+  alipayAppId,
+  alipayConfigWarnings,
+  alipayEnvReady,
   alipayNotifyUrl,
   alipaySandboxMode,
   getAlipaySdk,
@@ -20,6 +23,22 @@ function membershipActive(expires: Date | null | undefined): expires is Date {
 function createOutTradeNo(userId: string): string {
   const suffix = randomBytes(4).toString('hex')
   return `KJ${Date.now()}${userId.slice(-4)}${suffix}`.slice(0, 64)
+}
+
+export function assertAlipayConfigReady(): void {
+  const warnings = alipayConfigWarnings()
+  if (warnings.length > 0) {
+    throw new Error(`ALIPAY_CONFIG_MISMATCH:${warnings[0]}`)
+  }
+}
+
+export function membershipAlipayMeta() {
+  return {
+    alipayReady: alipayEnvReady(),
+    alipaySandbox: alipaySandboxMode(),
+    alipayAppId: alipayAppId() || undefined,
+    alipayWarnings: alipayConfigWarnings(),
+  }
 }
 
 export function membershipPlansJson() {

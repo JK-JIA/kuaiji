@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   createMembershipPurchase,
+  fetchApiHealth,
   fetchMembershipPlans,
   fetchMembershipPurchaseStatus,
   getApiBase,
@@ -8,6 +9,7 @@ import {
   type MembershipPlanId,
   type MembershipPlanInfo,
 } from '../../api/ledgerClient'
+import { DEFAULT_MEMBERSHIP_PLANS } from '../../constants/membershipPlans'
 import {
   AlipayPay,
   alipaySyncSuccess,
@@ -181,6 +183,9 @@ export function ProRedeemSheet({
   const [purchaseBusy, setPurchaseBusy] = useState<MembershipPlanId | null>(null)
   const [plans, setPlans] = useState<MembershipPlanInfo[]>([])
   const [alipayReady, setAlipayReady] = useState(false)
+  const [alipayAppId, setAlipayAppId] = useState<string | undefined>()
+  const [alipayWarnings, setAlipayWarnings] = useState<string[]>([])
+  const [plansLoaded, setPlansLoaded] = useState(false)
   const [payMsg, setPayMsg] = useState('')
 
   useEffect(() => {
@@ -194,15 +199,28 @@ export function ProRedeemSheet({
     if (!open || !apiBase) return
     const base = getApiBase()
     if (!base) return
+    setPlansLoaded(false)
     void fetchMembershipPlans(base)
       .then((j) => {
-        setPlans(j.plans)
+        setPlans(j.plans.length > 0 ? j.plans : DEFAULT_MEMBERSHIP_PLANS)
         setAlipayReady(j.alipayReady)
+        setAlipayAppId(j.alipayAppId)
+        setAlipayWarnings(j.alipayWarnings ?? [])
       })
-      .catch(() => {
-        setPlans([])
-        setAlipayReady(false)
+      .catch(async () => {
+        setPlans(DEFAULT_MEMBERSHIP_PLANS)
+        try {
+          const health = await fetchApiHealth(base)
+          setAlipayReady(Boolean(health.alipayPay))
+          setAlipayAppId(health.alipayAppId)
+          setAlipayWarnings(health.alipayWarnings ?? [])
+        } catch {
+          setAlipayReady(false)
+          setAlipayAppId(undefined)
+          setAlipayWarnings([])
+        }
       })
+      .finally(() => setPlansLoaded(true))
   }, [open, apiBase])
 
   const expiryLabel = (() => {
@@ -223,6 +241,9 @@ export function ProRedeemSheet({
     void onRedeem(trimmed).finally(() => setBusy(false))
   }
 
+  const alipayPayEnabled =
+    alipayReady && alipayWarnings.length === 0
+
   const purchase = async (planId: MembershipPlanId) => {
     if (purchaseBusy) return
     if (!hasToken) {
@@ -231,6 +252,13 @@ export function ProRedeemSheet({
     }
     if (!isAlipayPayNative()) {
       setPayMsg('请在 Android 应用内使用支付宝支付')
+      return
+    }
+    if (!alipayPayEnabled) {
+      setPayMsg(
+        alipayWarnings[0] ??
+          '服务端支付宝未就绪，请在服务器 git pull 后 docker compose up -d --build',
+      )
       return
     }
     const base = getApiBase()
@@ -244,13 +272,22 @@ export function ProRedeemSheet({
     setPayMsg('')
     try {
       const created = await createMembershipPurchase(base, token, planId)
-      const payResult = await AlipayPay.pay({ orderString: created.orderString })
+      const payResult = await AlipayPay.pay({
+        orderString: created.orderString,
+        sandbox: created.sandbox,
+      })
       if (!alipaySyncSuccess(payResult.resultStatus)) {
+        const memo = payResult.memo?.trim() ?? ''
+        const hint =
+          memo.includes('商家订单参数异常') && created.sandbox
+            ? '（请确认：①服务器 .env 使用沙箱 APPID 9021000164606067 与沙箱系统默认密钥；②手机安装的是支付宝沙箱版 App）'
+            : ''
         setPayMsg(
-          payResult.memo?.trim() ||
-            (payResult.resultStatus === '6001'
+          memo
+            ? `${memo}${hint}`
+            : payResult.resultStatus === '6001'
               ? '已取消支付'
-              : `支付未完成（${payResult.resultStatus || '未知'}）`),
+              : `支付未完成（${payResult.resultStatus || '未知'}）`,
         )
         return
       }
@@ -284,8 +321,8 @@ export function ProRedeemSheet({
     }
   }
 
-  const showPurchase =
-    apiBase && hasToken && alipayReady && isAlipayPayNative() && plans.length > 0
+  const nativePay = apiBase && hasToken && isAlipayPayNative()
+  const displayPlans = plans.length > 0 ? plans : DEFAULT_MEMBERSHIP_PLANS
 
   const cancelMembership = () => {
     if (cancelBusy || busy || purchaseBusy) return
@@ -323,7 +360,9 @@ export function ProRedeemSheet({
                     ? `会员有效至 ${expiryLabel}，可继续兑换延长。`
                     : '您已是专业版会员。'
                   : hasToken
-                    ? '输入会员兑换码即可开通云端同步等功能。'
+                    ? isAlipayPayNative()
+                      ? '可选支付宝购买，或输入兑换码开通。'
+                      : '输入会员兑换码即可开通云端同步等功能。'
                     : '兑换前请先登录账号。'}
             </p>
           </div>
@@ -339,14 +378,14 @@ export function ProRedeemSheet({
           </button>
         </div>
 
-        {showPurchase ? (
+        {nativePay ? (
           <div className="mb-4 space-y-2">
             <p className="text-[12px] font-medium text-kj-muted">支付宝购买</p>
-            {plans.map((plan) => (
+            {displayPlans.map((plan) => (
               <button
                 key={plan.id}
                 type="button"
-                disabled={purchaseBusy !== null}
+                disabled={purchaseBusy !== null || !alipayPayEnabled}
                 onClick={() => void purchase(plan.id)}
                 className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-kj-surface/5 px-4 py-3 text-left transition-colors hover:bg-white/5 disabled:opacity-50"
               >
@@ -360,6 +399,15 @@ export function ProRedeemSheet({
             ))}
             {payMsg ? (
               <p className="text-[12px] leading-relaxed text-amber-200/90">{payMsg}</p>
+            ) : !plansLoaded ? (
+              <p className="text-[11px] leading-relaxed text-kj-muted">正在加载支付配置…</p>
+            ) : !alipayPayEnabled ? (
+              <p className="text-[11px] leading-relaxed text-amber-200/80">
+                {alipayWarnings[0] ??
+                  (alipayAppId?.startsWith('202100')
+                    ? `服务端 APPID 为正式应用 ${alipayAppId}，沙箱支付需改为 9021000164606067 及沙箱系统默认密钥（不是桌面「应用私钥RSA2048」那套）。`
+                    : '服务端支付宝未配置或未更新。请在服务器 git pull 后 docker compose up -d --build，并在 .env 配置沙箱 ALIPAY_*。')}
+              </p>
             ) : (
               <p className="text-[11px] leading-relaxed text-kj-muted">
                 沙箱测试请使用支付宝沙箱版 App 与沙箱买家账号。

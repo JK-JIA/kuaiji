@@ -21,12 +21,19 @@ import {
   xfyunAsrEnvReady,
 } from './asrStream.js'
 import { doubaoEnvReady, parseVoiceOnServer } from './voiceParse.js'
-import { alipayEnvReady, alipaySandboxMode } from './alipay.js'
 import {
+  alipayAppId,
+  alipayConfigWarnings,
+  alipayEnvReady,
+  alipaySandboxMode,
+} from './alipay.js'
+import {
+  assertAlipayConfigReady,
   createMembershipPurchaseOrder,
   getMembershipPurchaseOrder,
   handleAlipayNotify,
   markMembershipOrderPaidFromClient,
+  membershipAlipayMeta,
   membershipPlansJson,
 } from './membershipPayment.js'
 
@@ -208,6 +215,8 @@ app.get('/health', (_req, res) => {
     oneClickLogin: true,
     alipayPay: alipayEnvReady(),
     alipaySandbox: alipaySandboxMode(),
+    alipayAppId: alipayAppId() || undefined,
+    alipayWarnings: alipayConfigWarnings(),
   })
 })
 
@@ -481,7 +490,10 @@ app.get('/api/me', async (req, res) => {
 })
 
 app.get('/api/membership/plans', (_req, res) => {
-  res.json({ plans: membershipPlansJson(), alipayReady: alipayEnvReady() })
+  res.json({
+    plans: membershipPlansJson(),
+    ...membershipAlipayMeta(),
+  })
 })
 
 app.post('/api/membership/purchase/create', async (req, res) => {
@@ -499,12 +511,18 @@ app.post('/api/membership/purchase/create', async (req, res) => {
     res.status(503).json({ error: '服务端未配置支付宝支付' })
     return
   }
+  const configWarnings = alipayConfigWarnings()
+  if (configWarnings.length > 0) {
+    res.status(503).json({ error: configWarnings[0] })
+    return
+  }
   const parsed = PurchaseCreateSchema.safeParse(req.body)
   if (!parsed.success) {
     res.status(400).json({ error: '无效的会员套餐' })
     return
   }
   try {
+    assertAlipayConfigReady()
     const { order, orderString, sandbox } = await createMembershipPurchaseOrder(
       prisma,
       userId,
@@ -520,6 +538,11 @@ app.post('/api/membership/purchase/create', async (req, res) => {
     })
   } catch (e) {
     console.error('[ledger-api][membership/purchase/create]', e)
+    const msg = e instanceof Error ? e.message : ''
+    if (msg.startsWith('ALIPAY_CONFIG_MISMATCH:')) {
+      res.status(503).json({ error: msg.slice('ALIPAY_CONFIG_MISMATCH:'.length) })
+      return
+    }
     res.status(500).json({ error: '创建支付订单失败' })
   }
 })
@@ -842,8 +865,11 @@ async function bootstrap() {
   }
   if (alipayEnvReady()) {
     console.log(
-      `[ledger-api] 支付宝会员支付已启用 sandbox=${alipaySandboxMode()}`,
+      `[ledger-api] 支付宝会员支付已启用 sandbox=${alipaySandboxMode()} appId=${alipayAppId()}`,
     )
+    for (const w of alipayConfigWarnings()) {
+      console.warn(`[ledger-api] 支付宝配置警告: ${w}`)
+    }
   } else {
     console.warn(
       '[ledger-api] 未配置 ALIPAY_APP_ID / ALIPAY_PRIVATE_KEY / ALIPAY_PUBLIC_KEY：会员支付不可用',

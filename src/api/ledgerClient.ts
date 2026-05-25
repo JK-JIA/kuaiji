@@ -284,6 +284,8 @@ export type ApiHealth = {
   oneClickLogin?: boolean
   alipayPay?: boolean
   alipaySandbox?: boolean
+  alipayAppId?: string
+  alipayWarnings?: string[]
 }
 
 export type MembershipPlanId = 'monthly' | 'quarterly' | 'yearly'
@@ -298,6 +300,9 @@ export type MembershipPlanInfo = {
 export type MembershipPlansResponse = {
   plans: MembershipPlanInfo[]
   alipayReady: boolean
+  alipaySandbox?: boolean
+  alipayAppId?: string
+  alipayWarnings?: string[]
 }
 
 export type MembershipPurchaseCreateResponse = {

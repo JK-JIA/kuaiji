@@ -20,6 +20,8 @@ public class AlipayPlugin extends Plugin {
             call.reject("INVALID_ORDER", "缺少 orderString");
             return;
         }
+        Boolean sandbox = call.getBoolean("sandbox", true);
+        final boolean useSandbox = sandbox == null || sandbox;
         Activity activity = getActivity();
         if (activity == null) {
             call.reject("NO_ACTIVITY");
@@ -30,7 +32,7 @@ public class AlipayPlugin extends Plugin {
                         () -> {
                             PayTask payTask = new PayTask(activity);
                             Map<String, String> result =
-                                    payTask.payV2(orderString.trim(), true);
+                                    payTask.payV2(orderString.trim(), useSandbox);
                             activity.runOnUiThread(
                                     () -> {
                                         JSObject ret = new JSObject();
