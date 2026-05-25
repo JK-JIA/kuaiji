@@ -39,13 +39,17 @@ curl -s http://127.0.0.1:3001/health
 
 1. **服务器密钥与 APPID 不匹配**  
    沙箱联调必须使用沙箱控制台 → **系统默认密钥**（不是正式应用 `202100…` 的密钥）。  
-   执行 `curl http://127.0.0.1:3001/health`，确认 `alipayAppId` 为 `9021000164606067`，`alipayWarnings` 为空。
+   执行 `curl http://127.0.0.1:3001/health`，确认 `alipayAppId` 为 `9021000164606067`，`alipayWarnings` 为空。  
+   **注意**：控制台「应用私钥（非 JAVA）」与 `.env` 里 `ALIPAY_PRIVATE_KEY` 必须是**同一套**系统默认密钥里导出的应用私钥；若 `.env` 填了别的导出格式（如桌面正式应用 RSA 文件），会签名错误并触发本报错。
 
 2. **手机未安装支付宝沙箱版**  
    正式版支付宝无法处理沙箱订单，需安装[沙箱调试说明](https://opendocs.alipay.com/open/00dn7d?pathHash=f5e7ce65)中的 **沙箱版 App**，并用沙箱买家账号付款。
 
 3. **私钥格式**  
    `.env` 中 `ALIPAY_PRIVATE_KEY` 填 **应用私钥**（不是应用公钥），`ALIPAY_PUBLIC_KEY` 填 **支付宝公钥**（不是应用公钥）。支持 PKCS8 一行或多行 PEM。
+
+4. **App 内复制诊断日志**（1.0.71+）  
+   设置 → 升级专业版 → 点击套餐支付失败后，展开 **支付诊断日志** → **复制日志**，发给开发。日志含服务端 `payDebug`（app_id、sign、gateway）与原生 `resultStatus`/`memo`。
 
 参考：[商家订单参数异常排查](https://opendocs.alipay.com/support/04ows2)
 

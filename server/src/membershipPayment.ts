@@ -4,9 +4,12 @@ import {
   alipayAppId,
   alipayConfigWarnings,
   alipayEnvReady,
+  alipayGatewayUrl,
   alipayNotifyUrl,
+  alipayPrivateKeyType,
   alipaySandboxMode,
   getAlipaySdk,
+  parseAlipayOrderStringDebug,
 } from './alipay.js'
 import {
   getMembershipPlan,
@@ -85,10 +88,41 @@ export async function createMembershipPurchaseOrder(
     },
   })
 
+  const sandbox = alipaySandboxMode()
+  const serverAppId = alipayAppId()
+  const parsed = parseAlipayOrderStringDebug(orderString)
+  const warnings = alipayConfigWarnings()
+  if (parsed.orderAppId && serverAppId && parsed.orderAppId !== serverAppId) {
+    warnings.push(
+      `orderString 内 app_id=${parsed.orderAppId} 与 ALIPAY_APP_ID=${serverAppId} 不一致`,
+    )
+  }
+  if (!parsed.signPresent) {
+    warnings.push('orderString 缺少有效 sign 参数，请检查 ALIPAY_PRIVATE_KEY')
+  }
+
+  const payDebug = {
+    serverAppId,
+    sandbox,
+    gateway: alipayGatewayUrl(),
+    keyType: alipayPrivateKeyType(),
+    notifyUrl: alipayNotifyUrl(),
+    warnings,
+    ...parsed,
+  }
+
+  console.log('[ledger-api][alipay][create-order]', {
+    outTradeNo,
+    planId: plan.id,
+    amountYuan: plan.priceYuan,
+    ...payDebug,
+  })
+
   return {
     order,
     orderString,
-    sandbox: alipaySandboxMode(),
+    sandbox,
+    payDebug,
   }
 }
 

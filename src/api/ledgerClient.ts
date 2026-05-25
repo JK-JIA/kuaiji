@@ -305,6 +305,25 @@ export type MembershipPlansResponse = {
   alipayWarnings?: string[]
 }
 
+export type AlipayPayDebugInfo = {
+  serverAppId: string
+  sandbox: boolean
+  gateway: string
+  keyType: 'PKCS1' | 'PKCS8'
+  notifyUrl: string
+  warnings: string[]
+  orderStringLen: number
+  orderAppId: string | null
+  method: string | null
+  signPresent: boolean
+  signLen: number
+  timestamp: string | null
+  bizOutTradeNo: string | null
+  bizTotal: string | null
+  bizProductCode: string | null
+  orderStringPreview: string
+}
+
 export type MembershipPurchaseCreateResponse = {
   outTradeNo: string
   orderString: string
@@ -312,6 +331,7 @@ export type MembershipPurchaseCreateResponse = {
   amountYuan: string
   subject: string
   sandbox: boolean
+  payDebug?: AlipayPayDebugInfo
 }
 
 export type MembershipPurchaseStatusResponse = {

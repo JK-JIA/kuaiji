@@ -4,6 +4,8 @@ export type AlipayPayResult = {
   resultStatus: string
   memo: string
   result: string
+  /** 原生层诊断（Logcat 同步一份） */
+  debugLog?: string
 }
 
 export interface AlipayPayPlugin {

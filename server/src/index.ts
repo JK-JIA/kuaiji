@@ -523,11 +523,8 @@ app.post('/api/membership/purchase/create', async (req, res) => {
   }
   try {
     assertAlipayConfigReady()
-    const { order, orderString, sandbox } = await createMembershipPurchaseOrder(
-      prisma,
-      userId,
-      parsed.data.planId,
-    )
+    const { order, orderString, sandbox, payDebug } =
+      await createMembershipPurchaseOrder(prisma, userId, parsed.data.planId)
     res.json({
       outTradeNo: order.outTradeNo,
       orderString,
@@ -535,6 +532,7 @@ app.post('/api/membership/purchase/create', async (req, res) => {
       amountYuan: order.amountYuan,
       subject: order.subject,
       sandbox,
+      payDebug,
     })
   } catch (e) {
     console.error('[ledger-api][membership/purchase/create]', e)

@@ -15,6 +15,13 @@ import {
   alipaySyncSuccess,
   isAlipayPayNative,
 } from '../../plugins/alipayPay'
+import {
+  alipayDebugLog,
+  alipayDebugLogBlock,
+  clearAlipayPayDebugLog,
+  copyAlipayPayDebugLog,
+  getAlipayPayDebugLogText,
+} from '../../utils/alipayPayDebug'
 
 const PRO_CARD =
   'rounded-3xl bg-gradient-to-br from-stone-800 via-stone-900 to-stone-950 text-left shadow-xl ring-1 ring-amber-500/10'
@@ -187,11 +194,15 @@ export function ProRedeemSheet({
   const [alipayWarnings, setAlipayWarnings] = useState<string[]>([])
   const [plansLoaded, setPlansLoaded] = useState(false)
   const [payMsg, setPayMsg] = useState('')
+  const [payDebugOpen, setPayDebugOpen] = useState(false)
+  const [payDebugCopied, setPayDebugCopied] = useState(false)
 
   useEffect(() => {
     if (open) {
       setCode('')
       setPayMsg('')
+      setPayDebugOpen(false)
+      setPayDebugCopied(false)
     }
   }, [open])
 
@@ -270,17 +281,38 @@ export function ProRedeemSheet({
 
     setPurchaseBusy(planId)
     setPayMsg('')
+    clearAlipayPayDebugLog()
+    alipayDebugLog(`=== 开始购买 ${planId} ===`)
+    alipayDebugLog(`apiBase=${base}`)
+    alipayDebugLog(`native=${isAlipayPayNative()} alipayReady=${alipayReady}`)
+    if (alipayAppId) alipayDebugLog(`health.alipayAppId=${alipayAppId}`)
+    if (alipayWarnings.length) alipayDebugLogBlock('health.warnings', alipayWarnings)
+
     try {
       const created = await createMembershipPurchase(base, token, planId)
+      alipayDebugLogBlock('createMembershipPurchase', {
+        outTradeNo: created.outTradeNo,
+        planId: created.planId,
+        amountYuan: created.amountYuan,
+        sandbox: created.sandbox,
+        orderStringLen: created.orderString?.length ?? 0,
+        payDebug: created.payDebug,
+      })
+      if (created.payDebug?.warnings?.length) {
+        alipayDebugLogBlock('server.payDebug.warnings', created.payDebug.warnings)
+      }
+
       const payResult = await AlipayPay.pay({
         orderString: created.orderString,
         sandbox: created.sandbox,
       })
+      alipayDebugLogBlock('AlipayPay.pay result', payResult)
+
       if (!alipaySyncSuccess(payResult.resultStatus)) {
         const memo = payResult.memo?.trim() ?? ''
         const hint =
           memo.includes('商家订单参数异常') && created.sandbox
-            ? '（请确认：①服务器 .env 使用沙箱 APPID 9021000164606067 与沙箱系统默认密钥；②手机安装的是支付宝沙箱版 App）'
+            ? '（请确认：①服务器 .env 为沙箱 APPID 9021000164606067 + 沙箱「系统默认密钥」应用私钥/支付宝公钥，勿用正式应用密钥；②手机为支付宝沙箱版 App + 沙箱买家账号）'
             : ''
         setPayMsg(
           memo
@@ -289,6 +321,7 @@ export function ProRedeemSheet({
               ? '已取消支付'
               : `支付未完成（${payResult.resultStatus || '未知'}）`,
         )
+        setPayDebugOpen(true)
         return
       }
 
@@ -311,14 +344,25 @@ export function ProRedeemSheet({
         return
       }
 
+      alipayDebugLog('支付同步成功，查单确认会员…')
       await onPurchaseSuccess?.()
       setPayMsg('支付成功，专业版已开通')
       setTimeout(() => onClose(), 800)
     } catch (e) {
-      setPayMsg(e instanceof Error ? e.message : '支付失败')
+      const msg = e instanceof Error ? e.message : '支付失败'
+      alipayDebugLog(`ERROR: ${msg}`)
+      if (e instanceof Error && e.stack) alipayDebugLog(e.stack)
+      setPayMsg(msg)
+      setPayDebugOpen(true)
     } finally {
       setPurchaseBusy(null)
     }
+  }
+
+  const copyPayDebug = async () => {
+    const ok = await copyAlipayPayDebugLog()
+    setPayDebugCopied(ok)
+    if (ok) setTimeout(() => setPayDebugCopied(false), 2000)
   }
 
   const nativePay = apiBase && hasToken && isAlipayPayNative()
@@ -399,20 +443,57 @@ export function ProRedeemSheet({
             ))}
             {payMsg ? (
               <p className="text-[12px] leading-relaxed text-amber-200/90">{payMsg}</p>
-            ) : !plansLoaded ? (
+            ) : null}
+            <div className="rounded-xl border border-white/10 bg-black/20">
+              <button
+                type="button"
+                onClick={() => setPayDebugOpen((v) => !v)}
+                className="flex w-full items-center justify-between px-3 py-2 text-left text-[12px] text-kj-muted"
+              >
+                <span>支付诊断日志</span>
+                <span>{payDebugOpen ? '收起' : '展开'}</span>
+              </button>
+              {payDebugOpen ? (
+                <div className="border-t border-white/10 px-3 pb-3">
+                  <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-stone-300">
+                    {getAlipayPayDebugLogText() || '（暂无日志，请先点击上方套餐发起支付）'}
+                  </pre>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void copyPayDebug()}
+                      className="rounded-lg bg-amber-500/20 px-3 py-1.5 text-[12px] font-medium text-amber-200"
+                    >
+                      {payDebugCopied ? '已复制' : '复制日志'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearAlipayPayDebugLog()
+                        setPayDebugCopied(false)
+                      }}
+                      className="rounded-lg border border-white/15 px-3 py-1.5 text-[12px] text-stone-400"
+                    >
+                      清空
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+            {!payMsg && !plansLoaded ? (
               <p className="text-[11px] leading-relaxed text-kj-muted">正在加载支付配置…</p>
-            ) : !alipayPayEnabled ? (
+            ) : !payMsg && !alipayPayEnabled ? (
               <p className="text-[11px] leading-relaxed text-amber-200/80">
                 {alipayWarnings[0] ??
                   (alipayAppId?.startsWith('202100')
                     ? `服务端 APPID 为正式应用 ${alipayAppId}，沙箱支付需改为 9021000164606067 及沙箱系统默认密钥（不是桌面「应用私钥RSA2048」那套）。`
                     : '服务端支付宝未配置或未更新。请在服务器 git pull 后 docker compose up -d --build，并在 .env 配置沙箱 ALIPAY_*。')}
               </p>
-            ) : (
+            ) : !payMsg ? (
               <p className="text-[11px] leading-relaxed text-kj-muted">
-                沙箱测试请使用支付宝沙箱版 App 与沙箱买家账号。
+                沙箱测试请使用支付宝沙箱版 App 与沙箱买家账号。出错请展开「支付诊断日志」复制发开发。
               </p>
-            )}
+            ) : null}
           </div>
         ) : null}
 

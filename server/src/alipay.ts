@@ -105,3 +105,55 @@ export function alipayNotifyUrl(): string {
     'https://kuaijipf.com/api/payment/alipay/notify'
   )
 }
+
+export function alipayPrivateKeyType(): 'PKCS1' | 'PKCS8' {
+  const { keyType } = normalizePrivateKey(envTrim('ALIPAY_PRIVATE_KEY'))
+  return keyType
+}
+
+export function alipayGatewayUrl(): string {
+  return (
+    envTrim('ALIPAY_GATEWAY') ||
+    (alipaySandboxMode()
+      ? 'https://openapi-sandbox.dl.alipaydev.com/gateway.do'
+      : 'https://openapi.alipay.com/gateway.do')
+  )
+}
+
+/** 从 sdkExecute 返回的 orderString 解析关键字段（用于排查「商家订单参数异常」） */
+export function parseAlipayOrderStringDebug(orderString: string) {
+  const raw = orderString.trim()
+  const params = new URLSearchParams(raw)
+  const appId = params.get('app_id') ?? params.get('appId') ?? null
+  const method = params.get('method') ?? null
+  const sign = params.get('sign') ?? null
+  const timestamp = params.get('timestamp') ?? null
+  const biz = params.get('biz_content') ?? null
+  let bizOutTradeNo: string | null = null
+  let bizTotal: string | null = null
+  let bizProductCode: string | null = null
+  if (biz) {
+    try {
+      const j = JSON.parse(biz) as Record<string, unknown>
+      bizOutTradeNo =
+        typeof j.out_trade_no === 'string' ? j.out_trade_no : null
+      bizTotal = typeof j.total_amount === 'string' ? j.total_amount : null
+      bizProductCode =
+        typeof j.product_code === 'string' ? j.product_code : null
+    } catch {
+      /* ignore */
+    }
+  }
+  return {
+    orderStringLen: raw.length,
+    orderAppId: appId,
+    method,
+    signPresent: Boolean(sign && sign.length > 8),
+    signLen: sign?.length ?? 0,
+    timestamp,
+    bizOutTradeNo,
+    bizTotal,
+    bizProductCode,
+    orderStringPreview: raw.length > 200 ? `${raw.slice(0, 200)}…` : raw,
+  }
+}
