@@ -83,7 +83,7 @@ function statsConfigHintHtml() {
   const parts = []
   if (!healthInfo.ledgerApiConfigured) {
     parts.push(
-      '<code>LEDGER_API_URL=http://host.docker.internal:3001</code>（Docker 部署；勿用 127.0.0.1）',
+      '<code>LEDGER_API_URL=http://api:3001</code>（同机 Docker；勿用 127.0.0.1）',
     )
   }
   if (!healthInfo.ledgerTokenConfigured) {
