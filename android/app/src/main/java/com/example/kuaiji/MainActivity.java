@@ -11,6 +11,7 @@ import android.os.Handler;
 import android.os.Looper;
 import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.PluginHandle;
 
 /**
  * Capacitor 页面源为 https://localhost，请求 http:// 的 API 时，WebView 会拦截「混合内容」，
@@ -30,6 +31,23 @@ public class MainActivity extends BridgeActivity {
         applyWebViewSettings();
         new Handler(Looper.getMainLooper()).post(this::applyWebViewSettings);
         new Handler(Looper.getMainLooper()).postDelayed(this::applyWebViewSettings, 300);
+        scheduleNumberAuthWarmUp();
+    }
+
+    /** 进入 App 即后台预取号+掩码，登录页可秒显号码 */
+    private void scheduleNumberAuthWarmUp() {
+        new Handler(Looper.getMainLooper())
+                .postDelayed(
+                        () -> {
+                            Bridge bridge = getBridge();
+                            if (bridge == null) return;
+                            PluginHandle handle = bridge.getPlugin("NumberAuth");
+                            if (handle != null
+                                    && handle.getInstance() instanceof NumberAuthPlugin) {
+                                ((NumberAuthPlugin) handle.getInstance()).warmUpInBackground();
+                            }
+                        },
+                        1200);
     }
 
     /** 混合内容策略；WebView 文本缩放固定 100%，字体大小由应用内「设置」控制（html font-size） */

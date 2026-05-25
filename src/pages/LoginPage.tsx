@@ -3,11 +3,12 @@ import ReactDOM from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { fetchApiHealth, getStoredPhone } from '../api/ledgerClient'
+import { CtAccountLegalMenuModal } from '../components/CtAccountLegalMenuModal'
 import {
-  NUMBER_AUTH_NOTICE,
-  PRIVACY_POLICY,
-  USER_AGREEMENT,
-} from '../constants/legalTexts'
+  CT_ACCOUNT_PRIVACY_POLICY,
+  CT_ACCOUNT_SERVICE_AGREEMENT,
+} from '../constants/ctAccountLegalTexts'
+import { PRIVACY_POLICY, USER_AGREEMENT } from '../constants/legalTexts'
 import { isNumberAuthNative, NumberAuth } from '../plugins/numberAuth'
 
 /** 展示用脱敏：前三位 + **** + 后四位，如 191****7776 */
@@ -118,34 +119,36 @@ function OneClickLoginPanel({
 
   return (
     <div className="flex flex-col py-2">
-      <div className="mb-6 text-center">
-        <div className="flex items-center justify-center gap-2">
-          <p className="font-mono text-[34px] font-bold tabular-nums tracking-[0.12em] text-stone-900 dark:text-white">
-            {displayPhone || (phoneLoading ? '······' : '本机号码')}
-          </p>
-          {displayPhone && !phoneLoading ? (
-            <button
-              type="button"
-              onClick={onEditPhone}
-              aria-label="更换手机号"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-100 hover:text-emerald-600 dark:hover:bg-zinc-700 dark:hover:text-emerald-400"
-            >
-              <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden>
-                <path
-                  d="M16.862 3.487a2.1 2.1 0 0 1 2.97 2.97L7.5 18.79l-4.01 1.004 1.004-4.01 12.368-12.297Z"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M14.5 6.5l3 3"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          ) : null}
+      <div className="mb-6 w-full text-center">
+        <div className="flex w-full justify-center">
+          <span className="relative inline-block">
+            <span className="block font-mono text-[22px] font-semibold tabular-nums tracking-wide text-stone-900 dark:text-white">
+              {displayPhone || (phoneLoading ? '······' : (oneClickReady ? '本机号码' : '未获取到号码'))}
+            </span>
+            {displayPhone && !phoneLoading ? (
+              <button
+                type="button"
+                onClick={onEditPhone}
+                aria-label="更换手机号"
+                className="absolute top-1/2 left-full ml-1.5 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-stone-400 transition-colors hover:bg-stone-100 hover:text-emerald-600 dark:hover:bg-zinc-700 dark:hover:text-emerald-400"
+              >
+                <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden>
+                  <path
+                    d="M16.862 3.487a2.1 2.1 0 0 1 2.97 2.97L7.5 18.79l-4.01 1.004 1.004-4.01 12.368-12.297Z"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M14.5 6.5l3 3"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            ) : null}
+          </span>
         </div>
         {carrierHint ? (
           <p className="mt-2 text-[12px] text-stone-400 dark:text-zinc-500">{carrierHint}</p>
@@ -175,7 +178,7 @@ function OneClickLoginPanel({
           onClick={() => onOpenLegal('numberAuth')}
           className="text-emerald-600 underline-offset-2 hover:underline dark:text-emerald-400"
         >
-          《号码认证服务说明》
+          《天翼账号认证服务条款》
         </button>
         、
         <button
@@ -235,7 +238,7 @@ export function LoginPage() {
   const [authBusy, setAuthBusy] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   const [legalModal, setLegalModal] = useState<
-    'agreement' | 'privacy' | 'numberAuth' | null
+    'agreement' | 'privacy' | 'numberAuth' | 'ctService' | 'ctPrivacy' | null
   >(null)
   const [showSmsFallback, setShowSmsFallback] = useState(false)
   const [oneClickReady, setOneClickReady] = useState(!nativeOneClick)
@@ -280,17 +283,36 @@ export function LoginPage() {
       if (cancelled) return
       applyMaskFromNative(data.maskedPhone, setMaskedPhone)
       if (data.carrierHint) setCarrierHint(data.carrierHint)
+      setPhoneLoading(false)
     }).then((h) => {
       maskListener = h
     })
+
+    void NumberAuth.getCachedMask()
+      .then((cached) => {
+        if (cancelled) return
+        applyMaskFromNative(cached.maskedPhone, setMaskedPhone)
+        if (cached.carrierHint) setCarrierHint(cached.carrierHint)
+        if (cached.maskedPhone) setPhoneLoading(false)
+      })
+      .catch(() => {})
 
     ;(async () => {
       setPhoneLoading(true)
       setErrorMsg('')
       try {
+        const healthP =
+          apiBase != null
+            ? fetchApiHealth(apiBase)
+            : Promise.resolve({ oneClickLogin: true as boolean })
+
+        const [h] = await Promise.all([
+          healthP.catch(() => ({ oneClickLogin: false as boolean })),
+          NumberAuth.initialize(),
+        ])
+        if (cancelled) return
         if (apiBase) {
-          const h = await fetchApiHealth(apiBase)
-          if (!cancelled) setServerOneClick(h.oneClickLogin === true)
+          setServerOneClick(h.oneClickLogin === true)
           if (!h.oneClickLogin) {
             setOneClickReady(false)
             setSdkReady(true)
@@ -298,29 +320,20 @@ export function LoginPage() {
             return
           }
         }
-        await NumberAuth.initialize()
-        if (!cancelled) setSdkReady(true)
+        setSdkReady(true)
 
-        const prePromise = NumberAuth.preLogin()
-        const mask = await NumberAuth.getMaskedPhone()
-        if (cancelled) return
-        applyMaskFromNative(mask.maskedPhone, setMaskedPhone)
-        setCarrierHint(mask.carrierHint || mask.carrier || '')
-        setPhoneLoading(false)
-
-        const pre = await prePromise
+        const pre = await NumberAuth.preLogin()
         if (cancelled) return
         setOneClickReady(pre.available)
-        setCarrierHint((prev) => prev || pre.carrierHint || pre.carrier || '')
+        setCarrierHint(pre.carrierHint || pre.carrier || '')
         applyMaskFromNative(pre.maskedPhone, setMaskedPhone)
       } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
         if (!cancelled) {
           setOneClickReady(false)
           setSdkReady(true)
           setShowSmsFallback(true)
-          setErrorMsg(
-            e instanceof Error ? e.message : '一键登录环境不可用，请用短信登录',
-          )
+          setErrorMsg(msg || '一键登录环境不可用，请用短信登录')
         }
       } finally {
         if (!cancelled) setPhoneLoading(false)
@@ -354,7 +367,9 @@ export function LoginPage() {
     setAuthBusy(true)
     setErrorMsg('')
     try {
-      const { accessToken } = await NumberAuth.login()
+      let accessToken: string
+      // 预取号后走授权页取 token（静默 accelerate 无法稳定拿到掩码/ token）
+      ;({ accessToken } = await NumberAuth.login())
       await oneClickLogin(accessToken)
       await refreshProfile()
       navigate('/', { replace: true })
@@ -437,21 +452,22 @@ export function LoginPage() {
         <div className="mb-5 flex flex-col items-center text-center">
           <img
             src="/app-icon.png"
-            alt="kuaiji"
-            className="mb-3 h-20 w-20 rounded-[22px] shadow-lg shadow-emerald-500/25"
+            alt=""
+            className="mb-3 h-16 w-16 rounded-[22px] object-cover shadow-lg shadow-emerald-500/25"
+            width={64}
+            height={64}
           />
-          <p className="text-[22px] font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
+          <h1 className="text-[30px] font-bold tracking-tight text-stone-800 dark:text-white">
+            kuaiji
+          </h1>
+          <p className="mt-1.5 text-[15px] font-semibold text-emerald-600 dark:text-emerald-400">
             批发场景随时记
           </p>
-          {showOneClickPanel ? (
-            <p className="mt-1 text-[12px] text-stone-400 dark:text-stone-500">
-              使用本机号码快速登录
-            </p>
-          ) : (
+          {!showOneClickPanel ? (
             <p className="mt-1 text-[12px] text-stone-400 dark:text-stone-500">
               语音记账 · 云端同步 · 一键对账
             </p>
-          )}
+          ) : null}
         </div>
 
         <div className="rounded-2xl bg-white/80 p-5 shadow-xl shadow-stone-200/70 ring-1 ring-white/80 backdrop-blur-md dark:bg-zinc-800/80 dark:shadow-black/40 dark:ring-white/10">
@@ -664,9 +680,22 @@ export function LoginPage() {
         />
       )}
       {legalModal === 'numberAuth' && (
+        <CtAccountLegalMenuModal
+          onSelect={(key) => setLegalModal(key)}
+          onClose={() => setLegalModal(null)}
+        />
+      )}
+      {legalModal === 'ctService' && (
         <LegalModal
-          title="号码认证服务说明"
-          content={NUMBER_AUTH_NOTICE}
+          title="天翼账号服务协议"
+          content={CT_ACCOUNT_SERVICE_AGREEMENT}
+          onClose={() => setLegalModal(null)}
+        />
+      )}
+      {legalModal === 'ctPrivacy' && (
+        <LegalModal
+          title="天翼账号隐私政策"
+          content={CT_ACCOUNT_PRIVACY_POLICY}
           onClose={() => setLegalModal(null)}
         />
       )}
