@@ -101,9 +101,12 @@ app.get('/api/admin/overview', async (req, res) => {
     res.json(body)
   } catch (e) {
     console.error('[admin/overview]', e)
-    res.status(502).json({
-      error: e instanceof Error ? e.message : '无法连接业务 API',
-    })
+    const msg = e instanceof Error ? e.message : '无法连接业务 API'
+    const hint =
+      LEDGER_API_URL.includes('127.0.0.1') || LEDGER_API_URL.includes('localhost')
+        ? ' uploader 在 Docker 内时 127.0.0.1 连不到宿主机 API，请改 website/.env 为 http://host.docker.internal:3001 后重建 uploader。'
+        : ''
+    res.status(502).json({ error: msg + hint })
   }
 })
 

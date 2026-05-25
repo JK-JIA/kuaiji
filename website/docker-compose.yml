@@ -7,6 +7,9 @@ services:
       context: ./uploader
       dockerfile: Dockerfile
     restart: unless-stopped
+    # uploader 在容器内，127.0.0.1 指向自身而非宿主机 ledger-api；用 host.docker.internal
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     environment:
       PORT: '3005'
       UPLOAD_TOKEN: ${UPLOAD_TOKEN:-}

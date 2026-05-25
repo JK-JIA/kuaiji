@@ -43,6 +43,8 @@ services:
       DATABASE_URL: mysql://ledger:ledger@db:3306/ledger
       JWT_SECRET: ${JWT_SECRET:-please-change-this-secret-min-32-characters-long}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-*}
+      # 官网管理后台拉取会员/订单（与 website/.env 的 LEDGER_ADMIN_TOKEN 一致）
+      WEBSITE_ADMIN_TOKEN: ${WEBSITE_ADMIN_TOKEN:-}
       # 语音识别：控制台「APP ID」→ VOLC_ASR_APP_KEY；「Access Token」→ VOLC_ASR_ACCESS_KEY
       # 在仓库旁建 .env 写入上述变量（勿提交 .env）；或 export 后再 compose up
       VOLC_ASR_APP_KEY: ${VOLC_ASR_APP_KEY:-}

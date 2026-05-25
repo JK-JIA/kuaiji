@@ -82,7 +82,9 @@ function showDashboard(loggedIn) {
 function statsConfigHintHtml() {
   const parts = []
   if (!healthInfo.ledgerApiConfigured) {
-    parts.push('<code>LEDGER_API_URL=http://&lt;主机&gt;:3001</code>（同机部署可用 <code>http://127.0.0.1:3001</code>）')
+    parts.push(
+      '<code>LEDGER_API_URL=http://host.docker.internal:3001</code>（Docker 部署；勿用 127.0.0.1）',
+    )
   }
   if (!healthInfo.ledgerTokenConfigured) {
     parts.push('<code>LEDGER_ADMIN_TOKEN=</code>随机长串（与 ledger-api 的 <code>WEBSITE_ADMIN_TOKEN</code> 相同）')
