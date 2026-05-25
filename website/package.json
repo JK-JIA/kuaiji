@@ -1,0 +1,9 @@
+{
+  "name": "kuaiji-website",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node dev-start.mjs",
+    "dev:install": "npm install --prefix uploader"
+  }
+}

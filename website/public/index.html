@@ -3,132 +3,363 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>记账本 · 下载</title>
-    <link rel="stylesheet" href="/assets/site.css" />
+    <meta
+      name="description"
+      content="kuaiji — 果蔬批发商的语音记账工具。说一句就入账，核账一键完成。"
+    />
+    <title>kuaiji · 批发商的语音记账神器</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=Noto+Sans+SC:wght@300;400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/assets/landing.css" />
+    <link rel="icon" href="/assets/app-icon.png" type="image/png" />
   </head>
   <body>
-    <div class="wrap">
-      <header class="hero">
-        <p class="eyebrow">批发记账</p>
-        <h1>记账本</h1>
-        <p class="lede">
-          公开下载各版本 Android 安装包与网页热更新包。管理员请在下方的<strong>管理后台</strong>登录后上传或删除版本（APK
-          整包安装 / zip 热更新由扩展名自动识别）。
-        </p>
-      </header>
+    <nav>
+      <a class="nav-logo" href="/"><span class="logo-dot"></span>kuaiji</a>
+      <ul class="nav-links">
+        <li><a href="#screenshots">应用截图</a></li>
+        <li><a href="#features">功能特色</a></li>
+        <li><a href="#howto">使用方法</a></li>
+        <li><a href="#reviews">用户评价</a></li>
+      </ul>
+      <div class="nav-right">
+        <a class="nav-admin" href="/admin.html">管理员登录</a>
+        <a class="nav-cta" href="#download">免费下载</a>
+      </div>
+    </nav>
 
-      <section class="admin-section hidden" id="admin-section" aria-label="管理后台">
-        <p class="admin-off hidden" id="admin-off">
-          服务端未配置 <code>UPLOAD_TOKEN</code>，仅可在服务器上维护
-          <code>downloads/</code> 与 <code>releases.json</code>。
-        </p>
-
-        <div class="panel admin-card" id="admin-login-card">
-          <h2 class="admin-heading">管理后台</h2>
-          <p class="admin-lede">
-            输入与服务器环境变量 <code>UPLOAD_TOKEN</code> 一致的令牌，登录后可连续上传多版、并管理已有版本（删除会同步更新列表与服务器文件）。
-          </p>
-          <form id="login-form" class="stack-form">
-            <label class="field">
-              <span class="label">上传令牌</span>
-              <input
-                id="login-token"
-                name="token"
-                type="password"
-                autocomplete="current-password"
-                placeholder="登录后保存在本机浏览器（关闭标签页仍有效至关闭浏览器）"
-                required
-              />
-            </label>
-            <button type="submit" class="btn-submit">登录</button>
-            <p class="form-msg" id="login-msg" aria-live="polite"></p>
-          </form>
-        </div>
-
-        <div class="panel admin-card hidden" id="admin-panel">
-          <div class="admin-panel-head">
-            <div>
-              <h2 class="admin-heading">版本管理</h2>
-              <p class="admin-sub">已登录 · 可多次上传；下方列表可删除历史版本。</p>
-            </div>
-            <button type="button" class="btn-outline" id="btn-logout">退出登录</button>
+    <section
+      class="hero-section"
+      style="position:relative;overflow:hidden;background:linear-gradient(180deg,var(--g50) 0%,white 60%)"
+    >
+      <div class="hero fade-up">
+        <div>
+          <div class="hero-eyebrow">
+            <div class="eyebrow-dot"></div>
+            专为果蔬批发商打造
           </div>
+          <h1>开口说一句，<br /><em>账就记好了</em></h1>
+          <p class="hero-desc">
+            不用打字、不用翻账本。说一句「收了王老板西瓜款三千二」，kuaiji
+            自动识别、分类、记录，核账一键完成。
+          </p>
+          <div class="hero-actions">
+            <a href="#download" class="btn-primary" id="hero-dl">▶ 立即免费下载</a>
+            <a href="#features" class="btn-sec">了解功能</a>
+          </div>
+          <div class="hero-trust">
+            <span>专为 <strong>果蔬批发</strong> 场景设计 · 说话就能记账</span>
+          </div>
+        </div>
 
-          <form id="upload-form" class="stack-form upload-form-inner">
-            <label class="field">
-              <span class="label">安装包（.apk）或热更新包（.zip）</span>
-              <input
-                name="file"
-                type="file"
-                accept=".apk,application/vnd.android.package-archive,.zip,application/zip"
-                required
-              />
-            </label>
-            <p class="upload-hint">
-              上传 <code>.zip</code> 时写入 <code>bundle</code> 字段，App 内热更新；上传
-              <code>.apk</code> 时写入 <code>file</code> 字段，整包安装替换。
-            </p>
-            <label class="field">
-              <span class="label">版本号</span>
-              <input name="version" type="text" placeholder="例如 1.0.5" required />
-            </label>
-            <label class="field">
-              <span class="label">热更新包版本（选填，仅 zip）</span>
-              <input
-                name="bundleVersion"
-                type="text"
-                placeholder="默认同上「版本号」；与 App 内比对 semver"
-              />
-            </label>
-            <label class="field">
-              <span class="label">原生 versionCode（选填，仅 apk）</span>
-              <input
-                name="versionCode"
-                type="number"
-                min="1"
-                step="1"
-                placeholder="与 build.gradle 一致时便于客户端比较"
-              />
-            </label>
-            <label class="field">
-              <span class="label">最低原生 versionCode（选填，仅 zip）</span>
-              <input
-                name="minNativeVersionCode"
-                type="number"
-                min="1"
-                step="1"
-                placeholder="低于此壳版本时 App 只提示整包 APK"
-              />
-            </label>
-            <label class="field">
-              <span class="label">日期</span>
-              <input name="date" type="date" id="upload-date" />
-            </label>
-            <label class="field">
-              <span class="label">渠道</span>
-              <input name="channel" type="text" placeholder="release / debug" />
-            </label>
-            <label class="field">
-              <span class="label">更新说明</span>
-              <input name="notes" type="text" placeholder="可选" />
-            </label>
-            <button type="submit" class="btn-submit">上传并发布</button>
-            <p class="form-msg" id="upload-msg" aria-live="polite"></p>
-          </form>
+        <div class="hero-visual">
+          <div class="phone-wrap phone-wrap-side">
+            <div class="phone">
+              <div class="phone-inner">
+                <img
+                  src="/assets/screens/hero-stats.png"
+                  alt="统计分析界面"
+                  width="400"
+                  height="856"
+                  loading="eager"
+                />
+              </div>
+            </div>
+            <span class="phone-label">统计分析</span>
+          </div>
+          <div class="phone-wrap">
+            <div class="phone main">
+              <div class="phone-inner">
+                <img
+                  src="/assets/screens/hero-home.png"
+                  alt="首页按日账单界面"
+                  width="475"
+                  height="1016"
+                  loading="eager"
+                />
+              </div>
+            </div>
+            <span class="phone-label">语音记账</span>
+          </div>
+          <div class="phone-wrap phone-wrap-side">
+            <div class="phone">
+              <div class="phone-inner">
+                <img
+                  src="/assets/screens/hero-products.png"
+                  alt="商品销售占比界面"
+                  width="400"
+                  height="856"
+                  loading="eager"
+                />
+              </div>
+            </div>
+            <span class="phone-label">商品销售占比</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="stats-bar fade-up">
+      <div class="stats-inner">
+        <div>
+          <div class="stat-num">语音</div>
+          <div class="stat-lbl">核心记账方式</div>
+        </div>
+        <div>
+          <div class="stat-num">3秒</div>
+          <div class="stat-lbl">典型场景记一笔</div>
+        </div>
+        <div>
+          <div class="stat-num">95%+</div>
+          <div class="stat-lbl">标准普通话识别率<br /><span class="stat-hint">清晰环境实测</span></div>
+        </div>
+        <div>
+          <div class="stat-num">核账</div>
+          <div class="stat-lbl">购买方一键汇总</div>
+        </div>
+      </div>
+      <p class="stats-disclaimer">识别效果因口音、环境噪声而异，请以实际使用为准。</p>
+    </div>
+
+    <section id="screenshots" class="section fade-up">
+      <div class="sec-label">应用截图</div>
+      <h2>真实界面，<em>所见即所得</em></h2>
+      <p class="sec-desc">清爽干净的设计，批发市场嘈杂环境下也能一眼看清账目。</p>
+      <div class="gallery">
+        <div class="gallery-item">
+          <div class="gallery-phone">
+            <img
+              src="/assets/screens/hero-home.png"
+              alt="首页按日账单"
+              width="475"
+              height="1016"
+              loading="lazy"
+            />
+          </div>
+          <div class="gallery-caption">首页 · 语音记账<br />长按「记一笔」开口说话</div>
+        </div>
+        <div class="gallery-item">
+          <div class="gallery-phone">
+            <img
+              src="/assets/screens/hero-stats.png"
+              alt="统计分析"
+              width="400"
+              height="856"
+              loading="lazy"
+            />
+          </div>
+          <div class="gallery-caption">统计分析<br />月报/周报，与上期对比</div>
+        </div>
+        <div class="gallery-item">
+          <div class="gallery-phone">
+            <img
+              src="/assets/screens/gallery-products.jpg"
+              alt="商品销售占比"
+              width="400"
+              height="856"
+              loading="lazy"
+            />
+          </div>
+          <div class="gallery-caption">商品销售占比<br />饼图 + 列表双视图</div>
+        </div>
+        <div class="gallery-item">
+          <div class="gallery-phone">
+            <img
+              src="/assets/screens/gallery-buyers.jpg"
+              alt="购买方汇总"
+              width="400"
+              height="856"
+              loading="lazy"
+            />
+          </div>
+          <div class="gallery-caption">购买方汇总<br />未核账一目了然</div>
+        </div>
+        <div class="gallery-item">
+          <div class="gallery-phone">
+            <img
+              src="/assets/screens/gallery-settings.jpg"
+              alt="设置页面"
+              width="400"
+              height="856"
+              loading="lazy"
+            />
+          </div>
+          <div class="gallery-caption">设置 · 专业版<br />语音热词 · 自定义字段</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="section fade-up features-section">
+      <div class="sec-label">核心功能</div>
+      <h2>批发记账，<em>从未这么轻松</em></h2>
+      <p class="sec-desc">专为批发市场场景设计，手没空、嘴不停，账就记好了。</p>
+      <div class="features-grid">
+        <div class="feat-card hl">
+          <div class="feat-icon">🎙</div>
+          <div class="feat-title">语音记账</div>
+          <div class="feat-desc">
+            长按「记一笔」开口说话，自动识别客户名、商品、单价、数量、金额，无需打字。支持语音热词与别名设置，方言也能识别。
+          </div>
+          <span class="feat-tag">核心功能</span>
+        </div>
+        <div class="feat-card">
+          <div class="feat-icon">📊</div>
+          <div class="feat-title">一键核账</div>
+          <div class="feat-desc">
+            按购买方汇总总斤数、总金额、未核账金额，已结清/未结清一键切换，催款不尴尬。
+          </div>
+          <span class="feat-tag">省时省力</span>
+        </div>
+        <div class="feat-card">
+          <div class="feat-icon">📈</div>
+          <div class="feat-title">统计分析</div>
+          <div class="feat-desc">
+            周报/月报/年报自定义，商品销售占比饼图，购买方汇总柱状图，经营数据一眼看懂。
+          </div>
+          <span class="feat-tag">经营洞察</span>
+        </div>
+        <div class="feat-card">
+          <div class="feat-icon">🗂</div>
+          <div class="feat-title">按日账单</div>
+          <div class="feat-desc">
+            按日期查看所有账单，搜索全部字段快速定位，已结清/未结清分类展示，核账清晰有序。
+          </div>
+          <span class="feat-tag">清晰有序</span>
+        </div>
+        <div class="feat-card">
+          <div class="feat-icon">☁</div>
+          <div class="feat-title">云端同步</div>
+          <div class="feat-desc">
+            数据实时云端备份，多设备同步，手机丢了账不丢，支持 CSV/Excel 导入导出。
+          </div>
+          <span class="feat-tag">安全备份</span>
+        </div>
+        <div class="feat-card">
+          <div class="feat-icon">⚙</div>
+          <div class="feat-title">专业版权益</div>
+          <div class="feat-desc">
+            自定义账本字段、商品管理、语音热词与别名、切换语音识别引擎（豆包/火山），满足专业需求。
+          </div>
+          <span class="feat-tag">专业版</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="howto-wrap">
+      <section id="howto" class="howto-section fade-up">
+        <div class="sec-label">使用方法</div>
+        <h2>3 步上手，<em>当天就能用</em></h2>
+        <p class="sec-desc">不需要培训，和说话一样简单。</p>
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">01</div>
+            <div class="step-icon">📲</div>
+            <div class="step-title">下载安装</div>
+            <div class="step-desc">从本页下载最新 Android 安装包，安装后用手机号登录。</div>
+          </div>
+          <div class="step">
+            <div class="step-num">02</div>
+            <div class="step-icon">🎙</div>
+            <div class="step-title">长按说话</div>
+            <div class="step-desc">长按「记一笔」按钮，说出交易内容，松手自动识别并记录。</div>
+          </div>
+          <div class="step">
+            <div class="step-num">03</div>
+            <div class="step-icon">✅</div>
+            <div class="step-title">确认入账</div>
+            <div class="step-desc">确认识别结果，一键保存，账目自动归类到对应客户和商品。</div>
+          </div>
+          <div class="step">
+            <div class="step-num">04</div>
+            <div class="step-icon">📊</div>
+            <div class="step-title">查账核账</div>
+            <div class="step-desc">随时查看每个客户往来、月度统计，欠款清晰，一键核账。</div>
+          </div>
         </div>
       </section>
-
-      <section class="panel" id="panel">
-        <h2 class="panel-title">版本列表</h2>
-        <p class="loading" id="loading">加载版本列表…</p>
-        <p class="error hidden" id="error"></p>
-        <ul class="list hidden" id="list"></ul>
-      </section>
-
-      <footer class="foot">
-        <p>数据与账号由自建账本后端提供，与本下载页无关。</p>
-      </footer>
     </div>
-    <script src="/assets/app.js" type="module"></script>
+
+    <section id="reviews" class="section fade-up">
+      <div class="sec-label">用户评价</div>
+      <h2>他们已经<em>省出了大量时间</em></h2>
+      <p class="sec-desc reviews-desc">来自真实批发商的使用反馈</p>
+      <div class="rev-grid">
+        <div class="rev-card">
+          <div class="rev-stars">★★★★★</div>
+          <div class="rev-text">
+            「以前每天晚上要花一个多小时对账，现在白天卖货时顺嘴说一下，晚上打开看一眼就完事了。核账准确，再也没跟客户对错过账。」
+          </div>
+          <div class="rev-author">
+            <div class="rev-av" style="background:#4caf6a">张</div>
+            <div>
+              <div class="rev-name">张老板</div>
+              <div class="rev-role">广州江南市场 · 薯类批发</div>
+            </div>
+          </div>
+        </div>
+        <div class="rev-card">
+          <div class="rev-stars">★★★★★</div>
+          <div class="rev-text">
+            「我手机打字慢，以前记账靠小本本，常丢常忘。现在直接说话就行，连我们这边口音都能识别，客户欠款也有提醒，再不怕忘了催款了。」
+          </div>
+          <div class="rev-author">
+            <div class="rev-av" style="background:#2d7a45">李</div>
+            <div>
+              <div class="rev-name">李大姐</div>
+              <div class="rev-role">武汉白沙洲市场 · 西瓜批发</div>
+            </div>
+          </div>
+        </div>
+        <div class="rev-card">
+          <div class="rev-stars">★★★★★</div>
+          <div class="rev-text">
+            「用了两个月了。最好用的是购买方汇总功能，每个人欠多少、收了多少清清楚楚，之前对账要大半天，现在十分钟搞定。」
+          </div>
+          <div class="rev-author">
+            <div class="rev-av" style="background:#1a4d2a">陈</div>
+            <div>
+              <div class="rev-name">陈老板</div>
+              <div class="rev-role">成都批发市场 · 蔬菜批发</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="cta-wrap">
+      <section id="download" class="cta-section fade-up">
+        <div class="sec-label">立即开始</div>
+        <h2>免费下载，<br /><em>今天就开始省时间</em></h2>
+        <p class="sec-desc cta-desc">
+          官网仅提供<strong>最新版</strong> Android 安装包。下载后 3 分钟内即可记下第一笔账。
+        </p>
+        <div class="cta-btns">
+          <a href="#" class="dl-btn green disabled" id="dl-apk" download>
+            <span class="dl-icon">🤖</span>
+            <div>
+              <span class="dl-sub" id="dl-sub">正在获取版本…</span>
+              <span class="dl-main" id="dl-main">下载 Android 版</span>
+            </div>
+          </a>
+        </div>
+        <p class="cta-note" id="dl-notes"></p>
+        <p id="dl-status" class="cta-status" aria-live="polite"></p>
+      </section>
+    </div>
+
+    <footer>
+      <p><strong>kuaiji</strong> · 批发商的语音记账神器</p>
+      <p class="footer-links">
+        <a href="/privacy.html">隐私政策</a>
+        <a href="/terms.html">用户协议</a>
+        <a href="/admin.html">管理员</a>
+      </p>
+      <p class="footer-copy">© 2026 kuaiji</p>
+    </footer>
+
+    <script src="/assets/home.js" defer></script>
   </body>
 </html>

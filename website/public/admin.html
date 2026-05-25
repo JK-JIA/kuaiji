@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>kuaiji · 管理后台</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=Noto+Sans+SC:wght@300;400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/assets/landing.css" />
+    <link rel="stylesheet" href="/assets/admin.css" />
+    <link rel="icon" href="/assets/app-icon.png" type="image/png" />
+  </head>
+  <body class="admin-body">
+    <nav>
+      <a class="nav-logo" href="/"><span class="logo-dot"></span>kuaiji</a>
+      <div class="nav-right">
+        <a class="nav-admin" href="/">返回官网</a>
+      </div>
+    </nav>
+
+    <div class="admin-wrap">
+      <div class="admin-top">
+        <h1>管理后台</h1>
+        <button type="button" class="btn-outline hidden" id="btn-logout">退出登录</button>
+      </div>
+
+      <div class="admin-card" id="login-card">
+        <p style="font-size:14px;color:var(--gray500);margin-bottom:16px">
+          使用服务器配置的 <code>UPLOAD_TOKEN</code> 登录。登录后可上传最新 APK、查看软件使用与会员数据。
+        </p>
+        <form id="login-form">
+          <label class="field">
+            <span class="label">管理令牌</span>
+            <input
+              id="login-token"
+              name="token"
+              type="password"
+              autocomplete="current-password"
+              required
+              placeholder="与 UPLOAD_TOKEN 一致"
+            />
+          </label>
+          <button type="submit" class="btn-submit">登录</button>
+          <p class="form-msg" id="login-msg" aria-live="polite"></p>
+        </form>
+        <p class="form-msg hidden" id="upload-off">
+          服务端未配置 UPLOAD_TOKEN，上传与数据面板不可用。
+        </p>
+      </div>
+
+      <div id="dashboard" class="hidden">
+        <div class="admin-tabs" role="tablist">
+          <button type="button" class="admin-tab active" data-tab="upload">发布 APK</button>
+          <button type="button" class="admin-tab" data-tab="stats">数据概览</button>
+          <button type="button" class="admin-tab" data-tab="orders">购买记录</button>
+          <button type="button" class="admin-tab" data-tab="members">会员有效期</button>
+        </div>
+
+        <div class="admin-card admin-panel active" id="panel-upload">
+          <h2 style="font-size:18px;margin-bottom:12px">上传最新安装包</h2>
+          <p style="font-size:13px;color:var(--gray500);margin-bottom:16px">
+            仅上传 <code>.apk</code>。成功后写入 <code>releases.json</code> 列表首位，官网只展示最新一条 APK。
+          </p>
+          <form id="upload-form">
+            <label class="field">
+              <span class="label">APK 文件</span>
+              <input
+                name="file"
+                type="file"
+                accept=".apk,application/vnd.android.package-archive"
+                required
+              />
+            </label>
+            <label class="field">
+              <span class="label">版本号</span>
+              <input name="version" type="text" placeholder="例如 1.0.74" required />
+            </label>
+            <label class="field">
+              <span class="label">versionCode（选填）</span>
+              <input name="versionCode" type="number" min="1" placeholder="Android versionCode" />
+            </label>
+            <label class="field">
+              <span class="label">更新说明</span>
+              <textarea name="notes" rows="3" placeholder="本次更新内容"></textarea>
+            </label>
+            <button type="submit" class="btn-submit">发布到官网</button>
+            <p class="form-msg" id="upload-msg" aria-live="polite"></p>
+          </form>
+          <div id="current-release" style="margin-top:20px;font-size:13px;color:var(--gray500)"></div>
+        </div>
+
+        <div class="admin-card admin-panel" id="panel-stats">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <h2 style="font-size:18px">数据概览</h2>
+            <button type="button" class="btn-outline" id="btn-refresh-stats">刷新</button>
+          </div>
+          <p class="form-msg" id="stats-msg"></p>
+          <div class="stats-grid" id="stats-grid"></div>
+        </div>
+
+        <div class="admin-card admin-panel" id="panel-orders">
+          <h2 style="font-size:18px;margin-bottom:12px">购买记录</h2>
+          <p class="form-msg" id="orders-msg"></p>
+          <div style="overflow-x:auto">
+            <table class="data-table" id="orders-table">
+              <thead>
+                <tr>
+                  <th>订单号</th>
+                  <th>套餐</th>
+                  <th>金额</th>
+                  <th>状态</th>
+                  <th>支付时间</th>
+                  <th>创建时间</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="admin-card admin-panel" id="panel-members">
+          <h2 style="font-size:18px;margin-bottom:12px">会员有效期</h2>
+          <p class="form-msg" id="members-msg"></p>
+          <div style="overflow-x:auto">
+            <table class="data-table" id="members-table">
+              <thead>
+                <tr>
+                  <th>手机</th>
+                  <th>邮箱</th>
+                  <th>到期时间</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/assets/admin.js" defer></script>
+  </body>
+</html>

@@ -2,6 +2,7 @@ package com.example.kuaiji;
 
 import android.app.Activity;
 import android.util.Log;
+import com.alipay.sdk.app.EnvUtils;
 import com.alipay.sdk.app.PayTask;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -43,6 +44,14 @@ public class AlipayPlugin extends Plugin {
         new Thread(
                         () -> {
                             try {
+                                // APP 支付沙箱必须切换 SDK 环境，否则 payV2 仍按正式环境校验 app_id
+                                if (useSandbox) {
+                                    EnvUtils.setEnv(EnvUtils.EnvEnum.SANDBOX);
+                                    debugLines.add("EnvUtils.setEnv(SANDBOX)");
+                                } else {
+                                    EnvUtils.setEnv(EnvUtils.EnvEnum.ONLINE);
+                                    debugLines.add("EnvUtils.setEnv(ONLINE)");
+                                }
                                 PayTask payTask = new PayTask(activity);
                                 Map<String, String> result =
                                         payTask.payV2(trimmed, useSandbox);

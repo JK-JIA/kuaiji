@@ -10,6 +10,8 @@ services:
     environment:
       PORT: '3005'
       UPLOAD_TOKEN: ${UPLOAD_TOKEN:-}
+      LEDGER_API_URL: ${LEDGER_API_URL:-}
+      LEDGER_ADMIN_TOKEN: ${LEDGER_ADMIN_TOKEN:-}
       DOWNLOADS_DIR: /data/downloads
       RELEASES_PATH: /data/public/releases.json
     volumes:

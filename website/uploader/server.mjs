@@ -5,6 +5,8 @@ import multer from 'multer'
 
 const PORT = Number(process.env.PORT) || 3005
 const UPLOAD_TOKEN = (process.env.UPLOAD_TOKEN || '').trim()
+const LEDGER_API_URL = (process.env.LEDGER_API_URL || '').trim().replace(/\/$/, '')
+const LEDGER_ADMIN_TOKEN = (process.env.LEDGER_ADMIN_TOKEN || '').trim()
 const DOWNLOADS_DIR = process.env.DOWNLOADS_DIR || '/data/downloads'
 const RELEASES_PATH =
   process.env.RELEASES_PATH || path.join('/data/public', 'releases.json')
@@ -63,7 +65,44 @@ const upload = multer({
 })
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, uploadEnabled: Boolean(UPLOAD_TOKEN) })
+  res.json({
+    ok: true,
+    uploadEnabled: Boolean(UPLOAD_TOKEN),
+    statsEnabled: Boolean(LEDGER_API_URL && LEDGER_ADMIN_TOKEN),
+  })
+})
+
+app.get('/api/admin/overview', async (req, res) => {
+  if (!UPLOAD_TOKEN) {
+    res.status(503).json({ error: '未配置 UPLOAD_TOKEN' })
+    return
+  }
+  if (!tokenOk(req)) {
+    res.status(401).json({ error: '无效或缺少上传令牌' })
+    return
+  }
+  if (!LEDGER_API_URL || !LEDGER_ADMIN_TOKEN) {
+    res.status(503).json({
+      error: '未配置 LEDGER_API_URL 或 LEDGER_ADMIN_TOKEN，无法拉取业务数据',
+    })
+    return
+  }
+  try {
+    const r = await fetch(`${LEDGER_API_URL}/api/site-admin/overview`, {
+      headers: { Authorization: `Bearer ${LEDGER_ADMIN_TOKEN}` },
+    })
+    const body = await r.json().catch(() => ({}))
+    if (!r.ok) {
+      res.status(r.status).json(body)
+      return
+    }
+    res.json(body)
+  } catch (e) {
+    console.error('[admin/overview]', e)
+    res.status(502).json({
+      error: e instanceof Error ? e.message : '无法连接业务 API',
+    })
+  }
 })
 
 /** 管理页登录校验（仅 JSON body.token） */
@@ -132,13 +171,13 @@ app.post('/api/upload', (req, res) => {
       try {
         raw = await fs.readFile(RELEASES_PATH, 'utf8')
       } catch {
-        raw = '{"appName":"记账本","items":[]}'
+        raw = '{"appName":"kuaiji","items":[]}'
       }
       let data
       try {
         data = JSON.parse(raw)
       } catch {
-        data = { appName: '记账本', items: [] }
+        data = { appName: 'kuaiji', items: [] }
       }
       if (!Array.isArray(data.items)) data.items = []
 
@@ -208,13 +247,13 @@ app.post('/api/release/delete', async (req, res) => {
     try {
       raw = await fs.readFile(RELEASES_PATH, 'utf8')
     } catch {
-      raw = '{"appName":"记账本","items":[]}'
+      raw = '{"appName":"kuaiji","items":[]}'
     }
     let data
     try {
       data = JSON.parse(raw)
     } catch {
-      data = { appName: '记账本', items: [] }
+      data = { appName: 'kuaiji', items: [] }
     }
     if (!Array.isArray(data.items)) data.items = []
 

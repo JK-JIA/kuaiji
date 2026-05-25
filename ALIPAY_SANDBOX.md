@@ -59,7 +59,19 @@ curl -s http://127.0.0.1:3001/health
 2. 下载并安装 **支付宝沙箱版** App（Android）
 3. 在沙箱控制台获取 **沙箱买家账号** 与登录密码
 
-## 3. 打包 Android 并测试
+## 3. Android SDK 沙箱环境（必做）
+
+服务端用沙箱网关签名后，**手机端**还须在唤起支付前调用（已在 `AlipayPlugin` 内实现）：
+
+```java
+EnvUtils.setEnv(EnvUtils.EnvEnum.SANDBOX);
+```
+
+若不调用，SDK 默认走**正式环境**，沙箱 `app_id=902100…` 会报 `isv.invalid-app-id` / `无效的AppID参数`（服务端 `payDebug` 仍可能全部正常）。
+
+正式收款上线时须改为 `EnvUtils.EnvEnum.ONLINE`（或去掉沙箱分支）。
+
+## 4. 打包 Android 并测试
 
 ```bash
 npm run build
@@ -77,13 +89,13 @@ App 内：**设置 → 升级专业版**，应看到三档支付宝购买：
 
 支付流程：创建订单 → 唤起沙箱支付宝 → 沙箱买家账号付款 → 服务端开通会员。
 
-## 4. 异步通知
+## 5. 异步通知
 
 `ALIPAY_NOTIFY_URL` 须公网 HTTPS 可达。沙箱也会 POST 到该地址；若本地联调可先依赖 App 内 **查单接口**（`/api/membership/purchase/status`）确认支付。
 
 确保 `https://kuaijipf.com` 反代到 ledger-api 的 `/api/payment/alipay/notify`。
 
-## 5. 切换正式环境
+## 6. 切换正式环境
 
 个体户执照下来、正式 APP 支付签约完成后：
 

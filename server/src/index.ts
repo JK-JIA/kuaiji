@@ -36,6 +36,11 @@ import {
   membershipAlipayMeta,
   membershipPlansJson,
 } from './membershipPayment.js'
+import {
+  buildSiteAdminOverview,
+  siteAdminAuthOk,
+  siteAdminReady,
+} from './siteAdmin.js'
 
 const prisma = new PrismaClient()
 
@@ -217,7 +222,29 @@ app.get('/health', (_req, res) => {
     alipaySandbox: alipaySandboxMode(),
     alipayAppId: alipayAppId() || undefined,
     alipayWarnings: alipayConfigWarnings(),
+    siteAdmin: siteAdminReady(),
   })
+})
+
+/** 官网管理后台：使用情况、购买记录、会员有效期（Bearer WEBSITE_ADMIN_TOKEN） */
+app.get('/api/site-admin/overview', async (req, res) => {
+  if (!siteAdminReady()) {
+    res.status(503).json({ error: '未配置 WEBSITE_ADMIN_TOKEN' })
+    return
+  }
+  if (!siteAdminAuthOk(req.headers.authorization)) {
+    res.status(401).json({ error: '无效或缺少管理令牌' })
+    return
+  }
+  try {
+    const overview = await buildSiteAdminOverview(prisma)
+    res.json(overview)
+  } catch (e) {
+    console.error('[site-admin]', e)
+    res.status(500).json({
+      error: e instanceof Error ? e.message : '服务器错误',
+    })
+  }
 })
 
 /** 私发 APK 应用内更新：公开接口，无需登录；未配置环境变量时返回 enabled: false */
