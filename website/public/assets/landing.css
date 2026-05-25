@@ -54,7 +54,16 @@ h1 em{font-style:normal;color:var(--g600)}
 .stats-disclaimer{max-width:1200px;margin:14px auto 0;text-align:center;font-size:11px;color:rgba(255,255,255,.45);line-height:1.5}
 
 .section{padding:90px 5vw;max-width:1200px;margin:0 auto}
-.features-section{padding-top:20px}
+.features-section{padding:48px 5vw 44px}
+.features-section .sec-label{margin-bottom:10px}
+.features-section h2{font-size:clamp(22px,2.4vw,32px);margin-bottom:8px}
+.features-section .sec-desc{margin-bottom:28px;font-size:14px;line-height:1.7}
+.features-section .features-grid{gap:14px}
+.features-section .feat-card{padding:16px 18px;border-radius:var(--r-md)}
+.features-section .feat-icon{width:36px;height:36px;font-size:17px;margin-bottom:10px}
+.features-section .feat-title{font-size:14px;margin-bottom:5px}
+.features-section .feat-desc{font-size:12px;line-height:1.55}
+.features-section .feat-tag{margin-top:8px;font-size:10px;padding:2px 7px}
 .sec-label{display:inline-block;background:var(--g50);color:var(--g600);border-radius:999px;padding:4px 14px;font-size:12px;font-weight:500;margin-bottom:14px}
 h2{font-family:'ZCOOL XiaoWei',serif;font-size:clamp(26px,3vw,38px);color:var(--gray900);margin-bottom:12px;line-height:1.3}
 h2 em{font-style:normal;color:var(--g600)}
@@ -67,7 +76,7 @@ h2 em{font-style:normal;color:var(--g600)}
 .gallery-phone img{width:100%;height:auto;display:block;border-radius:24px}
 .gallery-caption{font-size:12px;color:var(--gray500);line-height:1.65}
 
-.features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.features-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;align-items:stretch}
 .feat-card{background:var(--white);border:1px solid var(--gray100);border-radius:var(--r-lg);padding:26px;transition:border-color .2s,transform .2s}
 .feat-card:hover{border-color:var(--g200);transform:translateY(-3px)}
 .feat-icon{width:46px;height:46px;background:var(--g50);border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:16px;color:var(--g600)}
