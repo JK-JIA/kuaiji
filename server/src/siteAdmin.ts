@@ -29,23 +29,45 @@ export async function buildSiteAdminOverview(prisma: PrismaClient) {
     prisma.ledger.count(),
   ])
 
-  const users = await prisma.user.findMany({
-    where: { membershipExpiresAt: { not: null } },
-    select: {
-      id: true,
-      email: true,
-      phone: true,
-      membershipExpiresAt: true,
-      createdAt: true,
-    },
-    orderBy: { membershipExpiresAt: 'desc' },
-    take: 200,
-  })
+  const [userAccounts, membershipUsers, orders] = await Promise.all([
+    prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        createdAt: true,
+        membershipExpiresAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    }),
+    prisma.user.findMany({
+      where: { membershipExpiresAt: { not: null } },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        membershipExpiresAt: true,
+        createdAt: true,
+      },
+      orderBy: { membershipExpiresAt: 'desc' },
+      take: 200,
+    }),
+    prisma.membershipOrder.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 80,
+    }),
+  ])
 
-  const orders = await prisma.membershipOrder.findMany({
-    orderBy: { createdAt: 'desc' },
-    take: 80,
-  })
+  const orderUserIds = [...new Set(orders.map((o) => o.userId))]
+  const orderUsers =
+    orderUserIds.length > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: orderUserIds } },
+          select: { id: true, email: true, phone: true },
+        })
+      : []
+  const userById = new Map(orderUsers.map((u) => [u.id, u]))
 
   let membershipActiveCount = 0
   let membershipExpiredCount = 0
@@ -57,7 +79,7 @@ export async function buildSiteAdminOverview(prisma: PrismaClient) {
     active: boolean
   }[] = []
 
-  for (const u of users) {
+  for (const u of membershipUsers) {
     const active = membershipActive(u.membershipExpiresAt)
     if (u.membershipExpiresAt) {
       if (active) membershipActiveCount++
@@ -93,16 +115,27 @@ export async function buildSiteAdminOverview(prisma: PrismaClient) {
     membershipActiveCount,
     membershipExpiredCount,
     membershipOrdersPaid: paidOrders.length,
-    membershipOrdersPending: pendingOrders.length,
-    recentOrders: orders.slice(0, 40).map((o) => ({
-      outTradeNo: o.outTradeNo,
-      planId: o.planId,
-      amountYuan: o.amountYuan,
-      status: o.status,
-      paidAt: o.paidAt?.toISOString() ?? null,
-      createdAt: o.createdAt.toISOString(),
-      alipayTradeNo: o.alipayTradeNo,
+    membershipOrdersUnpaid: pendingOrders.length,
+    userAccounts: userAccounts.map((u) => ({
+      email: u.email,
+      phone: u.phone,
+      createdAt: u.createdAt.toISOString(),
+      membershipExpiresAt: u.membershipExpiresAt?.toISOString() ?? null,
     })),
+    recentOrders: orders.slice(0, 40).map((o) => {
+      const u = userById.get(o.userId)
+      return {
+        outTradeNo: o.outTradeNo,
+        planId: o.planId,
+        amountYuan: o.amountYuan,
+        status: o.status,
+        paidAt: o.paidAt?.toISOString() ?? null,
+        createdAt: o.createdAt.toISOString(),
+        alipayTradeNo: o.alipayTradeNo,
+        userEmail: u?.email ?? null,
+        userPhone: u?.phone ?? null,
+      }
+    }),
     members: members.slice(0, 80),
   }
 }

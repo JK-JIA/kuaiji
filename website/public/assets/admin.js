@@ -290,35 +290,64 @@ function renderStats(o) {
     ['membershipActiveCount', '有效会员'],
     ['membershipExpiredCount', '已过期会员'],
     ['membershipOrdersPaid', '已支付订单'],
-    ['membershipOrdersPending', '待支付订单'],
+    ['membershipOrdersUnpaid', '未支付订单'],
   ]
   grid.innerHTML = boxes
-    .map(
-      ([k, label]) =>
-        `<div class="stat-box"><div class="n">${escapeHtml(o[k] ?? 0)}</div><div class="l">${label}</div></div>`,
-    )
+    .map(([k, label]) => {
+      const n =
+        k === 'membershipOrdersUnpaid'
+          ? (o.membershipOrdersUnpaid ?? o.membershipOrdersPending ?? 0)
+          : (o[k] ?? 0)
+      return `<div class="stat-box"><div class="n">${escapeHtml(n)}</div><div class="l">${label}</div></div>`
+    })
     .join('')
   const msg = document.getElementById('stats-msg')
   msg.innerHTML = `数据更新时间：${escapeHtml(fmtTime(o.generatedAt))}`
   msg.classList.remove('err')
+  renderUserAccounts(o)
+}
+
+function renderUserAccounts(o) {
+  const tbody = document.querySelector('#users-table tbody')
+  const rows = Array.isArray(o.userAccounts) ? o.userAccounts : []
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3">暂无注册用户</td></tr>'
+    return
+  }
+  tbody.innerHTML = rows
+    .map(
+      (u) => `<tr>
+        <td>${escapeHtml(u.email || '—')}</td>
+        <td>${escapeHtml(u.phone || '—')}</td>
+        <td>${escapeHtml(fmtTime(u.createdAt))}</td>
+      </tr>`,
+    )
+    .join('')
+}
+
+function orderStatusLabel(status) {
+  if (status === 'paid') return { text: '已支付', cls: 'ok' }
+  if (status === 'pending') return { text: '未支付', cls: 'off' }
+  return { text: String(status || '—'), cls: 'off' }
 }
 
 function renderOrders(o) {
   const tbody = document.querySelector('#orders-table tbody')
   const rows = Array.isArray(o.recentOrders) ? o.recentOrders : []
   if (rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6">暂无订单</td></tr>'
+    tbody.innerHTML = '<tr><td colspan="8">暂无订单</td></tr>'
     return
   }
   tbody.innerHTML = rows
     .map((r) => {
-      const st = r.status === 'paid' ? '已支付' : r.status === 'pending' ? '待支付' : r.status
-      const cls = r.status === 'paid' ? 'ok' : 'off'
+      const st = orderStatusLabel(r.status)
       return `<tr>
         <td><code>${escapeHtml(r.outTradeNo || '')}</code></td>
+        <td>${escapeHtml(r.userEmail || '—')}</td>
+        <td>${escapeHtml(r.userPhone || '—')}</td>
         <td>${escapeHtml(r.planId || '')}</td>
         <td>${escapeHtml(r.amountYuan ?? '')} 元</td>
-        <td><span class="badge ${cls}">${escapeHtml(st)}</span></td>
+        <td><span class="badge ${st.cls}">${escapeHtml(st.text)}</span></td>
         <td>${escapeHtml(fmtTime(r.paidAt))}</td>
         <td>${escapeHtml(fmtTime(r.createdAt))}</td>
       </tr>`

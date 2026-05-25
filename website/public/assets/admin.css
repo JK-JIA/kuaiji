@@ -28,6 +28,7 @@
 .stat-box .n{font-family:'ZCOOL XiaoWei',serif;font-size:22px;color:var(--g600);line-height:1.2}
 .stat-box .l{font-size:11px;color:var(--gray500);margin-top:2px}
 .data-table{width:100%;border-collapse:collapse;font-size:12px}
+.table-scroll{overflow-x:auto;margin-top:8px}
 .data-table th,.data-table td{border-bottom:1px solid var(--gray100);padding:7px 6px;text-align:left}
 .data-table th{color:var(--gray500);font-weight:500;font-size:11px}
 .badge{display:inline-block;padding:2px 6px;border-radius:4px;font-size:10px}
