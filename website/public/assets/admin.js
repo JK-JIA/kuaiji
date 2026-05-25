@@ -47,8 +47,30 @@ function latestApkRelease(items) {
   return null
 }
 
+/** @param {Record<string, unknown>} row */
+function rowKind(row) {
+  const hasB = Boolean(row?.bundle && String(row.bundle).trim())
+  const hasF = Boolean(row?.file && String(row.file).trim())
+  if (hasB && hasF) return 'both'
+  if (hasB) return 'hot'
+  return 'apk'
+}
+
+/** @param {Record<string, unknown>} row */
+function deleteTargetForRow(row) {
+  return String(row.file || row.bundle || '').trim()
+}
+
+function kindLabel(row) {
+  const k = rowKind(row)
+  if (k === 'both') return { text: '整包+热更', cls: 'release-kind' }
+  if (k === 'hot') return { text: '热更新 zip', cls: 'release-kind hot' }
+  return { text: '整包 APK', cls: 'release-kind' }
+}
+
 let uploadEnabled = false
 let statsEnabled = false
+let healthInfo = {}
 let overviewCache = null
 
 function showDashboard(loggedIn) {
@@ -57,12 +79,32 @@ function showDashboard(loggedIn) {
   document.getElementById('btn-logout').classList.toggle('hidden', !loggedIn)
 }
 
+function statsConfigHintHtml() {
+  const parts = []
+  if (!healthInfo.ledgerApiConfigured) {
+    parts.push('<code>LEDGER_API_URL=http://&lt;主机&gt;:3001</code>（同机部署可用 <code>http://127.0.0.1:3001</code>）')
+  }
+  if (!healthInfo.ledgerTokenConfigured) {
+    parts.push('<code>LEDGER_ADMIN_TOKEN=</code>随机长串（与 ledger-api 的 <code>WEBSITE_ADMIN_TOKEN</code> 相同）')
+  }
+  const websiteEnv = parts.length
+    ? `<p style="margin:6px 0 0">在 <code>~/kuaiji/website/.env</code> 设置：<br>${parts.join('<br>')}</p>`
+    : ''
+  return `<div class="config-hint"><strong>业务数据未接通</strong>${websiteEnv}
+<p style="margin:6px 0 0">在 <code>~/kuaiji/server/.env</code>（或根目录 compose 环境）增加：<br><code>WEBSITE_ADMIN_TOKEN=</code>与上面 <code>LEDGER_ADMIN_TOKEN</code> 相同的值</p>
+<p style="margin:6px 0 0">保存后执行：<code>docker compose up -d --build api</code>（项目根目录）与 <code>cd website && docker compose up -d --build uploader</code>，再点「刷新」。</p></div>`
+}
+
 async function checkHealth() {
   try {
     const res = await fetch('/api/health')
     const data = await res.json()
     uploadEnabled = Boolean(data.uploadEnabled)
     statsEnabled = Boolean(data.statsEnabled)
+    healthInfo = {
+      ledgerApiConfigured: Boolean(data.ledgerApiConfigured),
+      ledgerTokenConfigured: Boolean(data.ledgerTokenConfigured),
+    }
     if (!uploadEnabled) {
       document.getElementById('upload-off').classList.remove('hidden')
     }
@@ -81,23 +123,140 @@ async function login(token) {
   if (!res.ok) throw new Error(data.error || `登录失败 (${res.status})`)
   setStoredToken(token)
   showDashboard(true)
-  await loadCurrentRelease()
+  await loadReleases()
 }
 
-async function loadCurrentRelease() {
-  const el = document.getElementById('current-release')
+async function loadReleases() {
+  const currentEl = document.getElementById('current-release')
+  const loadingEl = document.getElementById('releases-loading')
+  const errEl = document.getElementById('releases-error')
+  const listEl = document.getElementById('releases-list')
+
+  loadingEl.classList.remove('hidden')
+  errEl.classList.add('hidden')
+  errEl.textContent = ''
+  listEl.classList.add('hidden')
+
   try {
     const res = await fetch('/releases.json', { cache: 'no-store' })
+    if (!res.ok) throw new Error(`无法读取 releases.json（HTTP ${res.status}）`)
     const data = await res.json()
-    const latest = latestApkRelease(data.items)
+    const items = Array.isArray(data.items) ? data.items : []
+    const latest = latestApkRelease(items)
+
     if (!latest) {
-      el.textContent = '官网当前无 APK 发布记录。'
+      currentEl.textContent = '官网当前无 APK 发布记录。'
+    } else {
+      const file = String(latest.file ?? '')
+      currentEl.innerHTML = `官网最新：<strong>${escapeHtml(latest.version || '')}</strong> · ${escapeHtml(file)} · ${escapeHtml(latest.date || '')}`
+    }
+
+    loadingEl.classList.add('hidden')
+
+    if (items.length === 0) {
+      errEl.textContent = '暂无历史版本。上传 APK 或 zip 后将显示在此。'
+      errEl.classList.remove('hidden')
       return
     }
-    const file = String(latest.file ?? '')
-    el.innerHTML = `官网最新：<strong>${escapeHtml(latest.version || '')}</strong> · ${escapeHtml(file)} · ${escapeHtml(latest.date || '')}`
-  } catch {
-    el.textContent = '无法读取 releases.json'
+
+    const loggedIn = Boolean(getStoredToken())
+    listEl.innerHTML = items
+      .map((row) => {
+        const ver = escapeHtml(row.version ?? '')
+        const date = escapeHtml(row.date ?? '')
+        const channel = row.channel ? escapeHtml(String(row.channel)) : ''
+        const notes = row.notes ? escapeHtml(String(row.notes)) : ''
+        const file = String(row.file ?? '').trim()
+        const bundle = String(row.bundle ?? '').trim()
+        const meta = [date, channel].filter(Boolean).join(' · ')
+        const kind = kindLabel(row)
+        const delTarget = deleteTargetForRow(row)
+        const deleteBtn =
+          loggedIn && delTarget
+            ? `<button type="button" class="btn-del" data-target="${encodeURIComponent(delTarget)}">删除</button>`
+            : ''
+        const fileLines = [
+          file
+            ? `<p class="release-file"><span class="release-kind">APK</span> <code>${escapeHtml(file)}</code></p>`
+            : '',
+          bundle
+            ? `<p class="release-file"><span class="release-kind hot">zip</span> <code>${escapeHtml(bundle)}</code></p>`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('')
+        const dlBtns = [
+          file
+            ? `<a href="/downloads/${encodeURIComponent(file)}" download>下载 APK</a>`
+            : '',
+          bundle
+            ? `<a href="/downloads/${encodeURIComponent(bundle)}" download>下载热更包</a>`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('')
+        return `<li class="release-item">
+          <div class="release-item-top">
+            <span class="release-ver">v${ver}</span>
+            <span class="${kind.cls}">${kind.text}</span>
+            ${meta ? `<span class="release-meta">${meta}</span>` : ''}
+          </div>
+          ${fileLines || '<p class="release-file">（无文件字段）</p>'}
+          ${notes ? `<p class="release-notes">${notes}</p>` : ''}
+          <div class="release-actions">${dlBtns || ''}${deleteBtn}</div>
+        </li>`
+      })
+      .join('')
+
+    listEl.querySelectorAll('.btn-del').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const raw = btn.getAttribute('data-target')
+        const f = raw ? decodeURIComponent(raw) : ''
+        if (f) void deleteRelease(f)
+      })
+    })
+
+    listEl.classList.remove('hidden')
+  } catch (e) {
+    loadingEl.classList.add('hidden')
+    currentEl.textContent = ''
+    errEl.textContent = e instanceof Error ? e.message : '加载失败'
+    errEl.classList.remove('hidden')
+  }
+}
+
+async function deleteRelease(target) {
+  if (!getStoredToken()) {
+    window.alert('请先登录。')
+    return
+  }
+  if (
+    !window.confirm(
+      `确定删除「${target}」？\n将从列表移除，并删除服务器上对应文件（若存在）。`,
+    )
+  ) {
+    return
+  }
+  try {
+    const res = await fetch('/api/release/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeader() },
+      body: JSON.stringify({ target }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (res.status === 401) {
+      setStoredToken('')
+      showDashboard(false)
+      window.alert('登录已失效，请重新登录。')
+      return
+    }
+    if (!res.ok) {
+      window.alert(data.error || `删除失败（HTTP ${res.status}）`)
+      return
+    }
+    await loadReleases()
+  } catch (e) {
+    window.alert(e instanceof Error ? e.message : '网络错误')
   }
 }
 
@@ -138,7 +297,7 @@ function renderStats(o) {
     )
     .join('')
   const msg = document.getElementById('stats-msg')
-  msg.textContent = `数据更新时间：${fmtTime(o.generatedAt)}`
+  msg.innerHTML = `数据更新时间：${escapeHtml(fmtTime(o.generatedAt))}`
   msg.classList.remove('err')
 }
 
@@ -186,34 +345,43 @@ function renderMembers(o) {
     .join('')
 }
 
+function showStatsConfigError(targetEl) {
+  targetEl.innerHTML = statsConfigHintHtml()
+  targetEl.classList.add('err')
+}
+
 async function loadOverviewPanels() {
   const statsMsg = document.getElementById('stats-msg')
   const ordersMsg = document.getElementById('orders-msg')
   const membersMsg = document.getElementById('members-msg')
+  const statsGrid = document.getElementById('stats-grid')
 
   if (!statsEnabled) {
-    const err = '未配置 LEDGER_API_URL / LEDGER_ADMIN_TOKEN，无法显示业务数据。请在 website/.env 与 ledger-api 配置 WEBSITE_ADMIN_TOKEN。'
-    statsMsg.textContent = err
-    statsMsg.classList.add('err')
-    ordersMsg.textContent = err
-    membersMsg.textContent = err
+    statsGrid.innerHTML = ''
+    showStatsConfigError(statsMsg)
+    ordersMsg.innerHTML = ''
+    membersMsg.innerHTML = ''
     return
   }
 
   statsMsg.textContent = '加载中…'
+  statsMsg.classList.remove('err')
+  ordersMsg.textContent = ''
+  membersMsg.textContent = ''
   try {
     overviewCache = await fetchOverview()
     renderStats(overviewCache)
     renderOrders(overviewCache)
     renderMembers(overviewCache)
-    ordersMsg.textContent = ''
-    membersMsg.textContent = ''
   } catch (e) {
     const msg = e instanceof Error ? e.message : '加载失败'
+    statsGrid.innerHTML = ''
     statsMsg.textContent = msg
     statsMsg.classList.add('err')
     ordersMsg.textContent = msg
+    ordersMsg.classList.add('err')
     membersMsg.textContent = msg
+    membersMsg.classList.add('err')
   }
 }
 
@@ -250,6 +418,7 @@ document.getElementById('btn-logout').addEventListener('click', () => {
   overviewCache = null
   showDashboard(false)
   document.getElementById('login-token').value = ''
+  loadReleases()
 })
 
 document.getElementById('upload-form').addEventListener('submit', async (ev) => {
@@ -269,7 +438,7 @@ document.getElementById('upload-form').addEventListener('submit', async (ev) => 
     await uploadApk(form)
     msg.textContent = '发布成功，官网已指向此版本'
     form.reset()
-    await loadCurrentRelease()
+    await loadReleases()
   } catch (e) {
     msg.textContent = e instanceof Error ? e.message : '上传失败'
     msg.classList.add('err')
@@ -290,7 +459,11 @@ document.getElementById('btn-refresh-stats').addEventListener('click', () => {
 checkHealth().then(() => {
   if (getStoredToken()) {
     showDashboard(true)
-    loadCurrentRelease()
+    loadReleases()
     if (statsEnabled) loadOverviewPanels()
+    else {
+      const statsMsg = document.getElementById('stats-msg')
+      showStatsConfigError(statsMsg)
+    }
   }
 })

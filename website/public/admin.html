@@ -60,8 +60,8 @@
         </div>
 
         <div class="admin-card admin-panel active" id="panel-upload">
-          <h2 style="font-size:18px;margin-bottom:12px">上传最新安装包</h2>
-          <p style="font-size:13px;color:var(--gray500);margin-bottom:16px">
+          <h2 class="panel-title">上传最新安装包</h2>
+          <p class="admin-hint">
             仅上传 <code>.apk</code>。成功后写入 <code>releases.json</code> 列表首位，官网只展示最新一条 APK。
           </p>
           <form id="upload-form">
@@ -89,12 +89,20 @@
             <button type="submit" class="btn-submit">发布到官网</button>
             <p class="form-msg" id="upload-msg" aria-live="polite"></p>
           </form>
-          <div id="current-release" style="margin-top:20px;font-size:13px;color:var(--gray500)"></div>
+          <div id="current-release" class="current-release"></div>
+
+          <div class="releases-block">
+            <h3 class="admin-subheading">历史版本</h3>
+            <p class="admin-hint">官网首页仅展示列表第一条 APK；下方为全部已发布记录，可下载或删除。</p>
+            <p class="form-msg" id="releases-loading">加载中…</p>
+            <p class="form-msg err hidden" id="releases-error"></p>
+            <ul class="release-list hidden" id="releases-list"></ul>
+          </div>
         </div>
 
         <div class="admin-card admin-panel" id="panel-stats">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-            <h2 style="font-size:18px">数据概览</h2>
+          <div class="panel-head-row">
+            <h2 class="panel-title">数据概览</h2>
             <button type="button" class="btn-outline" id="btn-refresh-stats">刷新</button>
           </div>
           <p class="form-msg" id="stats-msg"></p>
@@ -102,7 +110,7 @@
         </div>
 
         <div class="admin-card admin-panel" id="panel-orders">
-          <h2 style="font-size:18px;margin-bottom:12px">购买记录</h2>
+          <h2 class="panel-title">购买记录</h2>
           <p class="form-msg" id="orders-msg"></p>
           <div style="overflow-x:auto">
             <table class="data-table" id="orders-table">
@@ -122,7 +130,7 @@
         </div>
 
         <div class="admin-card admin-panel" id="panel-members">
-          <h2 style="font-size:18px;margin-bottom:12px">会员有效期</h2>
+          <h2 class="panel-title">会员有效期</h2>
           <p class="form-msg" id="members-msg"></p>
           <div style="overflow-x:auto">
             <table class="data-table" id="members-table">

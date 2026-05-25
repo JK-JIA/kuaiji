@@ -69,6 +69,8 @@ app.get('/api/health', (_req, res) => {
     ok: true,
     uploadEnabled: Boolean(UPLOAD_TOKEN),
     statsEnabled: Boolean(LEDGER_API_URL && LEDGER_ADMIN_TOKEN),
+    ledgerApiConfigured: Boolean(LEDGER_API_URL),
+    ledgerTokenConfigured: Boolean(LEDGER_ADMIN_TOKEN),
   })
 })
 

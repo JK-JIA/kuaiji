@@ -11,7 +11,9 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-在 **ledger-api**（`kuaiji/server`）的 `.env` 中增加 **`WEBSITE_ADMIN_TOKEN`**，值与 website 的 **`LEDGER_ADMIN_TOKEN`** 相同。
+在 **ledger-api**（`kuaiji/server` 或项目根 `docker-compose` 的 `api` 环境）中增加 **`WEBSITE_ADMIN_TOKEN`**，值与 website 的 **`LEDGER_ADMIN_TOKEN`** 相同。二者缺一，管理后台「数据概览 / 购买记录 / 会员」会显示配置说明而无法拉数。
+
+同机部署时 `LEDGER_API_URL` 可用 `http://127.0.0.1:3001`；改 env 后需 `docker compose up -d --build api` 与 `cd website && docker compose up -d --build uploader`。
 
 浏览器访问：`http://<服务器IP>:8080`（`WEB_PORT` 默认 8080）。
 
