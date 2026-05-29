@@ -335,6 +335,47 @@ function getAmountFieldId(fields: VoiceFieldMeta[]): string | undefined {
   )
 }
 
+function normalizeSpokenUnitToken(raw: string): string {
+  const u = String(raw ?? '').trim()
+  if (/kg/i.test(u)) return '公斤'
+  if (/千克/.test(u)) return '公斤'
+  return u
+}
+
+/** 按原话出现顺序提取「数字+单位」，用于纠正 AI 把多行都写成斤 */
+function extractQtyUnitSegmentsFromUserText(userText: string): string[] {
+  const re =
+    /(\d+(?:\.\d+)?)\s*(斤|千克|公斤|kg|包|箱|袋|个|吨|车|次|条|块|瓶|台|两)/gi
+  const out: string[] = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(userText)) !== null) {
+    out.push(`${m[1]}${normalizeSpokenUnitToken(m[2]!)}`)
+  }
+  return out
+}
+
+function enrichLineQuantitiesFromUserText(
+  userText: string,
+  lines: VoiceProductLine[],
+): VoiceProductLine[] {
+  const segments = extractQtyUnitSegmentsFromUserText(userText)
+  if (!segments.length) return lines
+  return lines.map((row, i) => {
+    const patch = segments[i]
+    if (!patch) return row
+    const q = row.quantity.trim()
+    const patchUnit = patch.replace(/^\d+(?:\.\d+)?/, '')
+    const qUnit = q.replace(/^\d+(?:\.\d+)?/, '')
+    if (!q || /^\d+(?:\.\d+)?$/.test(q)) {
+      return { ...row, quantity: patch }
+    }
+    if (qUnit && patchUnit && qUnit !== patchUnit) {
+      return { ...row, quantity: patch }
+    }
+    return row
+  })
+}
+
 function supplementFromUserText(
   userText: string,
   fields: VoiceFieldMeta[],
@@ -362,15 +403,9 @@ function supplementFromUserText(
   }
 
   const qtyField = fields.find((f) => f.key === 'quantity')
-  if (qtyField && pl?.length) {
-    const textHasJin = /斤/.test(userText)
-    pl = pl.map((row) => {
-      let q = row.quantity.trim()
-      if (!q) return row
-      if (/^\d+(?:\.\d+)?$/.test(q) && textHasJin) q = `${q}斤`
-      return { ...row, quantity: q }
-    })
-    if (pl[0]?.quantity) next[qtyField.id] = pl[0].quantity
+  if (pl?.length) {
+    pl = enrichLineQuantitiesFromUserText(userText, pl)
+    if (qtyField && pl[0]?.quantity) next[qtyField.id] = pl[0].quantity
   }
 
   if (pl?.length) {
@@ -472,6 +507,7 @@ function buildVoiceParsePrompt(
 【商品与数量】
 - 多种商品：必须用「商品明细」数组，每项一条：{ "商品":"名称", "数量":"数字+单位（如斤）", "单价":"数字（元/斤，可选）" }；若用户说了**该行货款**或**小计**，再加 "金额":"数字"（该行小计，元）。若同时有「单价」和可换算的斤数，可省略 "金额"。
 - **数量一律写成数字+单位**，例如：5斤、100斤、12.5公斤、3包；禁止只写「100」不写单位（除非原文完全没有单位则用「斤」）。
+- **每一行的单位必须与用户原话一致**；同一商品多行时各行单位可不同（如一行「1包」、另一行「20斤」），禁止全部改成斤。
 - **单价**：用户说「每斤3块」「单价2.5」等，写成阿拉伯数字的 "单价" 字段（元/斤）。
 - 用户说「五斤」「一百斤」分别写成「5斤」「100斤」。
 - 多种商品禁止把名称堆在一个字段里用顿号拼接；每种一行。
@@ -495,6 +531,15 @@ function buildVoiceParsePrompt(
   ],
   "${buyerLabel}": "京A8899",
   "${amountLabel}": "90"
+}
+
+同商品不同单位示例（用户：紫薯1包，紫薯20斤，孙悟空买的）：
+{
+  "商品明细": [
+    { "商品": "紫薯", "数量": "1包" },
+    { "商品": "紫薯", "数量": "20斤" }
+  ],
+  "${buyerLabel}": "孙悟空"
 }
 
 单商品示例：

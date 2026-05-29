@@ -52,6 +52,7 @@ export type VoiceFormPrefillPayload = {
   lines: Array<{
     product: string
     quantity: string
+    quantityUnit?: string
     unitPrice: string
     lineAmount: string
   }>
@@ -321,7 +322,9 @@ export function AddRecordModal({
               product: row.product,
               unitPrice: row.unitPrice,
               quantity: row.quantity,
-              quantityUnit: defaultUnitForProduct(row.product, productCatalog),
+              quantityUnit:
+                row.quantityUnit?.trim() ||
+                defaultUnitForProduct(row.product, productCatalog),
               lineAmount: row.lineAmount,
               lastEdited: null,
               touched: emptyLineTripleTouched(),
@@ -498,14 +501,9 @@ export function AddRecordModal({
                     )
                     if (productLines?.length && prodId && qtyId) {
                       setLines(
-                        mapDoubaoProductLinesToLineForms(productLines).map(
-                          (line) => ({
-                            ...line,
-                            quantityUnit: defaultUnitForProduct(
-                              line.product,
-                              productCatalog,
-                            ),
-                          }),
+                        mapDoubaoProductLinesToLineForms(
+                          productLines,
+                          productCatalog,
                         ),
                       )
                     }

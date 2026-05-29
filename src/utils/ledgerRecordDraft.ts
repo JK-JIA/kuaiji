@@ -5,7 +5,10 @@ import type {
   LineItemRow,
   ProductCatalogEntry,
 } from '../types'
-import { LINE_QUANTITY_UNIT_KEY } from './productUnits'
+import {
+  LINE_QUANTITY_UNIT_KEY,
+  splitVoiceQuantityString,
+} from './productUnits'
 import { defaultUnitForProduct } from './productCatalogHelpers'
 import {
   computedLineAmountFromUnitAndQty,
@@ -387,9 +390,14 @@ export function mergeVoiceParsedIntoValues(
 
 export function mapDoubaoProductLinesToLineForms(
   productLines: DoubaoProductLine[],
+  catalog: ProductCatalogEntry[] = [],
 ): LedgerLineForm[] {
   return productLines.map((l) => {
-    const q = sanitizeUnsignedDecimalInput(l.quantity)
+    const { quantity: q, quantityUnit } = splitVoiceQuantityString(
+      l.quantity,
+      l.product,
+      catalog,
+    )
     const u = sanitizeUnsignedDecimalInput((l.unitPrice ?? '').trim())
     const fromAi = sanitizeUnsignedDecimalInput(l.lineAmount?.trim() ?? '')
     const computed = computedLineAmountFromUnitAndQty(u, q)
@@ -412,7 +420,7 @@ export function mapDoubaoProductLinesToLineForms(
     return {
       id: crypto.randomUUID(),
       product: l.product,
-      quantityUnit: '',
+      quantityUnit,
       ...r,
       lastEdited: null,
       touched: emptyLineTripleTouched(),
@@ -466,12 +474,13 @@ export function applyVoiceParsedToDraft(
   prevLines: LedgerLineForm[],
   data: Record<string, string>,
   productLines?: DoubaoProductLine[],
+  catalog: ProductCatalogEntry[] = [],
 ): { values: Record<string, string>; lines: LedgerLineForm[] } {
   const { sortedFields, prodId, qtyId } = layout
   let values = mergeVoiceParsedIntoValues(sortedFields, prevValues, data)
   let lines = prevLines
   if (productLines?.length && prodId && qtyId) {
-    lines = mapDoubaoProductLinesToLineForms(productLines)
+    lines = mapDoubaoProductLinesToLineForms(productLines, catalog)
   }
   values = syncCanonicalAmountFromLines(layout, values, lines)
   return { values, lines }

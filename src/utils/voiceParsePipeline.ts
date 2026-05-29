@@ -178,6 +178,7 @@ export async function runVoiceParsePipeline(
     emptyLines,
     aiRaw.data,
     aiRaw.productLines,
+    productCatalog,
   )
   lines = lines.map((l) => ({
     ...l,

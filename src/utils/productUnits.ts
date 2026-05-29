@@ -105,6 +105,61 @@ export function parseEmbeddedUnit(raw: string): string | undefined {
   return u
 }
 
+function normalizeSpokenUnitToken(raw: string): string {
+  const u = String(raw ?? '').trim()
+  if (/kg/i.test(u)) return '公斤'
+  if (/千克/.test(u)) return '公斤'
+  return u
+}
+
+/** 口语单位名对齐商品目录中的规范单位名 */
+export function resolveCatalogUnitName(
+  productName: string,
+  unitToken: string,
+  catalog: ProductCatalogEntry[],
+): string {
+  const token = normalizeSpokenUnitToken(unitToken)
+  const units = unitsForProduct(productName, catalog)
+  const exact = units.find((u) => u.name === token)
+  if (exact) return exact.name
+  const starts = units.find((u) => u.name.startsWith(token))
+  if (starts) return starts.name
+  return token
+}
+
+/**
+ * 智能解析数量字段 → 纯数字 + 单位（勿先 strip 非数字，否则会丢掉「包」等）
+ */
+export function splitVoiceQuantityString(
+  rawQty: string,
+  productName: string,
+  catalog: ProductCatalogEntry[] = [],
+): { quantity: string; quantityUnit: string } {
+  const trimmed = String(rawQty ?? '').trim()
+  const fallbackUnit = defaultUnitDef(
+    lookupCatalogEntryForProduct(productName, catalog),
+  ).name
+  if (!trimmed) {
+    return { quantity: '', quantityUnit: fallbackUnit }
+  }
+  const embedded = parseEmbeddedUnit(trimmed)
+  const num = parseQuantityNumeric(trimmed)
+  const qtyStr =
+    num > 0
+      ? String(num)
+      : sanitizeUnsignedDecimalInput(trimmed) || trimmed
+  if (embedded) {
+    return {
+      quantity: qtyStr,
+      quantityUnit: resolveCatalogUnitName(productName, embedded, catalog),
+    }
+  }
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    return { quantity: trimmed, quantityUnit: fallbackUnit }
+  }
+  return { quantity: qtyStr, quantityUnit: fallbackUnit }
+}
+
 export function readLineQuantityUnit(
   values: Record<string, string> | undefined,
 ): string | undefined {

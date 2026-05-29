@@ -259,6 +259,7 @@ export function HomePage() {
             lines: lines.map((l) => ({
               product: l.product,
               quantity: l.quantity,
+              quantityUnit: l.quantityUnit,
               unitPrice: l.unitPrice,
               lineAmount: l.lineAmount,
             })),
