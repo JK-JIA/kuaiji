@@ -262,7 +262,20 @@ async function deleteRelease(target) {
   }
 }
 
-async function uploadApk(form) {
+function uploadSuccessMessage(data) {
+  if (data?.kind === 'zip') return '热更新 zip 已发布并写入列表。'
+  if (data?.kind === 'apk') return '整包 APK 已发布并写入列表。'
+  return '发布成功。'
+}
+
+async function uploadRelease(form) {
+  const file = form.elements.namedItem('file')?.files?.[0]
+  if (file) {
+    const name = String(file.name || '').toLowerCase()
+    if (!name.endsWith('.apk') && !name.endsWith('.zip')) {
+      throw new Error('请选择 .apk 或 .zip 文件')
+    }
+  }
   const fd = new FormData(form)
   const res = await fetch('/api/upload', {
     method: 'POST',
@@ -466,8 +479,8 @@ document.getElementById('upload-form').addEventListener('submit', async (ev) => 
   const btn = form.querySelector('button[type="submit"]')
   btn.disabled = true
   try {
-    await uploadApk(form)
-    msg.textContent = '发布成功，官网已指向此版本'
+    const data = await uploadRelease(form)
+    msg.textContent = uploadSuccessMessage(data)
     form.reset()
     await loadReleases()
   } catch (e) {

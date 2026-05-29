@@ -1,5 +1,12 @@
 import { format, parseISO } from 'date-fns'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import type { FieldDef, LedgerRecord } from '../types'
 import { useLedger } from '../context/LedgerContext'
 import {
@@ -9,17 +16,19 @@ import {
   getPlateValue,
   parseMoney,
   parseNonNegativeMoney,
+  patchLineTripleTouched,
   reconcileLineTripleByLastEdited,
   sanitizeUnsignedDecimalInput,
   displayQuantityFieldName,
   type LineTripleLastEdited,
-  type LineTripleTouched,
 } from '../utils/recordHelpers'
 import { defaultUnitForProduct } from '../utils/productCatalogHelpers'
+import { QuantityUnitSelect } from './QuantityUnitSelect'
 import {
   applyVoiceFillFirstLine,
   buildLedgerRecordForSave,
   createEmptyLineForm,
+  lineFormQuantityUnitFromValues,
   emptyLedgerFieldValues,
   formatLedgerMoneyInput,
   getLedgerFormLayout,
@@ -110,6 +119,8 @@ export function AddRecordModal({
   const [dealInput, setDealInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [datePickerOpen, setDatePickerOpen] = useState(false)
+  /** 语音 / 智能填入区域，默认收起以节省屏高 */
+  const [voicePanelOpen, setVoicePanelOpen] = useState(false)
   /** 校验失败文案（弹窗内展示；避免 WebView / 原生校验拦截导致无提示） */
   const [formError, setFormError] = useState<string | null>(null)
   const lineSubtotal = useMemo(
@@ -176,21 +187,27 @@ export function AddRecordModal({
     setValues((v) => ({ ...v, [plateFieldId]: trimmed }))
   }, [plateFieldId])
 
-  const applyRecentProduct = useCallback((name: string) => {
-    const trimmed = name.trim()
-    if (!trimmed) return
-    setLines((prev) => {
-      const emptyIdx = prev.findIndex((l) => !l.product.trim())
-      if (emptyIdx >= 0) {
+  const applyRecentProduct = useCallback(
+    (name: string) => {
+      const trimmed = name.trim()
+      if (!trimmed) return
+      const unit = defaultUnitForProduct(trimmed, productCatalog)
+      setLines((prev) => {
+        const emptyIdx = prev.findIndex((l) => !l.product.trim())
+        if (emptyIdx >= 0) {
+          return prev.map((row, i) =>
+            i === emptyIdx
+              ? { ...row, product: trimmed, quantityUnit: unit }
+              : row,
+          )
+        }
         return prev.map((row, i) =>
-          i === emptyIdx ? { ...row, product: trimmed } : row,
+          i === 0 ? { ...row, product: trimmed, quantityUnit: unit } : row,
         )
-      }
-      return prev.map((row, i) =>
-        i === 0 ? { ...row, product: trimmed } : row,
-      )
-    })
-  }, [])
+      })
+    },
+    [productCatalog],
+  )
 
   useEffect(() => {
     if (!open || !canonicalAmountId || !showDetailAmounts) return
@@ -203,6 +220,7 @@ export function AddRecordModal({
 
   useEffect(() => {
     if (open) setFormError(null)
+    else setVoicePanelOpen(false)
   }, [open])
 
   /** 防止保存别名目录 refresh 时因 sortedFields 引用变化而清空已填入的表单 */
@@ -245,11 +263,17 @@ export function AddRecordModal({
               deriveUnitPriceFromAmountAndQty(storedAmt, qStr)
             const computed = computedLineAmountFromUnitAndQty(unitPrice, qStr)
             const lineAmount = computed || storedAmt
+            const product = String(li.values[prodId] ?? '')
             return {
               id: li.id,
-              product: li.values[prodId] ?? '',
+              product,
               unitPrice,
               quantity: qStr,
+              quantityUnit: lineFormQuantityUnitFromValues(
+                li.values,
+                product,
+                productCatalog,
+              ),
               lineAmount,
               lastEdited: null,
               touched: emptyLineTripleTouched(),
@@ -263,6 +287,11 @@ export function AddRecordModal({
             product: recordToEdit.values[prodId] ?? '',
             unitPrice: '',
             quantity: recordToEdit.values[qtyId] ?? '',
+            quantityUnit: lineFormQuantityUnitFromValues(
+              recordToEdit.values,
+              String(recordToEdit.values[prodId] ?? ''),
+              productCatalog,
+            ),
             lineAmount: '',
             lastEdited: null,
             touched: emptyLineTripleTouched(),
@@ -275,6 +304,7 @@ export function AddRecordModal({
       lastVoicePrefillKeyRef.current !== voiceFormPrefillKey
     ) {
       lastVoicePrefillKeyRef.current = voiceFormPrefillKey
+      setVoicePanelOpen(true)
       setRecordDate(
         voiceFormPrefill.recordDate ?? format(new Date(), 'yyyy-MM-dd'),
       )
@@ -291,6 +321,7 @@ export function AddRecordModal({
               product: row.product,
               unitPrice: row.unitPrice,
               quantity: row.quantity,
+              quantityUnit: defaultUnitForProduct(row.product, productCatalog),
               lineAmount: row.lineAmount,
               lastEdited: null,
               touched: emptyLineTripleTouched(),
@@ -317,6 +348,7 @@ export function AddRecordModal({
     voiceFormPrefill,
     voiceFormPrefillKey,
     sortedFields,
+    productCatalog,
     recordToEdit,
   ])
 
@@ -439,22 +471,54 @@ export function AddRecordModal({
             </button>
           </div>
           <div className="mb-4">
-            <VoiceInputSection
-            fields={sortedFields}
-            records={records}
-            productCatalog={productCatalog}
-            asrHotwords={modalAsrHotwords}
-            onApplyParsed={(data, productLines) => {
-              setValues((v) => mergeVoiceParsedIntoValues(sortedFields, v, data))
-              if (productLines?.length && prodId && qtyId) {
-                setLines(mapDoubaoProductLinesToLineForms(productLines))
-              }
-              setFormError(null)
-            }}
-            onFillFirstLine={(product, quantity) => {
-              setLines((prev) => applyVoiceFillFirstLine(prev, product, quantity))
-            }}
-            />
+            <button
+              type="button"
+              onClick={() => setVoicePanelOpen((v) => !v)}
+              className="flex w-full items-center justify-between gap-2 rounded-2xl border border-kj-border-strong/80 bg-kj-surface px-4 py-3 text-left shadow-sm active:bg-kj-hover"
+              aria-expanded={voicePanelOpen}
+            >
+              <span className="text-sm font-medium text-kj-primary">
+                智能识别
+              </span>
+              <ChevronDownGlyph
+                className={`h-4 w-4 shrink-0 text-kj-muted transition-transform duration-200 ${voicePanelOpen ? 'rotate-180' : ''}`}
+                aria-hidden
+              />
+            </button>
+            {voicePanelOpen ? (
+              <div className="mt-3">
+                <VoiceInputSection
+                  fields={sortedFields}
+                  records={records}
+                  productCatalog={productCatalog}
+                  asrHotwords={modalAsrHotwords}
+                  onApplyParsed={(data, productLines) => {
+                    setValues((v) =>
+                      mergeVoiceParsedIntoValues(sortedFields, v, data),
+                    )
+                    if (productLines?.length && prodId && qtyId) {
+                      setLines(
+                        mapDoubaoProductLinesToLineForms(productLines).map(
+                          (line) => ({
+                            ...line,
+                            quantityUnit: defaultUnitForProduct(
+                              line.product,
+                              productCatalog,
+                            ),
+                          }),
+                        ),
+                      )
+                    }
+                    setFormError(null)
+                  }}
+                  onFillFirstLine={(product, quantity) => {
+                    setLines((prev) =>
+                      applyVoiceFillFirstLine(prev, product, quantity),
+                    )
+                  }}
+                />
+              </div>
+            ) : null}
           </div>
 
           {rootFieldIdsForRender.length > 0 && (
@@ -462,20 +526,38 @@ export function AddRecordModal({
               {rootFieldIdsForRender.map((fid) => {
                 const f = sortedFields.find((x) => x.id === fid)
                 if (!f) return null
+                const isBuyerField = f.key === 'plate'
                 return (
                   <label key={f.id} className="block text-left">
-                    <span className="text-sm font-medium text-kj-secondary">
-                      {f.name}
-                      {f.required && (
-                        <span className="text-rose-500" aria-hidden>
-                          *
+                    {isBuyerField ? (
+                      <div className="mb-2 flex items-center gap-2.5">
+                        <span
+                          className="h-4 w-0.5 shrink-0 rounded-full bg-gradient-to-b from-emerald-400 to-[#1a7f4c] shadow-[0_0_4px_rgba(26,127,76,0.3)]"
+                          aria-hidden
+                        />
+                        <span className="text-base font-bold tracking-wide text-kj-primary">
+                          {f.name}
+                          {f.required && (
+                            <span className="text-rose-500" aria-hidden>
+                              *
+                            </span>
+                          )}
                         </span>
-                      )}
-                    </span>
+                      </div>
+                    ) : (
+                      <span className="text-sm font-semibold text-kj-primary">
+                        {f.name}
+                        {f.required && (
+                          <span className="text-rose-500" aria-hidden>
+                            *
+                          </span>
+                        )}
+                      </span>
+                    )}
                     {f.key === 'plate' && recentBuyerNames.length > 0 && (
-                      <div className="mt-2 mb-1">
-                        <p className="mb-1.5 text-xs font-medium text-kj-secondary">
-                          最近常用
+                      <div className="mb-2">
+                        <p className="mb-2 text-xs font-medium text-kj-secondary">
+                          常用
                         </p>
                         <div className="flex flex-wrap gap-2">
                           {recentBuyerNames.map((name) => (
@@ -516,9 +598,15 @@ export function AddRecordModal({
 
           {prodField && qtyField && (
             <div className="mt-4">
-              <p className="mb-3 text-sm font-semibold text-kj-primary">
-                商品明细
-              </p>
+              <div className="mb-3 flex items-center gap-2.5">
+                <span
+                  className="h-4 w-0.5 shrink-0 rounded-full bg-gradient-to-b from-emerald-400 to-[#1a7f4c] shadow-[0_0_4px_rgba(26,127,76,0.3)]"
+                  aria-hidden
+                />
+                <p className="text-base font-bold tracking-wide text-kj-primary">
+                  商品明细
+                </p>
+              </div>
               {recentProductNames.length > 0 && (
                 <div className="mb-3">
                   <p className="mb-2 text-xs font-medium text-kj-secondary">
@@ -538,23 +626,13 @@ export function AddRecordModal({
                   </div>
                 </div>
               )}
-              <div className="mb-3 flex justify-end">
-                <button
-                  type="button"
-                  onClick={addLine}
-                  className="text-sm font-semibold text-[#2ecc71] hover:text-[#27ae60]"
-                >
-                  + 一行
-                </button>
-              </div>
               <div className="rounded-2xl border border-kj-border-strong/80 bg-kj-surface p-4 shadow-sm">
                 {!showDetailAmounts || !canonicalAmountId ? (
                   <div className="space-y-3 pt-2">
                     {lines.map((line, idx) => {
-                      const lineUnit = defaultUnitForProduct(
-                        line.product,
-                        productCatalog,
-                      )
+                      const lineUnit =
+                        line.quantityUnit ||
+                        defaultUnitForProduct(line.product, productCatalog)
                       return (
                       <div
                         key={line.id}
@@ -569,15 +647,26 @@ export function AddRecordModal({
                           )}
                           <input
                             value={line.product}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              const p = e.target.value
+                              const unit = defaultUnitForProduct(
+                                p.trim(),
+                                productCatalog,
+                              )
                               setLines((prev) =>
                                 prev.map((row, i) =>
                                   i === idx
-                                    ? { ...row, product: e.target.value }
+                                    ? {
+                                        ...row,
+                                        product: p,
+                                        quantityUnit: p.trim()
+                                          ? unit
+                                          : row.quantityUnit,
+                                      }
                                     : row,
                                 ),
                               )
-                            }
+                            }}
                             className="mt-1 w-full rounded-xl border border-kj-border-strong bg-kj-surface px-3 py-2.5 text-base text-kj-primary"
                             placeholder="商品名称"
                           />
@@ -589,25 +678,41 @@ export function AddRecordModal({
                               *
                             </span>
                           )}
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            value={line.quantity}
-                            onChange={(e) => {
-                              const q = sanitizeUnsignedDecimalInput(
-                                e.target.value,
-                              )
-                              setLines((prev) =>
-                                prev.map((row, i) =>
-                                  i === idx ? { ...row, quantity: q } : row,
-                                ),
-                              )
-                            }}
-                            className="mt-1 w-full rounded-xl border border-kj-border-strong bg-kj-surface px-2 py-2.5 text-center text-base tabular-nums text-kj-primary"
-                            placeholder={lineUnit}
-                            autoComplete="off"
-                            spellCheck={false}
-                          />
+                          <div className="mt-1 flex gap-1">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={line.quantity}
+                              onChange={(e) => {
+                                const q = sanitizeUnsignedDecimalInput(
+                                  e.target.value,
+                                )
+                                setLines((prev) =>
+                                  prev.map((row, i) =>
+                                    i === idx ? { ...row, quantity: q } : row,
+                                  ),
+                                )
+                              }}
+                              className="min-w-0 flex-1 rounded-xl border border-kj-border-strong bg-kj-surface px-2 py-2.5 text-center text-base tabular-nums text-kj-primary"
+                              placeholder="数"
+                              autoComplete="off"
+                              spellCheck={false}
+                            />
+                            <QuantityUnitSelect
+                              productName={line.product}
+                              catalog={productCatalog}
+                              value={lineUnit}
+                              onChange={(unit) =>
+                                setLines((prev) =>
+                                  prev.map((row, i) =>
+                                    i === idx
+                                      ? { ...row, quantityUnit: unit }
+                                      : row,
+                                  ),
+                                )
+                              }
+                            />
+                          </div>
                         </label>
                         {lines.length > 1 && (
                           <button
@@ -621,181 +726,241 @@ export function AddRecordModal({
                       </div>
                       )
                     })}
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="button"
+                        onClick={addLine}
+                        className="text-sm font-semibold text-[#2ecc71] hover:text-[#27ae60]"
+                      >
+                        + 一行
+                      </button>
+                    </div>
                   </div>
                 ) : (
-                  <div className="min-w-0 overflow-x-auto overscroll-x-contain pt-2">
-                    <div className="min-w-[20.25rem]">
-                      <div
-                        className="grid grid-cols-[minmax(7.5rem,1fr)_2.75rem_2.75rem_3.25rem_2rem] gap-x-2 border-b border-kj-border pb-2 text-xs font-medium text-kj-secondary"
+                  <div className="min-w-0 pt-2">
+                    <div
+                      className="grid w-full grid-cols-[minmax(4rem,1.5fr)_1fr_1fr_minmax(2.25rem,0.58fr)_1fr] items-center gap-x-1.5 gap-y-2.5"
+                      role="table"
+                    >
+                      <span
+                        className="border-b border-kj-border pb-2 text-xs font-medium text-kj-secondary"
+                        role="columnheader"
                       >
-                        <span className="min-w-0 break-words">
-                          {prodField.name}
-                        </span>
-                        <span className="text-center">
-                          {unitPriceField?.name ?? '单价'}
-                        </span>
-                        <span className="text-center">{qtyFieldDisplayName}</span>
-                        <span className="text-right">
-                          {amountField?.name ?? '金额'}
-                        </span>
-                        <span aria-hidden className="w-2 shrink-0" />
-                      </div>
-                  <div className="divide-y divide-stone-100">
-                    {lines.map((line, idx) => {
-                      const lineUnit = defaultUnitForProduct(
-                        line.product,
-                        productCatalog,
-                      )
-                      return (
-                      <div
-                        key={line.id}
-                        className="grid grid-cols-[minmax(7.5rem,1fr)_2.75rem_2.75rem_3.25rem_2rem] items-center gap-x-2 py-2.5 first:pt-0"
+                        {prodField.name}
+                      </span>
+                      <span
+                        className="border-b border-kj-border pb-2 text-center text-xs font-medium text-kj-secondary"
+                        role="columnheader"
                       >
-                        <input
-                          value={line.product}
-                          onChange={(e) =>
-                            setLines((prev) =>
-                              prev.map((row, i) =>
-                                i === idx
-                                  ? { ...row, product: e.target.value }
-                                  : row,
-                              ),
-                            )
-                          }
-                          className="w-full min-w-[7.5rem] rounded-xl border border-kj-border-strong bg-kj-raised px-2.5 py-2 text-sm text-kj-primary placeholder:text-kj-muted"
-                          placeholder="商品名称"
-                          aria-label={prodField.name}
-                        />
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={line.unitPrice}
-                          onChange={(e) => {
-                            const raw = e.target.value
-                            const u =
-                              raw === ''
-                                ? ''
-                                : sanitizeUnsignedDecimalInput(raw)
-                            const lastEdited: LineTripleLastEdited =
-                              u.trim() === '' ? null : 'unitPrice'
-                            setLines((prev) =>
-                              prev.map((row, i) => {
-                                if (i !== idx) return row
-                                const touched: LineTripleTouched = {
-                                  ...(row.touched ?? emptyLineTripleTouched()),
-                                  unitPrice: u.trim() !== '',
-                                }
-                                return {
-                                  ...row,
-                                  ...reconcileLineTripleByLastEdited({
-                                    ...row,
-                                    unitPrice: u,
-                                    lastEdited,
-                                    touched,
+                        {unitPriceField?.name ?? '单价'}
+                      </span>
+                      <span
+                        className="border-b border-kj-border pb-2 text-center text-xs font-medium text-kj-secondary"
+                        role="columnheader"
+                      >
+                        {qtyFieldDisplayName}
+                      </span>
+                      <span
+                        className="border-b border-kj-border pb-2 text-center text-xs font-medium text-kj-secondary"
+                        role="columnheader"
+                      >
+                        单位
+                      </span>
+                      <span
+                        className="border-b border-kj-border pb-2 text-right text-xs font-medium text-kj-secondary"
+                        role="columnheader"
+                      >
+                        {amountField?.name ?? '金额'}
+                      </span>
+                      {lines.map((line, idx) => {
+                        const lineUnit =
+                          line.quantityUnit ||
+                          defaultUnitForProduct(line.product, productCatalog)
+                        const rowBorder =
+                          idx > 0 ? 'border-t border-stone-100 pt-2.5' : ''
+                        const cell = `min-w-0 ${rowBorder}`
+                        return (
+                          <Fragment key={line.id}>
+                            <input
+                              value={line.product}
+                              onChange={(e) => {
+                                const p = e.target.value
+                                const unit = defaultUnitForProduct(
+                                  p.trim(),
+                                  productCatalog,
+                                )
+                                setLines((prev) =>
+                                  prev.map((row, i) =>
+                                    i === idx
+                                      ? {
+                                          ...row,
+                                          product: p,
+                                          quantityUnit: p.trim()
+                                            ? unit
+                                            : row.quantityUnit,
+                                        }
+                                      : row,
+                                  ),
+                                )
+                              }}
+                              className={`${cell} w-full rounded-xl border border-kj-border-strong bg-kj-raised px-2 py-2 text-sm text-kj-primary placeholder:text-kj-muted`}
+                              placeholder="商品名称"
+                              aria-label={prodField.name}
+                            />
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={line.unitPrice}
+                              onChange={(e) => {
+                                const raw = e.target.value
+                                const u =
+                                  raw === ''
+                                    ? ''
+                                    : sanitizeUnsignedDecimalInput(raw)
+                                const lastEdited: LineTripleLastEdited =
+                                  'unitPrice'
+                                setLines((prev) =>
+                                  prev.map((row, i) => {
+                                    if (i !== idx) return row
+                                    const touched = patchLineTripleTouched(
+                                      row.touched,
+                                      'unitPrice',
+                                      u.trim() !== '',
+                                    )
+                                    return {
+                                      ...row,
+                                      ...reconcileLineTripleByLastEdited({
+                                        ...row,
+                                        unitPrice: u,
+                                        lastEdited,
+                                        touched,
+                                      }),
+                                    }
                                   }),
-                                }
-                              }),
-                            )
-                          }}
-                          className="rounded-xl border border-kj-border-strong bg-kj-raised px-1.5 py-2 text-center text-sm tabular-nums text-kj-primary placeholder:text-kj-muted"
-                          placeholder={`元/${lineUnit}`}
-                          aria-label={unitPriceField?.name ?? '单价'}
-                          autoComplete="off"
-                          spellCheck={false}
-                        />
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={line.quantity}
-                          onChange={(e) => {
-                            const raw = e.target.value
-                            const q =
-                              raw === ''
-                                ? ''
-                                : sanitizeUnsignedDecimalInput(raw)
-                            const lastEdited: LineTripleLastEdited =
-                              q.trim() === '' ? null : 'quantity'
-                            setLines((prev) =>
-                              prev.map((row, i) => {
-                                if (i !== idx) return row
-                                const touched: LineTripleTouched = {
-                                  ...(row.touched ?? emptyLineTripleTouched()),
-                                  quantity: q.trim() !== '',
-                                }
-                                return {
-                                  ...row,
-                                  ...reconcileLineTripleByLastEdited({
-                                    ...row,
-                                    quantity: q,
-                                    lastEdited,
-                                    touched,
+                                )
+                              }}
+                              className={`${cell} w-full rounded-xl border border-kj-border-strong bg-kj-raised px-1 py-2 text-center text-sm tabular-nums text-kj-primary placeholder:text-kj-muted`}
+                              placeholder={`元/${lineUnit}`}
+                              aria-label={unitPriceField?.name ?? '单价'}
+                              autoComplete="off"
+                              spellCheck={false}
+                            />
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={line.quantity}
+                              onChange={(e) => {
+                                const raw = e.target.value
+                                const q =
+                                  raw === ''
+                                    ? ''
+                                    : sanitizeUnsignedDecimalInput(raw)
+                                const lastEdited: LineTripleLastEdited =
+                                  'quantity'
+                                setLines((prev) =>
+                                  prev.map((row, i) => {
+                                    if (i !== idx) return row
+                                    const touched = patchLineTripleTouched(
+                                      row.touched,
+                                      'quantity',
+                                      q.trim() !== '',
+                                    )
+                                    return {
+                                      ...row,
+                                      ...reconcileLineTripleByLastEdited({
+                                        ...row,
+                                        quantity: q,
+                                        lastEdited,
+                                        touched,
+                                      }),
+                                    }
                                   }),
-                                }
-                              }),
-                            )
-                          }}
-                          className="rounded-xl border border-kj-border-strong bg-kj-raised px-1.5 py-2 text-center text-sm tabular-nums text-kj-primary placeholder:text-kj-muted"
-                          placeholder={lineUnit}
-                          aria-label={qtyFieldDisplayName}
-                          autoComplete="off"
-                          spellCheck={false}
-                        />
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={line.lineAmount}
-                          onChange={(e) => {
-                            const raw = e.target.value
-                            const a =
-                              raw === ''
-                                ? ''
-                                : sanitizeUnsignedDecimalInput(raw)
-                            const lastEdited: LineTripleLastEdited =
-                              a.trim() === '' ? null : 'lineAmount'
-                            setLines((prev) =>
-                              prev.map((row, i) => {
-                                if (i !== idx) return row
-                                const touched: LineTripleTouched = {
-                                  ...(row.touched ?? emptyLineTripleTouched()),
-                                  lineAmount: a.trim() !== '',
-                                }
-                                return {
-                                  ...row,
-                                  ...reconcileLineTripleByLastEdited({
-                                    ...row,
-                                    lineAmount: a,
-                                    lastEdited,
-                                    touched,
-                                  }),
-                                }
-                              }),
-                            )
-                          }}
-                          className="rounded-xl border border-kj-border-strong bg-kj-raised px-1.5 py-2 text-right text-sm font-semibold tabular-nums text-amber-900 placeholder:text-kj-muted placeholder:font-normal"
-                          placeholder="金额"
-                          aria-label={amountField?.name ?? '金额'}
-                          title="单价、数量、金额填两项自动算第三项"
-                          autoComplete="off"
-                          spellCheck={false}
-                        />
-                        <div className="flex justify-end">
-                          {lines.length > 1 ? (
-                            <button
-                              type="button"
-                              onClick={() => removeLine(idx)}
-                              className="rounded-lg p-1 text-xs text-kj-muted hover:bg-stone-100 hover:text-rose-600"
-                              aria-label="移除此行"
-                            >
-                              ×
-                            </button>
-                          ) : (
-                            <span className="w-4" aria-hidden />
-                          )}
-                        </div>
+                                )
+                              }}
+                              className={`${cell} w-full rounded-xl border border-kj-border-strong bg-kj-raised px-1 py-2 text-center text-sm tabular-nums text-kj-primary placeholder:text-kj-muted`}
+                              placeholder="数"
+                              aria-label={qtyFieldDisplayName}
+                              autoComplete="off"
+                              spellCheck={false}
+                            />
+                            <QuantityUnitSelect
+                              productName={line.product}
+                              catalog={productCatalog}
+                              value={lineUnit}
+                              onChange={(unit) =>
+                                setLines((prev) =>
+                                  prev.map((row, i) =>
+                                    i === idx
+                                      ? { ...row, quantityUnit: unit }
+                                      : row,
+                                  ),
+                                )
+                              }
+                              className={`${cell} w-full min-w-0 rounded-xl border border-kj-border-strong bg-kj-raised px-0.5 py-2 text-center text-xs font-medium`}
+                            />
+                            <div className={`${cell} flex min-w-0 items-center gap-1`}>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={line.lineAmount}
+                                onChange={(e) => {
+                                  const raw = e.target.value
+                                  const a =
+                                    raw === ''
+                                      ? ''
+                                      : sanitizeUnsignedDecimalInput(raw)
+                                  const lastEdited: LineTripleLastEdited =
+                                    'lineAmount'
+                                  setLines((prev) =>
+                                    prev.map((row, i) => {
+                                      if (i !== idx) return row
+                                      const touched = patchLineTripleTouched(
+                                        row.touched,
+                                        'lineAmount',
+                                        a.trim() !== '',
+                                      )
+                                      return {
+                                        ...row,
+                                        ...reconcileLineTripleByLastEdited({
+                                          ...row,
+                                          lineAmount: a,
+                                          lastEdited,
+                                          touched,
+                                        }),
+                                      }
+                                    }),
+                                  )
+                                }}
+                                className="min-w-0 flex-1 rounded-xl border border-kj-border-strong bg-kj-raised px-1.5 py-2 text-right text-sm font-semibold tabular-nums text-amber-900 placeholder:text-kj-muted placeholder:font-normal"
+                                placeholder="金额"
+                                aria-label={amountField?.name ?? '金额'}
+                                title="默认改单价或数量会重算金额；单独改金额后以金额为准"
+                                autoComplete="off"
+                                spellCheck={false}
+                              />
+                              {lines.length > 1 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => removeLine(idx)}
+                                  className="shrink-0 rounded-lg p-1 text-sm text-kj-muted hover:bg-stone-100 hover:text-rose-600"
+                                  aria-label="移除此行"
+                                >
+                                  ×
+                                </button>
+                              ) : null}
+                            </div>
+                          </Fragment>
+                        )
+                      })}
+                      <div className="col-span-full flex justify-end border-t border-stone-100 pt-2.5">
+                        <button
+                          type="button"
+                          onClick={addLine}
+                          className="text-sm font-semibold text-[#2ecc71] hover:text-[#27ae60]"
+                        >
+                          + 一行
+                        </button>
                       </div>
-                      )
-                    })}
-                  </div>
                     </div>
                   </div>
                 )}
@@ -814,10 +979,11 @@ export function AddRecordModal({
                         </span>
                       </div>
                       <p className="mt-1 text-xs leading-tight text-kj-muted">
-                        各行：单价、{qtyFieldDisplayName}、金额任填两项，自动算第三项并合计为应收
+                        各行：改单价或{qtyFieldDisplayName}会重算金额；单独改金额后以金额为准，再改单价则反推
+                        {qtyFieldDisplayName}并合计为应收
                       </p>
                     </div>
-                    <div className="mt-4 rounded-xl border border-kj-border bg-kj-bg p-3">
+                    <div className="mt-4 w-full rounded-xl border border-kj-border bg-kj-bg p-3">
                       <label className="block text-left">
                         <span className="text-sm font-medium text-kj-primary">
                           总价（优惠后实收价）

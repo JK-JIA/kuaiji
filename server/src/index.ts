@@ -20,7 +20,12 @@ import {
   volcAsrEnvReady,
   xfyunAsrEnvReady,
 } from './asrStream.js'
-import { doubaoEnvReady, parseVoiceOnServer } from './voiceParse.js'
+import { getVolcAsrResourceId } from './volcAsrUpstream.js'
+import {
+  doubaoEnvReady,
+  getVoiceParseModelId,
+  parseVoiceOnServer,
+} from './voiceParse.js'
 import {
   alipayAppId,
   alipayConfigWarnings,
@@ -275,6 +280,10 @@ app.get('/api/asr/health', (_req, res) => {
     volcAsrEnvReady: volcAsrEnvReady(),
     xfyunAsrEnvReady: xfyunAsrEnvReady(),
     doubaoEnvReady: doubaoEnvReady(),
+    /** 语音转文字后智能解析（商品/数量等）所用豆包模型 */
+    voiceParseModel: getVoiceParseModelId(),
+    /** 豆包流式 ASR 资源 ID（非 LLM 模型） */
+    volcAsrResourceId: getVolcAsrResourceId(),
     websocketPaths: {
       volc: '/api/asr/stream',
       xfyun: '/api/asr/xfyun/stream',

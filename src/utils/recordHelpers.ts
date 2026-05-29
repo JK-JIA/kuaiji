@@ -4,7 +4,10 @@ import type {
   LineItemRow,
   ProductCatalogEntry,
 } from '../types'
-import { defaultUnitForProduct } from './productCatalogHelpers'
+import {
+  formatQuantityWithResolvedUnit,
+  readLineQuantityUnit,
+} from './productUnits'
 
 const MONEY_RE = /(\d+(?:\.\d+)?)/
 
@@ -14,14 +17,15 @@ export function formatQuantityWithUnit(
   raw: string,
   productName: string,
   catalog: ProductCatalogEntry[] | undefined,
+  lineValues?: Record<string, string>,
 ): string {
-  const s = String(raw).trim()
-  if (!s) return '—'
-  if (/斤|千克|公斤|吨|包|箱|袋|个|两|[kK][gG]|[Gg]\b/.test(s)) {
-    return s
-  }
-  const unit = defaultUnitForProduct(productName, catalog ?? [])
-  return `${s}${unit}`
+  const recorded = readLineQuantityUnit(lineValues)
+  return formatQuantityWithResolvedUnit(
+    raw,
+    productName,
+    catalog ?? [],
+    recorded,
+  )
 }
 
 /** 无商品名上下文时等价于「数量 + 斤」 */
@@ -142,10 +146,40 @@ export type LineTripleTouched = {
   unitPrice: boolean
   quantity: boolean
   lineAmount: boolean
+  /** 金额锚定后，用户第二个编辑的单价/数量（次高优先级） */
+  secondAnchor: 'unitPrice' | 'quantity' | null
 }
 
 export function emptyLineTripleTouched(): LineTripleTouched {
-  return { unitPrice: false, quantity: false, lineAmount: false }
+  return {
+    unitPrice: false,
+    quantity: false,
+    lineAmount: false,
+    secondAnchor: null,
+  }
+}
+
+/** 记一笔行内：根据本次编辑更新 touched / secondAnchor */
+export function patchLineTripleTouched(
+  prev: LineTripleTouched | undefined,
+  field: Exclude<LineTripleLastEdited, null>,
+  hasValue: boolean,
+): LineTripleTouched {
+  const base = { ...emptyLineTripleTouched(), ...prev }
+  if (field === 'lineAmount') {
+    base.lineAmount = hasValue
+    if (!hasValue) base.secondAnchor = null
+    return base
+  }
+  if (field === 'unitPrice') {
+    base.unitPrice = hasValue
+    if (base.lineAmount && hasValue) base.secondAnchor = 'unitPrice'
+  } else {
+    base.quantity = hasValue
+    if (base.lineAmount && hasValue) base.secondAnchor = 'quantity'
+  }
+  if (!base.lineAmount) base.secondAnchor = null
+  return base
 }
 
 /** 单价 / 数量 / 行金额 中有几项为有效正数 */
@@ -167,10 +201,10 @@ export function lineTripleFilledCount(row: {
 }
 
 /**
- * 单价、数量、行金额：按 lastEdited 推导第三维；结合 touched 避免覆盖用户已锚定的字段
- *（如先单价后金额不再被 a÷q 改单价；先金额后数量不再被 u×q 改金额）。
- * lastEdited 为 null 且金额已清空时，直接清空行金额；
- * 为 null 且金额非空时，仅在「恰缺一维」时补缺，三项皆满时不改写。
+ * 单价 × 数量 = 行金额：
+ * - 默认金额优先级最低，改单价或数量时重算金额；
+ * - 用户单独改过金额后金额最高；此后第二个编辑的单价/数量为次高；
+ * - 仅锚定金额时：改单价 → 反推数量（斤数），改数量 → 反推单价。
  */
 export function reconcileLineTripleByLastEdited(row: {
   unitPrice: string
@@ -186,9 +220,8 @@ export function reconcileLineTripleByLastEdited(row: {
   touched: LineTripleTouched
 } {
   const touched: LineTripleTouched = {
-    unitPrice: row.touched?.unitPrice ?? false,
-    quantity: row.touched?.quantity ?? false,
-    lineAmount: row.touched?.lineAmount ?? false,
+    ...emptyLineTripleTouched(),
+    ...row.touched,
   }
 
   const u = sanitizeUnsignedDecimalInput(row.unitPrice)
@@ -207,7 +240,36 @@ export function reconcileLineTripleByLastEdited(row: {
   let quantity = q
   let lineAmount = aRaw
   const lastEdited = row.lastEdited
+  const amountAnchored = touched.lineAmount
+  const second = touched.secondAnchor
 
+  if (lastEdited === 'unitPrice' && !u.trim()) {
+    return {
+      unitPrice: '',
+      quantity,
+      lineAmount,
+      lastEdited: 'unitPrice',
+      touched,
+    }
+  }
+  if (lastEdited === 'quantity' && !q.trim()) {
+    return {
+      unitPrice,
+      quantity: '',
+      lineAmount,
+      lastEdited: 'quantity',
+      touched,
+    }
+  }
+  if (lastEdited === 'lineAmount' && !aRaw.trim()) {
+    return {
+      unitPrice,
+      quantity,
+      lineAmount: '',
+      lastEdited: null,
+      touched: { ...touched, lineAmount: false, secondAnchor: null },
+    }
+  }
   if (lastEdited === null && !aRaw.trim()) {
     return {
       unitPrice,
@@ -218,59 +280,65 @@ export function reconcileLineTripleByLastEdited(row: {
     }
   }
 
-  if (lastEdited === 'unitPrice') {
-    if (uOk && qOk && aOk && touched.lineAmount) {
+  if (!amountAnchored) {
+    if (lastEdited === 'unitPrice' || lastEdited === 'quantity') {
+      if (uOk && qOk) {
+        const c = computedLineAmountFromUnitAndQty(u, q)
+        if (c) lineAmount = c
+      } else if (lastEdited === 'unitPrice' && uOk && aOk) {
+        const qd = deriveQuantityFromAmountAndUnit(aRaw, u)
+        if (qd) quantity = sanitizeUnsignedDecimalInput(qd)
+      } else if (lastEdited === 'quantity' && qOk && aOk) {
+        const ud = deriveUnitPriceFromAmountAndQty(aRaw, q)
+        if (ud) unitPrice = sanitizeUnsignedDecimalInput(ud)
+      }
+    } else if (lastEdited === 'lineAmount') {
+      if (uOk && aOk) {
+        const qd = deriveQuantityFromAmountAndUnit(aRaw, u)
+        if (qd) quantity = sanitizeUnsignedDecimalInput(qd)
+      } else if (qOk && aOk) {
+        const ud = deriveUnitPriceFromAmountAndQty(aRaw, q)
+        if (ud) unitPrice = sanitizeUnsignedDecimalInput(ud)
+      }
+    } else {
+      if (uOk && qOk && !aOk) {
+        const c = computedLineAmountFromUnitAndQty(u, q)
+        if (c) lineAmount = c
+      } else if (uOk && aOk && !qOk) {
+        const qd = deriveQuantityFromAmountAndUnit(aRaw, u)
+        if (qd) quantity = sanitizeUnsignedDecimalInput(qd)
+      } else if (qOk && aOk && !uOk) {
+        const ud = deriveUnitPriceFromAmountAndQty(aRaw, q)
+        if (ud) unitPrice = sanitizeUnsignedDecimalInput(ud)
+      }
+    }
+    return {
+      unitPrice,
+      quantity,
+      lineAmount,
+      lastEdited,
+      touched: { ...touched, secondAnchor: null },
+    }
+  }
+
+  if (lastEdited === 'lineAmount') {
+    if (second === 'quantity' && qOk && aOk) {
+      const ud = deriveUnitPriceFromAmountAndQty(aRaw, q)
+      if (ud) unitPrice = sanitizeUnsignedDecimalInput(ud)
+    } else if (uOk && aOk) {
       const qd = deriveQuantityFromAmountAndUnit(aRaw, u)
       if (qd) quantity = sanitizeUnsignedDecimalInput(qd)
-    } else if (uOk && qOk) {
-      const c = computedLineAmountFromUnitAndQty(u, q)
-      if (c) lineAmount = c
-    } else if (uOk && aOk) {
+    } else if (qOk && aOk) {
+      const ud = deriveUnitPriceFromAmountAndQty(aRaw, q)
+      if (ud) unitPrice = sanitizeUnsignedDecimalInput(ud)
+    }
+  } else if (lastEdited === 'unitPrice') {
+    if (aOk && uOk) {
       const qd = deriveQuantityFromAmountAndUnit(aRaw, u)
       if (qd) quantity = sanitizeUnsignedDecimalInput(qd)
     }
   } else if (lastEdited === 'quantity') {
-    if (uOk && qOk && aOk && touched.lineAmount) {
-      const ud = deriveUnitPriceFromAmountAndQty(aRaw, q)
-      if (ud) unitPrice = sanitizeUnsignedDecimalInput(ud)
-    } else if (uOk && qOk) {
-      const c = computedLineAmountFromUnitAndQty(u, q)
-      if (c) lineAmount = c
-    } else if (qOk && aOk && !uOk) {
-      const ud = deriveUnitPriceFromAmountAndQty(aRaw, q)
-      if (ud) unitPrice = sanitizeUnsignedDecimalInput(ud)
-    }
-  } else if (lastEdited === 'lineAmount') {
-    if (!aRaw.trim()) {
-      return {
-        unitPrice,
-        quantity,
-        lineAmount: '',
-        lastEdited: null,
-        touched,
-      }
-    }
-    if (uOk && aOk && touched.unitPrice) {
-      const qd = deriveQuantityFromAmountAndUnit(aRaw, u)
-      if (qd) quantity = sanitizeUnsignedDecimalInput(qd)
-    } else if (qOk && aOk && touched.quantity) {
-      const ud = deriveUnitPriceFromAmountAndQty(aRaw, q)
-      if (ud) unitPrice = sanitizeUnsignedDecimalInput(ud)
-    } else if (qOk && aOk) {
-      const ud = deriveUnitPriceFromAmountAndQty(aRaw, q)
-      if (ud) unitPrice = sanitizeUnsignedDecimalInput(ud)
-    } else if (uOk && aOk) {
-      const qd = deriveQuantityFromAmountAndUnit(aRaw, u)
-      if (qd) quantity = sanitizeUnsignedDecimalInput(qd)
-    }
-  } else {
-    if (uOk && qOk && !aOk) {
-      const c = computedLineAmountFromUnitAndQty(u, q)
-      if (c) lineAmount = c
-    } else if (uOk && aOk && !qOk) {
-      const qd = deriveQuantityFromAmountAndUnit(aRaw, u)
-      if (qd) quantity = sanitizeUnsignedDecimalInput(qd)
-    } else if (qOk && aOk && !uOk) {
+    if (aOk && qOk) {
       const ud = deriveUnitPriceFromAmountAndQty(aRaw, q)
       if (ud) unitPrice = sanitizeUnsignedDecimalInput(ud)
     }
@@ -364,6 +432,8 @@ export type ExpandedProductLine = {
   quantity: string
   /** 该行小计（元），来自 lineItem.values[金额列] */
   lineAmountStr: string
+  /** 行 values（含记账单位元数据） */
+  lineValues?: Record<string, string>
 }
 
 /** 与 expandProductLines 一致，并保留行号与 lineItem 供统计按行读数字段 */
@@ -408,17 +478,26 @@ export function expandProductLineContexts(
   ]
 }
 
+function lineValuesForContext(
+  record: LedgerRecord,
+  lineItem: LineItemRow | null,
+): Record<string, string> | undefined {
+  if (lineItem?.values) return lineItem.values
+  return record.values
+}
+
 /** 展开为若干 (商品, 数量, 行金额) 行；兼容无 lineItems 的旧数据 */
 export function expandProductLines(
   record: LedgerRecord,
   fields: FieldDef[],
 ): ExpandedProductLine[] {
   return expandProductLineContexts(record, fields).map(
-    ({ product, unitPriceStr, quantity, lineAmountStr }) => ({
+    ({ product, unitPriceStr, quantity, lineAmountStr, lineItem }) => ({
       product,
       unitPriceStr,
       quantity,
       lineAmountStr,
+      lineValues: lineValuesForContext(record, lineItem),
     }),
   )
 }

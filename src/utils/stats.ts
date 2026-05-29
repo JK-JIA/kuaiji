@@ -1,4 +1,5 @@
-import type { FieldDef, LedgerRecord } from '../types'
+import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
+import { lineQuantityToJin } from './productUnits'
 import {
   buyerBucketKey,
   emptyBuyerBucketLabel,
@@ -101,8 +102,14 @@ export function collectDistinctProductsForStats(
  */
 function distributeRecordAmount(
   record: LedgerRecord,
-  lines: { quantity: string; lineAmountStr: string }[],
+  lines: {
+    product: string
+    quantity: string
+    lineAmountStr: string
+    lineValues?: Record<string, string>
+  }[],
   amountFieldId: string | undefined,
+  catalog: ProductCatalogEntry[],
 ): number[] {
   if (!amountFieldId || lines.length === 0) return lines.map(() => 0)
   const total = parseFloat(record.values[amountFieldId] || '')
@@ -112,7 +119,9 @@ function distributeRecordAmount(
   const sumExp = Math.round(explicit.reduce((a, b) => a + b, 0) * 100) / 100
 
   if (sumExp <= 0) {
-    const jins = lines.map((l) => parseJinFromQuantity(l.quantity))
+    const jins = lines.map((l) =>
+      parseJinFromQuantity(l.quantity, l.product, catalog, l.lineValues),
+    )
     const sum = jins.reduce((a, b) => a + b, 0)
     if (sum <= 0) return lines.map(() => ta / lines.length)
     return jins.map((j) => Math.round(ta * (j / sum) * 100) / 100)
@@ -127,7 +136,14 @@ function distributeRecordAmount(
     .filter((i) => i >= 0)
   if (needIdx.length === 0) return out
 
-  const jins = needIdx.map((i) => parseJinFromQuantity(lines[i].quantity))
+  const jins = needIdx.map((i) =>
+    parseJinFromQuantity(
+      lines[i].quantity,
+      lines[i].product,
+      catalog,
+      lines[i].lineValues,
+    ),
+  )
   const jsum = jins.reduce((a, b) => a + b, 0)
   if (jsum <= 0) {
     const each = rem / needIdx.length
@@ -172,8 +188,21 @@ export function dailyAmountSeries(
     .sort((a, b) => a.date.localeCompare(b.date))
 }
 
-/** 从数量字段估算斤数 */
-export function parseJinFromQuantity(q: string): number {
+/** 从数量字段估算斤数（无商品目录时按旧规则解析） */
+export function parseJinFromQuantity(
+  q: string,
+  productName?: string,
+  catalog?: ProductCatalogEntry[],
+  lineValues?: Record<string, string>,
+): number {
+  if (catalog?.length && productName !== undefined) {
+    return lineQuantityToJin({
+      product: productName,
+      quantity: q,
+      lineItem: lineValues ? { id: '', values: lineValues } : null,
+      catalog,
+    })
+  }
   const s = String(q).trim()
   if (!s) return 0
   const jin = s.match(/(\d+(?:\.\d+)?)\s*斤/)
@@ -197,17 +226,29 @@ export function aggregateProductSales(
   fields: FieldDef[],
   amountFieldId: string | undefined,
   dimensionFilter?: StatsDimensionFilter | null,
+  catalog: ProductCatalogEntry[] = [],
 ): ProductSalesRow[] {
   const f = normalizeStatsDimensionFilter(dimensionFilter)
   const map = new Map<string, { count: number; jin: number; amount: number }>()
   for (const r of records) {
     if (!statsRecordMatchesBuyer(r, fields, f.buyer)) continue
-    const lines = expandProductLines(r, fields)
-    const amounts = distributeRecordAmount(r, lines, amountFieldId)
+    const contexts = expandProductLineContexts(r, fields)
+    const lines = contexts.map((c) => ({
+      product: c.product,
+      quantity: c.quantity,
+      lineAmountStr: c.lineAmountStr,
+      lineValues: c.lineItem?.values,
+    }))
+    const amounts = distributeRecordAmount(r, lines, amountFieldId, catalog)
     lines.forEach((line, i) => {
       const name = statsLineProductName(line)
       if (f.product && name !== f.product) return
-      const jin = parseJinFromQuantity(line.quantity)
+      const jin = parseJinFromQuantity(
+        line.quantity,
+        line.product,
+        catalog,
+        line.lineValues,
+      )
       const amt = amounts[i] ?? 0
       const cur = map.get(name) || { count: 0, jin: 0, amount: 0 }
       cur.count += 1
@@ -267,6 +308,7 @@ export function aggregateBuyerProductRows(
   fields: FieldDef[],
   amountFieldId: string | undefined,
   dimensionFilter?: StatsDimensionFilter | null,
+  catalog: ProductCatalogEntry[] = [],
 ): BuyerProductRow[] {
   const f = normalizeStatsDimensionFilter(dimensionFilter)
   const plateId = fields.find((f) => f.key === 'plate')?.id
@@ -274,13 +316,24 @@ export function aggregateBuyerProductRows(
   for (const r of records) {
     if (!statsRecordMatchesBuyer(r, fields, f.buyer)) continue
     const buyer = plateId ? buyerBucketKey(r.values[plateId], fields) : emptyBuyerBucketLabel(fields)
-    const lines = expandProductLines(r, fields)
-    if (lines.length === 0) continue
-    const amounts = distributeRecordAmount(r, lines, amountFieldId)
+    const contexts = expandProductLineContexts(r, fields)
+    if (contexts.length === 0) continue
+    const lines = contexts.map((c) => ({
+      product: c.product,
+      quantity: c.quantity,
+      lineAmountStr: c.lineAmountStr,
+      lineValues: c.lineItem?.values,
+    }))
+    const amounts = distributeRecordAmount(r, lines, amountFieldId, catalog)
     lines.forEach((line, i) => {
       const product = statsLineProductName(line)
       if (f.product && product !== f.product) return
-      const jin = parseJinFromQuantity(line.quantity)
+      const jin = parseJinFromQuantity(
+        line.quantity,
+        line.product,
+        catalog,
+        line.lineValues,
+      )
       const amt = amounts[i] ?? 0
       const key = `${buyer}\t${product}`
       const cur = map.get(key) || { jin: 0, amount: 0 }
@@ -461,10 +514,12 @@ export function aggregateCustomStats(
         continue
       }
       const lines = contexts.map((c) => ({
+        product: c.product,
         quantity: c.quantity,
         lineAmountStr: c.lineAmountStr,
+        lineValues: c.lineItem?.values,
       }))
-      const amounts = distributeRecordAmount(r, lines, amountFieldId)
+      const amounts = distributeRecordAmount(r, lines, amountFieldId, [])
       for (let i = 0; i < contexts.length; i++) {
         const ctx = contexts[i]
         const bucket = ctx.product.trim() || '（未填商品）'

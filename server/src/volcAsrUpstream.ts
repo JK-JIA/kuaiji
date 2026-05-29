@@ -65,6 +65,10 @@ export function volcAsrEnvReady(): boolean {
   }
 }
 
+export function getVolcAsrResourceId(): string {
+  return process.env.VOLC_ASR_RESOURCE_ID?.trim() || 'volc.seedasr.sauc.duration'
+}
+
 export function runVolcUpstreamSession(params: {
   send: ClientFacingSendJson
   hotwords: string[]

@@ -343,6 +343,7 @@ export function RecordCard({
                                 line.quantity,
                                 line.product,
                                 productCatalog,
+                                line.lineValues,
                               )}
                             </span>,
                             <span
@@ -477,6 +478,7 @@ export function RecordCard({
                                 line.quantity,
                                 line.product,
                                 productCatalog,
+                                line.lineValues,
                               )}
                         </span>
                       </div>

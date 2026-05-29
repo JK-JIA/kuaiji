@@ -31,7 +31,15 @@ import { normalizeToken } from '../utils/voiceHistoryFuzzy'
 import { SETTINGS_CARD_CLASS } from './settings/SettingsSection'
 import { SettingsAboutYouScreen } from './settings/SettingsAboutYouScreen'
 import { AsrProviderSettingsScreen } from './settings/AsrProviderSettingsScreen'
+import {
+  fetchVoiceParseModelSubtitle,
+  VoiceParseSettingsScreen,
+} from './settings/VoiceParseSettingsScreen'
 import { VoiceLexiconSettingsScreen } from './settings/VoiceLexiconSettingsScreen'
+import { ProductCatalogUnitEditor } from './settings/ProductCatalogUnitEditor'
+import { SwipeDeleteRow } from '../components/SwipeDeleteRow'
+import { catalogEntryWithUnits } from '../utils/productCatalogHelpers'
+import { BASE_STAT_UNIT } from '../utils/productUnits'
 import { asrProviderLabel, readAsrProvider } from '../utils/asrProvider'
 import { ProBenefitsSheet, ProRedeemSheet } from './settings/ProMembershipSheets'
 import { SettingsProfileCard } from './settings/SettingsProfileCard'
@@ -39,6 +47,7 @@ import {
   IconBell,
   IconBox,
   IconMic,
+  IconSparkles,
   IconFields,
   IconFontSize,
   IconImportExport,
@@ -415,6 +424,7 @@ type SettingsPanel =
   | 'catalog'
   | 'voiceLexicon'
   | 'asrProvider'
+  | 'voiceParse'
   | 'fields'
 
 export function SettingsPage() {
@@ -452,6 +462,10 @@ export function SettingsPage() {
   const [proRedeemOpen, setProRedeemOpen] = useState(false)
   const [newProductName, setNewProductName] = useState('')
   const [newProductUnit, setNewProductUnit] = useState('斤')
+  /** 正在编辑计量单位的商品 id（此时禁用左滑删除） */
+  const [catalogUnitEditorId, setCatalogUnitEditorId] = useState<string | null>(
+    null,
+  )
   const sorted = useMemo(
     () => [...fields].sort((a, b) => a.order - b.order),
     [fields],
@@ -489,6 +503,19 @@ export function SettingsPage() {
     () => `当前：${asrProviderLabel(readAsrProvider())}`,
     [panel],
   )
+
+  const [voiceParseSubtitle, setVoiceParseSubtitle] = useState('读取中…')
+
+  useEffect(() => {
+    if (panel !== 'main') return
+    let cancelled = false
+    void fetchVoiceParseModelSubtitle().then((s) => {
+      if (!cancelled) setVoiceParseSubtitle(s)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [panel])
 
   const fieldsRowSubtitle = useMemo(
     () => `${sorted.length} 个字段 · 支持自定义`,
@@ -556,7 +583,7 @@ export function SettingsPage() {
 
   const addProductCatalogEntry = async () => {
     const n = newProductName.trim()
-    const u = newProductUnit.trim() || '斤'
+    const u = newProductUnit.trim() || BASE_STAT_UNIT
     if (!n) {
       alert('请输入商品名称')
       return
@@ -575,7 +602,10 @@ export function SettingsPage() {
         await saveProductCatalog(
           productCatalog.map((e) =>
             e.id === dup.id
-              ? { ...dup, name: n, unit: u, source: 'manual' as const }
+              ? catalogEntryWithUnits(
+                  { ...dup, name: n, source: 'manual' as const },
+                  [{ name: u, factorToJin: 1, isDefault: true }],
+                )
               : e,
           ),
           productCatalogSuppressed,
@@ -597,12 +627,15 @@ export function SettingsPage() {
       await saveProductCatalog(
         [
           ...productCatalog,
-          {
-            id: newCatalogEntryId(),
-            name: n,
-            unit: u,
-            source: 'manual',
-          },
+          catalogEntryWithUnits(
+            {
+              id: newCatalogEntryId(),
+              name: n,
+              unit: u,
+              source: 'manual',
+            },
+            [{ name: u, factorToJin: 1, isDefault: true }],
+          ),
         ],
         productCatalogSuppressed,
         asrHotwordsSuppressed,
@@ -632,16 +665,14 @@ export function SettingsPage() {
     }
   }
 
-  const updateProductCatalogUnit = async (id: string, unitRaw: string) => {
-    const u = unitRaw.trim() || '斤'
+  const saveProductCatalogEntry = async (entry: ProductCatalogEntry) => {
     setBusy(true)
     try {
       const next = productCatalog.map((x) =>
-        x.id === id
+        x.id === entry.id
           ? {
-              ...x,
-              unit: u,
-              source: x.source === 'auto' ? ('manual' as const) : x.source,
+              ...entry,
+              source: x.source === 'auto' ? ('manual' as const) : entry.source,
             }
           : x,
       )
@@ -838,32 +869,43 @@ export function SettingsPage() {
     return <AsrProviderSettingsScreen onBack={() => setPanel('main')} />
   }
 
+  if (panel === 'voiceParse') {
+    return (
+      <VoiceParseSettingsScreen
+        onBack={() => {
+          setPanel('main')
+          void fetchVoiceParseModelSubtitle().then(setVoiceParseSubtitle)
+        }}
+      />
+    )
+  }
+
   if (panel === 'catalog') {
     return (
       <div className={SETTINGS_SHELL_BG}>
         <SettingsSubHeader title="商品管理" onBack={() => setPanel('main')} />
         <SettingsPanelBody>
-          <p className="px-1 text-[12px] leading-relaxed text-stone-500">
-            维护商品名与单位（斤、包等）。语音与录入会优先匹配；常用账单可自动生成条目。删除自动条目后同名不会再自动加入。
+          <p className="px-1 text-sm leading-relaxed text-stone-500">
+            配置商品与单位换算，记账选单位，统计自动折合斤。
           </p>
           <div className={SETTINGS_CARD_CLASS}>
-            <div className="mb-4 flex flex-wrap items-end gap-2">
-              <label className="min-w-[8rem] flex-1 text-left text-xs font-medium text-kj-secondary">
+            <div className="mb-5 flex flex-wrap items-end gap-3">
+              <label className="min-w-[8rem] flex-1 text-left text-sm font-medium text-kj-secondary">
                 商品名称
                 <input
                   value={newProductName}
                   onChange={(e) => setNewProductName(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-kj-border-strong bg-kj-raised px-3 py-2 text-sm text-kj-primary"
+                  className="mt-1.5 w-full rounded-xl border border-kj-border-strong bg-kj-raised px-3 py-3 text-base text-kj-primary"
                   placeholder="如 圆紫薯"
                   autoComplete="off"
                 />
               </label>
-              <label className="w-[5.5rem] text-left text-xs font-medium text-kj-secondary">
+              <label className="w-[5.5rem] text-left text-sm font-medium text-kj-secondary">
                 单位
                 <input
                   value={newProductUnit}
                   onChange={(e) => setNewProductUnit(e.target.value)}
-                  className="mt-1 w-full rounded-xl border border-kj-border-strong bg-kj-raised px-2 py-2 text-center text-sm text-kj-primary"
+                  className="mt-1.5 w-full rounded-xl border border-kj-border-strong bg-kj-raised px-2 py-3 text-center text-base text-kj-primary"
                   placeholder="斤"
                   autoComplete="off"
                 />
@@ -872,61 +914,53 @@ export function SettingsPage() {
                 type="button"
                 disabled={busy}
                 onClick={() => void addProductCatalogEntry()}
-                className="shrink-0 rounded-xl border border-[#2ecc71] bg-[#2ecc71] px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50"
+                className="shrink-0 rounded-xl border border-[#2ecc71] bg-[#2ecc71] px-6 py-3 text-base font-semibold text-white shadow-sm disabled:opacity-50"
               >
                 添加
               </button>
             </div>
             {sortedProductCatalog.length === 0 ? (
-              <p className="text-xs text-kj-muted">
+              <p className="text-sm text-kj-muted">
                 暂无条目；记几笔或在此添加后会显示。
               </p>
             ) : (
-              <ul className="max-h-[min(22rem,50vh)] space-y-2 overflow-y-auto pr-1">
+              <ul className="space-y-3">
                 {sortedProductCatalog.map((row) => (
-                  <li
-                    key={row.id}
-                    className="flex flex-wrap items-center gap-2 rounded-xl border border-kj-border bg-kj-raised px-3 py-2 text-sm"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <span className="block truncate font-medium text-kj-primary">
-                        {row.name}
-                      </span>
-                      {(row.aliases?.length ?? 0) > 0 ? (
-                        <span className="mt-0.5 block truncate text-[10px] text-amber-800/90 dark:text-amber-200/80">
-                          别名：{row.aliases!.join('、')}
-                        </span>
-                      ) : null}
-                    </div>
-                    <label className="flex w-[4.5rem] shrink-0 items-center gap-1 text-xs text-kj-secondary">
-                      <span className="shrink-0">单位</span>
-                      <input
-                        defaultValue={row.unit}
-                        key={`${row.id}-${row.unit}`}
-                        onBlur={(e) => {
-                          if (e.target.value.trim() === row.unit) return
-                          void updateProductCatalogUnit(row.id, e.target.value)
-                        }}
-                        className="w-full rounded-lg border border-kj-border-strong bg-kj-surface px-1.5 py-1 text-center text-sm text-kj-primary"
-                      />
-                    </label>
-                    <span
-                      className={
-                        row.source === 'auto'
-                          ? 'shrink-0 text-[10px] text-kj-muted'
-                          : 'shrink-0 text-[10px] text-kj-secondary'
-                      }
-                    >
-                      {row.source === 'auto' ? '自动' : '手动'}
-                    </span>
-                    <button
-                      type="button"
+                  <li key={row.id}>
+                    <SwipeDeleteRow
                       disabled={busy}
-                      onClick={() => void removeProductCatalogEntry(row)}
-                      className="ml-auto shrink-0 text-xs font-medium text-rose-600 hover:underline disabled:opacity-50"
+                      swipeDisabled={catalogUnitEditorId === row.id}
+                      confirmTitle="删除商品？"
+                      confirmMessage={
+                        row.source === 'auto'
+                          ? '删除后无法恢复；同名商品将不再自动加入目录。'
+                          : '删除后无法恢复，确定要删除这条商品吗？'
+                      }
+                      onDelete={() => void removeProductCatalogEntry(row)}
+                      className="border border-kj-border"
                     >
-                      删除
-                    </button>
+                      <div className="px-4 py-4">
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+                          <span className="shrink-0 text-base font-semibold text-kj-primary">
+                            {row.name}
+                          </span>
+                          <ProductCatalogUnitEditor
+                            entry={row}
+                            disabled={busy}
+                            activeEditorId={catalogUnitEditorId}
+                            onSave={saveProductCatalogEntry}
+                            onOpenChange={(isOpen) =>
+                              setCatalogUnitEditorId(isOpen ? row.id : null)
+                            }
+                          />
+                        </div>
+                        {(row.aliases?.length ?? 0) > 0 ? (
+                          <p className="mt-2 truncate text-xs text-amber-800/90 dark:text-amber-200/80">
+                            别名：{row.aliases!.join('、')}
+                          </p>
+                        ) : null}
+                      </div>
+                    </SwipeDeleteRow>
                   </li>
                 ))}
               </ul>
@@ -1039,6 +1073,12 @@ export function SettingsPage() {
               title="语音热词与别名"
               subtitle={voiceLexiconSubtitle}
               onClick={() => setPanel('voiceLexicon')}
+            />
+            <SettingsNavRowButton
+              icon={<IconSparkles className="h-[18px] w-[18px]" />}
+              title="智能解析"
+              subtitle={voiceParseSubtitle}
+              onClick={() => setPanel('voiceParse')}
             />
             <SettingsNavRowButton
               last

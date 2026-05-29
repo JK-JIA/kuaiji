@@ -67,6 +67,11 @@ export function doubaoEnvReady(): boolean {
   return DOUBAO_API_KEY.length > 0
 }
 
+/** 供 /api/asr/health 与设置页展示当前智能解析模型 */
+export function getVoiceParseModelId(): string {
+  return DOUBAO_MODEL
+}
+
 type ArkCallFailure = {
   ok: false
   status: number

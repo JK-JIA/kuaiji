@@ -107,3 +107,13 @@ export function IconScan(props: IconProps) {
     </svg>
   )
 }
+
+/** 智能解析（豆包 LLM） */
+export function IconSparkles(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M9.5 2 10.8 5.2 14 6.5 10.8 7.8 9.5 11 8.2 7.8 5 6.5 8.2 5.2 9.5 2z" />
+      <path d="M18 14l.9 2.7 2.7.9-2.7.9L18 21l-.9-2.7-2.7-.9 2.7-.9L18 14z" />
+    </svg>
+  )
+}

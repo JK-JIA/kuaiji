@@ -88,6 +88,7 @@ export function mergeAutoProductCatalog(input: {
       id: `auto_${k}`,
       name: display,
       unit: '斤',
+      units: [{ name: '斤', factorToJin: 1, isDefault: true }],
       source: 'auto',
     })
   }

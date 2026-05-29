@@ -1,9 +1,10 @@
-import type { ProductCatalogEntry } from '../types'
+import type { ProductCatalogEntry, ProductUnitDef } from '../types'
 import {
   normalizeAliasList,
   sanitizeAliasesForProduct,
   sanitizeAllCatalogAliases,
 } from './productAliasHelpers'
+import { defaultUnitDef, normalizeProductUnits } from './productUnits'
 import { normalizeToken } from './voiceHistoryFuzzy'
 
 /**
@@ -16,7 +17,11 @@ export function normalizeCatalogEntry(
   const name = String(raw.name ?? '').trim()
   if (!id || !name) return null
   const unitRaw = String(raw.unit ?? '斤').trim()
-  const unit = unitRaw || '斤'
+  const units = normalizeProductUnits(
+    (raw as ProductCatalogEntry).units,
+    unitRaw || '斤',
+  )
+  const unit = defaultUnitDef({ id, name, unit: unitRaw, units, source: 'manual' }).name
   const inferredAuto =
     raw.source === 'auto' || (typeof id === 'string' && id.startsWith('auto_'))
   const source: 'manual' | 'auto' = inferredAuto ? 'auto' : 'manual'
@@ -28,9 +33,19 @@ export function normalizeCatalogEntry(
     id,
     name,
     unit,
+    units,
     source,
     ...(aliases.length > 0 ? { aliases } : {}),
   }
+}
+
+export function catalogEntryWithUnits(
+  entry: ProductCatalogEntry,
+  units: ProductUnitDef[],
+): ProductCatalogEntry {
+  const normalized = normalizeProductUnits(units, entry.unit)
+  const unit = defaultUnitDef({ ...entry, units: normalized }).name
+  return { ...entry, unit, units: normalized }
 }
 
 export function parseProductCatalogEntries(raw: unknown): ProductCatalogEntry[] {
@@ -93,5 +108,8 @@ export function defaultUnitForProduct(
   productName: string,
   catalog: ProductCatalogEntry[],
 ): string {
-  return lookupCatalogEntryForProduct(productName, catalog)?.unit ?? '斤'
+  const entry = lookupCatalogEntryForProduct(productName, catalog)
+  return defaultUnitDef(entry).name
 }
+
+export { getCatalogUnits, unitsForProduct } from './productUnits'

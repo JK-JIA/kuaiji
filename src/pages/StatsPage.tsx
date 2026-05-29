@@ -44,6 +44,11 @@ import {
   buildStatsDrillDownHint,
   type StatsDrillDownPayload,
 } from '../utils/statsDrillDown'
+import {
+  BASE_STAT_UNIT,
+  collectDistinctStatUnits,
+  jinToUnitQuantity,
+} from '../utils/productUnits'
 
 function filterByRange(
   records: LedgerRecord[],
@@ -118,7 +123,8 @@ type StatsRangeMode = 'preset' | 'custom'
 
 export function StatsPage() {
   const navigate = useNavigate()
-  const { ready, fields, records } = useLedger()
+  const { ready, fields, records, productCatalog } = useLedger()
+  const [statsQtyUnit, setStatsQtyUnit] = useState(BASE_STAT_UNIT)
   const [kind, setKind] = useState<ReportKind>('month')
   /** 0=当前周期，-1=上一周期，不可大于 0（不向未来空周期） */
   const [periodOffset, setPeriodOffset] = useState(0)
@@ -367,6 +373,25 @@ export function StatsPage() {
   const statsChartsFiltered =
     Boolean(statsDimFilter.buyer) || Boolean(statsDimFilter.product)
 
+  const statUnitOptions = useMemo(
+    () => collectDistinctStatUnits(productCatalog),
+    [productCatalog],
+  )
+
+  useEffect(() => {
+    if (!statUnitOptions.includes(statsQtyUnit)) {
+      setStatsQtyUnit(BASE_STAT_UNIT)
+    }
+  }, [statUnitOptions, statsQtyUnit])
+
+  const displayQtyForProduct = useCallback(
+    (jin: number, productName: string) => {
+      if (statsQtyUnit === BASE_STAT_UNIT) return jin
+      return jinToUnitQuantity(jin, statsQtyUnit, productName, productCatalog)
+    },
+    [statsQtyUnit, productCatalog],
+  )
+
   const products = useMemo(
     () =>
       aggregateProductSales(
@@ -374,8 +399,9 @@ export function StatsPage() {
         fields,
         amountId,
         statsDimFilter,
+        productCatalog,
       ),
-    [currentRecords, fields, amountId, statsDimFilter],
+    [currentRecords, fields, amountId, statsDimFilter, productCatalog],
   )
   const buyerProductRows = useMemo(
     () =>
@@ -384,8 +410,9 @@ export function StatsPage() {
         fields,
         amountId,
         statsDimFilter,
+        productCatalog,
       ),
-    [currentRecords, fields, amountId, statsDimFilter],
+    [currentRecords, fields, amountId, statsDimFilter, productCatalog],
   )
   const buyerOutstandingRows = useMemo(
     () => aggregateBuyerOutstanding(currentRecords, fields, statsDimFilter),
@@ -400,12 +427,12 @@ export function StatsPage() {
     return m
   }, [buyerOutstandingRows])
 
-  /** 按购买方汇总：总斤数、总金额、未核账 */
+  /** 按购买方汇总：总数量（按所选单位）、总金额、未核账 */
   const buyerSummaryRows = useMemo(() => {
     const m = new Map<string, { jin: number; amount: number }>()
     for (const r of buyerProductRows) {
       const t = m.get(r.buyer) || { jin: 0, amount: 0 }
-      t.jin += r.jin
+      t.jin += displayQtyForProduct(r.jin, r.product)
       t.amount += r.amount
       m.set(r.buyer, t)
     }
@@ -420,12 +447,25 @@ export function StatsPage() {
         outstanding: buyerOutstandingMap.get(buyer) ?? 0,
       }))
       .sort((a, b) => a.buyer.localeCompare(b.buyer, 'zh-CN'))
-  }, [buyerProductRows, buyerOutstandingRows, buyerOutstandingMap])
+  }, [
+    buyerProductRows,
+    buyerOutstandingRows,
+    buyerOutstandingMap,
+    displayQtyForProduct,
+  ])
 
-  const totalJin = products.reduce((s, r) => s + r.jin, 0)
+  const totalDisplayQty = products.reduce(
+    (s, r) => s + displayQtyForProduct(r.jin, r.name),
+    0,
+  )
   const totalProductAmt = products.reduce((s, r) => s + r.amount, 0)
+  const productDisplayQty = (row: ProductSalesRow) =>
+    displayQtyForProduct(row.jin, row.name)
   const maxJinBar =
-    products.length > 0 ? Math.max(...products.map((r) => r.jin), 1e-6) : 1
+    products.length > 0
+      ? Math.max(...products.map((r) => productDisplayQty(r)), 1e-6)
+      : 1
+  const qtyUnitLabel = statsQtyUnit
   const maxAmtBar =
     products.length > 0
       ? Math.max(...products.map((r) => r.amount), 1e-6)
@@ -446,10 +486,13 @@ export function StatsPage() {
   const productPieData = useMemo(() => {
     const rows = products.map((p) => ({
       key: p.name,
-      value: productPieMetricEffective === 'amount' ? p.amount : p.jin,
+      value:
+        productPieMetricEffective === 'amount'
+          ? p.amount
+          : productDisplayQty(p),
     }))
     return chartDataWithOther(rows)
-  }, [products, productPieMetricEffective])
+  }, [products, productPieMetricEffective, statsQtyUnit, productCatalog])
 
   const totalBuyerJin = buyerSummaryRows.reduce((s, r) => s + r.jin, 0)
   const totalBuyerAmt = buyerSummaryRows.reduce((s, r) => s + r.amount, 0)
@@ -723,8 +766,24 @@ export function StatsPage() {
               />
             </div>
             <p className="mb-3 text-[11px] leading-relaxed text-kj-secondary">
-              切换饼图或列表查看；饼图为前 10 项及「其他」，列表含斤数/金额明细与排序。
+              切换饼图或列表查看；数量按商品目录换算（默认斤）。可在下方选择其他统计单位。
             </p>
+            {statUnitOptions.length > 1 ? (
+              <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-kj-secondary">统计数量单位</span>
+                <select
+                  value={statsQtyUnit}
+                  onChange={(e) => setStatsQtyUnit(e.target.value)}
+                  className="rounded-lg border border-kj-border-strong bg-kj-raised px-2 py-1.5 text-kj-primary"
+                >
+                  {statUnitOptions.map((u) => (
+                    <option key={u} value={u}>
+                      {u}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
             <div className="overflow-hidden rounded-2xl border border-kj-border bg-kj-surface shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-kj-border px-3 py-2.5">
                 <StatsShareViewModeSwitch
@@ -743,7 +802,7 @@ export function StatsPage() {
                             : 'text-kj-secondary hover:text-kj-primary'
                         }`}
                       >
-                        按斤数
+                        按{qtyUnitLabel}
                       </button>
                       <button
                         type="button"
@@ -776,7 +835,7 @@ export function StatsPage() {
                     formatValue={(n) =>
                       productPieMetricEffective === 'amount'
                         ? `¥${fmtMoney(n)}`
-                        : `${fmtNum(n)} 斤`
+                        : `${fmtNum(n)} ${qtyUnitLabel}`
                     }
                     emptyMessage={
                       products.length === 0
@@ -791,7 +850,9 @@ export function StatsPage() {
                 <div className="max-h-[min(52vh,22rem)] overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] px-2 pb-2 pt-1 sm:px-3">
                   <ProductSalesShareTable
                     products={sortedProductShareRows}
-                    totalJin={totalJin}
+                    totalJin={totalDisplayQty}
+                    qtyUnitLabel={qtyUnitLabel}
+                    rowDisplayQty={productDisplayQty}
                     totalProductAmt={totalProductAmt}
                     amountId={amountId}
                     maxJinBar={maxJinBar}
@@ -810,7 +871,7 @@ export function StatsPage() {
               {buyerFieldName}汇总与未核账
             </h2>
             <p className="mb-3 mt-1 text-[11px] leading-relaxed text-kj-secondary">
-              横轴为购买方，柱状图展示总斤数、总金额与未核账；可切换柱状图/列表，点击图例可单独查看某条线。
+              横轴为购买方，柱状图展示总数量（与上方所选单位一致）、总金额与未核账。
             </p>
             {!hasBuyerStatsSection ? (
               <div className="rounded-2xl border border-dashed border-kj-border bg-kj-surface py-8 text-center text-sm text-kj-secondary">
@@ -857,6 +918,7 @@ export function StatsPage() {
                       rows={sortedBuyerSummaryRows}
                       amountId={amountId}
                       totalJin={totalBuyerJin}
+                      qtyUnitLabel={qtyUnitLabel}
                       totalAmt={totalBuyerAmt}
                       totalOutstanding={totalBuyerOutstanding}
                       maxJin={maxBuyerJin}
@@ -912,7 +974,9 @@ export function StatsPage() {
         {statsDetailModal === 'product' && (
           <ProductSalesShareTable
             products={sortedProductShareRows}
-            totalJin={totalJin}
+            totalJin={totalDisplayQty}
+            qtyUnitLabel={qtyUnitLabel}
+            rowDisplayQty={productDisplayQty}
             totalProductAmt={totalProductAmt}
             amountId={amountId}
             maxJinBar={maxJinBar}
@@ -929,6 +993,7 @@ export function StatsPage() {
             rows={sortedBuyerSummaryRows}
             amountId={amountId}
             totalJin={totalBuyerJin}
+            qtyUnitLabel={qtyUnitLabel}
             totalAmt={totalBuyerAmt}
             totalOutstanding={totalBuyerOutstanding}
             maxJin={maxBuyerJin}
@@ -1099,6 +1164,7 @@ function BuyerSummaryTable({
   rows,
   amountId,
   totalJin,
+  qtyUnitLabel = BASE_STAT_UNIT,
   totalAmt,
   totalOutstanding,
   maxJin,
@@ -1113,6 +1179,7 @@ function BuyerSummaryTable({
   rows: BuyerSummaryRow[]
   amountId: string | null | undefined
   totalJin: number
+  qtyUnitLabel?: string
   totalAmt: number
   totalOutstanding: number
   maxJin: number
@@ -1146,7 +1213,7 @@ function BuyerSummaryTable({
             {buyerFieldName}
           </th>
           <SortableBuyerSummaryTh
-            label="总斤数"
+            label={`总${qtyUnitLabel}`}
             sortKey="jin"
             sort={sort}
             onSortKey={onSortKey}
@@ -1203,7 +1270,7 @@ function BuyerSummaryTable({
               <td className={metricTd}>
                 {row.jin > 0 ? (
                   <StatsShareMetricCell
-                    valueLine={`${fmtNum(row.jin)} 斤`}
+                    valueLine={`${fmtNum(row.jin)} ${qtyUnitLabel}`}
                     pct={jinPct}
                     barPct={jinBar}
                     barClassName="bg-teal-500"
@@ -1259,6 +1326,8 @@ function BuyerSummaryTable({
 function ProductSalesShareTable({
   products,
   totalJin,
+  qtyUnitLabel = BASE_STAT_UNIT,
+  rowDisplayQty,
   totalProductAmt,
   amountId,
   maxJinBar,
@@ -1270,6 +1339,8 @@ function ProductSalesShareTable({
 }: {
   products: ProductSalesRow[]
   totalJin: number
+  qtyUnitLabel?: string
+  rowDisplayQty?: (row: ProductSalesRow) => number
   totalProductAmt: number
   amountId: string | null | undefined
   maxJinBar: number
@@ -1289,6 +1360,7 @@ function ProductSalesShareTable({
     ? 'text-sm tabular-nums text-kj-secondary'
     : 'text-[11px] tabular-nums text-kj-secondary'
   const pctText = relaxed ? 'text-sm' : 'text-xs'
+  const qtyOf = rowDisplayQty ?? ((row: ProductSalesRow) => row.jin)
 
   return (
     <table className="w-full text-left text-sm">
@@ -1296,7 +1368,7 @@ function ProductSalesShareTable({
         <tr>
           <th className={th}>商品</th>
           <SortableShareMetricTh
-            label="斤数占比"
+            label={`${qtyUnitLabel}占比`}
             sortKey="jin"
             sort={sort}
             onSortKey={onSortKey}
@@ -1316,12 +1388,13 @@ function ProductSalesShareTable({
       </thead>
       <tbody>
         {products.map((row) => {
-          const jinPct = totalJin > 0 ? (row.jin / totalJin) * 100 : 0
+          const rowQty = qtyOf(row)
+          const jinPct = totalJin > 0 ? (rowQty / totalJin) * 100 : 0
           const amtPct =
             amountId && totalProductAmt > 0
               ? (row.amount / totalProductAmt) * 100
               : 0
-          const jinBar = Math.round((row.jin / maxJinBar) * 100)
+          const jinBar = Math.round((rowQty / maxJinBar) * 100)
           const amtBar = Math.round((row.amount / maxAmtBar) * 100)
           const nameCell = onProductClick ? (
             <button
@@ -1344,7 +1417,9 @@ function ProductSalesShareTable({
               </td>
               <td className="py-2 pl-2 align-top">
                 <div className="space-y-1">
-                  <div className={valLine}>{fmtNum(row.jin)} 斤</div>
+                  <div className={valLine}>
+                    {fmtNum(rowQty)} {qtyUnitLabel}
+                  </div>
                   <div className="flex items-center gap-2">
                     <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-kj-raised">
                       <div

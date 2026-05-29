@@ -70,7 +70,8 @@ export function AsrProviderSettingsScreen({ onBack }: Props) {
       <SettingsSubHeader title="语音识别引擎" onBack={onBack} />
       <SettingsPanelBody>
         <p className="px-1 text-[12px] leading-relaxed text-stone-500">
-          长按首页麦克风或「记一笔」内语音按钮时使用所选引擎。智能解析（商品、数量等）仍由豆包完成，与识别引擎无关。
+          长按首页麦克风或「记一笔」内语音按钮时使用所选引擎。商品、数量等智能解析见「设置 →
+          智能解析」。
         </p>
 
         <div className={`mt-4 ${SETTINGS_CARD_CLASS}`}>

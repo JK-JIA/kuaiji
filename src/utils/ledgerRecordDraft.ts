@@ -1,5 +1,12 @@
 import type { DoubaoProductLine } from './doubaoParser'
-import type { FieldDef, LedgerRecord, LineItemRow } from '../types'
+import type {
+  FieldDef,
+  LedgerRecord,
+  LineItemRow,
+  ProductCatalogEntry,
+} from '../types'
+import { LINE_QUANTITY_UNIT_KEY } from './productUnits'
+import { defaultUnitForProduct } from './productCatalogHelpers'
 import {
   computedLineAmountFromUnitAndQty,
   emptyLineTripleTouched,
@@ -17,6 +24,8 @@ export type LedgerLineForm = {
   product: string
   unitPrice: string
   quantity: string
+  /** 本行数量所用单位（与商品目录一致） */
+  quantityUnit: string
   lineAmount: string
   lastEdited: LineTripleLastEdited
   touched: LineTripleTouched
@@ -134,12 +143,13 @@ export function buildMergedValues(
   return merged
 }
 
-export function createEmptyLineForm(): LedgerLineForm {
+export function createEmptyLineForm(quantityUnit = ''): LedgerLineForm {
   return {
     id: crypto.randomUUID(),
     product: '',
     unitPrice: '',
     quantity: '',
+    quantityUnit,
     lineAmount: '',
     lastEdited: null,
     touched: emptyLineTripleTouched(),
@@ -304,7 +314,7 @@ export function buildLedgerRecordForSave(
     throw new Error('缺少商品或数量字段配置')
   }
 
-  const mergedValues = buildMergedValues(values, lines, prodId, qtyId)
+  let mergedValues = buildMergedValues(values, lines, prodId, qtyId)
 
   const shouldPersistLineItems =
     lines.length > 1 ||
@@ -317,17 +327,29 @@ export function buildLedgerRecordForSave(
 
   let lineItems: LineItemRow[] | undefined
   if (shouldPersistLineItems) {
-    lineItems = lines.map((l) => ({
-      id: l.id,
-      values: {
-        [prodId]: l.product.trim(),
-        [qtyId]: l.quantity.trim(),
-        ...(unitPriceId ? { [unitPriceId]: l.unitPrice.trim() } : {}),
-        ...(canonicalAmountId
-          ? { [canonicalAmountId]: l.lineAmount.trim() }
-          : {}),
-      },
-    }))
+    lineItems = lines.map((l) => {
+      const qtyUnit = l.quantityUnit.trim()
+      return {
+        id: l.id,
+        values: {
+          [prodId]: l.product.trim(),
+          [qtyId]: l.quantity.trim(),
+          ...(qtyUnit ? { [LINE_QUANTITY_UNIT_KEY]: qtyUnit } : {}),
+          ...(unitPriceId ? { [unitPriceId]: l.unitPrice.trim() } : {}),
+          ...(canonicalAmountId
+            ? { [canonicalAmountId]: l.lineAmount.trim() }
+            : {}),
+        },
+      }
+    })
+  } else {
+    const qtyUnit = lines[0]?.quantityUnit.trim()
+    if (qtyUnit) {
+      mergedValues = { ...mergedValues, [LINE_QUANTITY_UNIT_KEY]: qtyUnit }
+    } else {
+      const { [LINE_QUANTITY_UNIT_KEY]: _removed, ...rest } = mergedValues
+      mergedValues = rest
+    }
   }
 
   const dealParsed = parseNonNegativeMoney(dealInput)
@@ -390,11 +412,22 @@ export function mapDoubaoProductLinesToLineForms(
     return {
       id: crypto.randomUUID(),
       product: l.product,
+      quantityUnit: '',
       ...r,
       lastEdited: null,
       touched: emptyLineTripleTouched(),
     }
   })
+}
+
+export function lineFormQuantityUnitFromValues(
+  values: Record<string, string> | undefined,
+  productName: string,
+  catalog: ProductCatalogEntry[],
+): string {
+  const stored = values?.[LINE_QUANTITY_UNIT_KEY]?.trim()
+  if (stored) return stored
+  return defaultUnitForProduct(productName, catalog)
 }
 
 export function applyVoiceFillFirstLine(

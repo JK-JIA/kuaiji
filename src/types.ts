@@ -51,12 +51,21 @@ export type ReconcilePayload = {
   markSettled?: boolean
 }
 
+/** 商品的一种计量单位及与「斤」的换算（1 单位 = factorToJin 斤） */
+export interface ProductUnitDef {
+  name: string
+  factorToJin: number
+  isDefault?: boolean
+}
+
 /** 商品维护目录：名称 + 计量单位（展示/语音优先；数量仍存纯数字） */
 export interface ProductCatalogEntry {
   id: string
   name: string
-  /** 如 斤、包、箱 */
+  /** 默认记账单位名（与 units 中 isDefault 同步） */
   unit: string
+  /** 多单位及换算；缺省时视为仅 unit 一种单位、1:1 斤 */
+  units?: ProductUnitDef[]
   source: 'manual' | 'auto'
   /**
    * 读音/错别字/口语别名（系统静默维护，不在设置页展示）
