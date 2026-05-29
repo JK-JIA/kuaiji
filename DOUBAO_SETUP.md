@@ -68,14 +68,14 @@ copy .env.example .env
 
 ```
 DOUBAO_API_KEY=你的方舟_API_Key
-DOUBAO_MODEL=doubao-seed-1-8-251228
+DOUBAO_MODEL=doubao-1-5-pro-256k-250115
 # 可选
 # DOUBAO_ENDPOINT=https://ark.cn-beijing.volces.com/api/v3/responses
 ```
 
 App 登录后调用 `POST /api/voice/parse`，由服务端请求火山方舟。修改后 **重启 api 容器** 即可生效。
 
-**仅本地浏览器调试**（未连后端时）可在项目根 `.env` 配置 `VITE_DOUBAO_API_KEY`；打 APK/热更**不再依赖**此项。
+App **不再**读取 `VITE_DOUBAO_API_KEY` / `VITE_DOUBAO_MODEL`；模型以服务端 `DOUBAO_MODEL` 为准。在 **设置 → 智能解析** 可查看当前服务端模型。
 
 ## 📦 重新构建 APK
 
@@ -102,7 +102,7 @@ APK 位置：`android\app\build\outputs\apk\debug\app-debug.apk`
 2. 在语音区域的文本框中，**使用输入法的语音按钮**输入
 3. 说话，例如："今天卖了5斤苹果给川A12345，收了50块"
 4. 输入法会转成文字
-5. 点击 **「智能填入」**（已配置 `VITE_DOUBAO_API_KEY` 时）或 **「填入首行」**（未配置时，仅把整段文字放进第一行商品）
+5. 点击 **「智能填入」**（已配置 `VITE_API_URL` 且已登录时）或 **「填入首行」**（未连云端时）
 6. 配置正确时，豆包会解析并填入下方字段与多行商品
 
 ### 方式 2：手动输入
@@ -143,11 +143,11 @@ APK 位置：`android\app\build\outputs\apk\debug\app-debug.apk`
 
 ## ❓ 常见问题
 
-**Q: 提示「请先配置豆包 API Key」，或按钮一直是「填入首行」**  
-A: 在 `kuaiji/.env`（或 `.env.local`）中设置 `VITE_DOUBAO_API_KEY`，重启开发服务器或重新执行 `npm run build`（含打 APK 的构建流程）。占位符或未参与构建的变量会导致降级为首行填入。
+**Q: 按钮一直是「填入首行」**  
+A: 检查 App 是否配置 `VITE_API_URL` 并已登录；智能解析只走服务端 `/api/voice/parse`。
 
-**Q: 以前能「智能填入」，现在变成「填入首行」**  
-A: 同上：Key 丢失、换机未拷贝 `.env`、或发布构建未注入该环境变量时，前端会走降级逻辑，属预期行为。
+**Q: 模型报错或未开通**  
+A: 在服务端设置 `DOUBAO_MODEL` 为火山方舟已开通的模型 ID，重启 ledger-api；App 内 **设置 → 智能解析** 可核对当前模型。
 
 **Q: 提示"API Key 无效"**  
 A: 检查 API Key 是否正确，是否有多余的空格

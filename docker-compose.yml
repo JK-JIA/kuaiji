@@ -59,7 +59,7 @@ services:
       XFYUN_ASR_WS_URL: ${XFYUN_ASR_WS_URL:-wss://iat.cn-huabei-1.xf-yun.com/v1}
       # 语音智能解析（豆包）：改服务端环境变量即可，无需重打 App 热更包
       DOUBAO_API_KEY: ${DOUBAO_API_KEY:-}
-      DOUBAO_MODEL: ${DOUBAO_MODEL:-doubao-seed-1-8-251228}
+      DOUBAO_MODEL: ${DOUBAO_MODEL:-doubao-1-5-pro-256k-250115}
       DOUBAO_ENDPOINT: ${DOUBAO_ENDPOINT:-https://ark.cn-beijing.volces.com/api/v3/responses}
       # 手机号验证码：RAM AccessKey（需号码认证/短信相关权限）；见 .env.example
       ALIYUN_ACCESS_KEY_ID: ${ALIYUN_ACCESS_KEY_ID:-}

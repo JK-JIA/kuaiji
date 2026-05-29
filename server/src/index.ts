@@ -887,7 +887,7 @@ async function bootstrap() {
     )
   } else {
     console.log(
-      `[ledger-api] 豆包语音解析已启用，模型=${process.env.DOUBAO_MODEL?.trim() || 'doubao-seed-1-8-251228'}`,
+      `[ledger-api] 豆包语音解析已启用，模型=${process.env.DOUBAO_MODEL?.trim() || 'doubao-1-5-pro-256k-250115'}`,
     )
   }
   if (xfyunAsrEnvReady()) {

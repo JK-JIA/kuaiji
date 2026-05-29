@@ -42,7 +42,7 @@ export type VoiceParseResult = {
 
 const DOUBAO_API_KEY = process.env.DOUBAO_API_KEY?.trim() ?? ''
 const DOUBAO_MODEL =
-  process.env.DOUBAO_MODEL?.trim() || 'doubao-seed-1-8-251228'
+  process.env.DOUBAO_MODEL?.trim() || 'doubao-1-5-pro-256k-250115'
 const DOUBAO_ENDPOINT =
   process.env.DOUBAO_ENDPOINT?.trim() ||
   'https://ark.cn-beijing.volces.com/api/v3/responses'
