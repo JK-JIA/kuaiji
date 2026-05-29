@@ -297,7 +297,7 @@ export async function runBillParsePipeline(
     result.needConfirm = true
     result.confirmHint =
       result.confirmHint ??
-      '图片识别结果请核对购买方与商品是否正确后再保存'
+      '请核对识别结果后保存'
   }
   return result
 }

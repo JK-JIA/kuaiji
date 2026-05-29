@@ -25,6 +25,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(InstallApkPlugin.class);
         registerPlugin(KuaijiHttpPlugin.class);
+        registerPlugin(KuaijiPermissionsPlugin.class);
         registerPlugin(NumberAuthPlugin.class);
         registerPlugin(AlipayPlugin.class);
         super.onCreate(savedInstanceState);

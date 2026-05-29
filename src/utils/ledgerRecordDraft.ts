@@ -238,7 +238,7 @@ export function validateRecordForm(
       const aOk = a > 0
       const pairs = (uOk ? 1 : 0) + (qOk ? 1 : 0) + (aOk ? 1 : 0)
       if (p && q && pairs < 2) {
-        return `第 ${i + 1} 行：请填写「${unitPriceField?.name ?? '单价'}」、「${qtyField?.name ?? '数量'}」、「金额」中至少两项有效数字`
+        return `第 ${i + 1} 行：单价、数量、金额至少填两项`
       }
     }
   }

@@ -6,6 +6,7 @@ import {
   AddRecordModal,
   type VoiceFormPrefillPayload,
 } from '../components/AddRecordModal'
+import { BillCameraCaptureModal } from '../components/BillCameraCaptureModal'
 import { CalendarPickerModal } from '../components/CalendarPickerModal'
 import { HomeSearchDateRangeBlock } from '../components/HomeSearchDateRangeBlock'
 import { ReconcileModal } from '../components/ReconcileModal'
@@ -92,6 +93,7 @@ export function HomePage() {
   const [showTopBtn, setShowTopBtn] = useState(false)
   const [voiceParsing, setVoiceParsing] = useState(false)
   const [billParsing, setBillParsing] = useState(false)
+  const [billCameraOpen, setBillCameraOpen] = useState(false)
   const [voiceBanner, setVoiceBanner] = useState<string | null>(null)
   const [voiceFormPrefill, setVoiceFormPrefill] =
     useState<VoiceFormPrefillPayload | null>(null)
@@ -174,8 +176,6 @@ export function HomePage() {
   )
 
   const emptySpeechToastRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const billCameraInputRef = useRef<HTMLInputElement>(null)
-  const billGalleryInputRef = useRef<HTMLInputElement>(null)
 
   const openParsedPrefillModal = useCallback(
     (
@@ -402,7 +402,7 @@ export function HomePage() {
           lines,
           dealInput: '',
         })
-        const prefillMessages = [err, fuzzy.confirmHint].filter(
+        const prefillMessages = [err, err ? null : fuzzy.confirmHint].filter(
           (x): x is string => Boolean(x && String(x).trim()),
         )
 
@@ -415,7 +415,7 @@ export function HomePage() {
           values,
           lines,
           prefillMessages,
-          '图片识别结果请核对后再保存',
+          '请核对识别结果后保存',
         )
       } catch (e) {
         setVoiceBanner(
@@ -484,12 +484,7 @@ export function HomePage() {
 
   const onBillCameraClick = useCallback(() => {
     if (billParsing || voiceParsing || voiceRecording) return
-    billCameraInputRef.current?.click()
-  }, [billParsing, voiceParsing, voiceRecording])
-
-  const onBillGalleryClick = useCallback(() => {
-    if (billParsing || voiceParsing || voiceRecording) return
-    billGalleryInputRef.current?.click()
+    setBillCameraOpen(true)
   }, [billParsing, voiceParsing, voiceRecording])
 
   const onRecordBarClick = () => {
@@ -1157,27 +1152,15 @@ export function HomePage() {
         </div>
       )}
 
-      <input
-        ref={billCameraInputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) => {
-          onBillImagePicked(e.target.files?.[0])
-          e.target.value = ''
+      <BillCameraCaptureModal
+        open={billCameraOpen}
+        onClose={() => setBillCameraOpen(false)}
+        onImagePicked={(file) => {
+          setBillCameraOpen(false)
+          onBillImagePicked(file)
         }}
       />
-      <input
-        ref={billGalleryInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={(e) => {
-          onBillImagePicked(e.target.files?.[0])
-          e.target.value = ''
-        }}
-      />
+
       <div className="pointer-events-none fixed bottom-20 left-1/2 z-30 w-full max-w-lg -translate-x-1/2 px-4">
         <div className="pointer-events-auto mx-auto flex w-full max-w-full flex-col items-center gap-2">
           {homeVoiceEnabled && (voiceHoldPressActive || voiceRecording) ? (
@@ -1272,28 +1255,16 @@ export function HomePage() {
               </>
             )}
           </button>
-          <div className="flex shrink-0 flex-col items-center gap-1.5">
-            <button
-              type="button"
-              onClick={onBillCameraClick}
-              disabled={billParsing || voiceParsing || voiceRecording}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black text-white shadow-lg active:bg-neutral-500 disabled:opacity-50"
-              title="拍照识别账单"
-              aria-label="拍照识别账单"
-            >
-              <ScanCameraGlyph className="h-5 w-5" />
-            </button>
-            <button
-              type="button"
-              onClick={onBillGalleryClick}
-              disabled={billParsing || voiceParsing || voiceRecording}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black text-white/85 shadow-md active:bg-neutral-500 disabled:opacity-50"
-              title="从相册选择"
-              aria-label="从相册选择账单图片"
-            >
-              <ScanGalleryGlyph className="h-4 w-4" />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onBillCameraClick}
+            disabled={billParsing || voiceParsing || voiceRecording}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black text-white shadow-lg active:bg-neutral-500 disabled:opacity-50"
+            title="拍照识别账单"
+            aria-label="拍照识别账单"
+          >
+            <ScanCameraGlyph className="h-5 w-5" />
+          </button>
           </div>
         </div>
       </div>
@@ -1627,26 +1598,6 @@ function ScanCameraGlyph({ className }: { className?: string }) {
         strokeLinecap="round"
         strokeLinejoin="round"
         d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"
-      />
-    </svg>
-  )
-}
-
-function ScanGalleryGlyph({ className }: { className?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      fill="none"
-      viewBox="0 0 24 24"
-      strokeWidth={1.5}
-      stroke="currentColor"
-      className={className}
-      aria-hidden
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
       />
     </svg>
   )
