@@ -41,11 +41,11 @@ export type VoiceParseResult = {
 }
 
 const DOUBAO_API_KEY = process.env.DOUBAO_API_KEY?.trim() ?? ''
-const DOUBAO_MODEL =
-  process.env.DOUBAO_MODEL?.trim() || 'doubao-1-5-pro-256k-250115'
+/** 须为火山方舟「模型推理」接入点 ID（ep- 开头）或账号已开通的模型 ID，勿用未订阅的默认名 */
+const DOUBAO_MODEL = process.env.DOUBAO_MODEL?.trim() ?? ''
 const DOUBAO_ENDPOINT =
   process.env.DOUBAO_ENDPOINT?.trim() ||
-  'https://ark.cn-beijing.volces.com/api/v3/responses'
+  'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
 const ARK_CHAT_ENDPOINT =
   'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
 
@@ -65,6 +65,10 @@ const BUYER_SPEECH_ALIASES = ['对方', '客户', '买家'] as const
 
 export function doubaoEnvReady(): boolean {
   return DOUBAO_API_KEY.length > 0
+}
+
+export function voiceParseModelReady(): boolean {
+  return DOUBAO_MODEL.length > 0
 }
 
 /** 供 /api/asr/health 与设置页展示当前智能解析模型 */
@@ -114,7 +118,11 @@ function formatDoubaoHttpError(failure: ArkCallFailure, model: string): string {
     )
   }
   if (failure.status === 404) {
-    return `模型「${model}」不可用${suffix}。请核对服务端 DOUBAO_MODEL。`
+    const epHint =
+      model.startsWith('ep-') || model.length === 0
+        ? ''
+        : ' 推荐在火山方舟创建推理接入点（Doubao-lite 即可），将 DOUBAO_MODEL 设为接入点 ID（ep- 开头）。'
+    return `模型「${model || '(未配置)'}」不可用${suffix}。请核对服务端 DOUBAO_MODEL。${epHint}`
   }
   if (failure.status === 429) {
     return '请求过于频繁，请稍后再试'
@@ -241,29 +249,26 @@ async function callDoubaoModel(
   prompt: string,
   model: string,
 ): Promise<ArkCallSuccess | ArkCallFailure> {
-  const tryResponsesFirst =
+  const chat = await callArkChat(prompt, model)
+  if (chat.ok) return chat
+
+  const useResponses =
     DOUBAO_ENDPOINT.includes('/responses') &&
     !DOUBAO_ENDPOINT.includes('/chat/completions')
+  if (!useResponses) return chat
 
-  if (!tryResponsesFirst) {
-    return callArkChat(prompt, model)
-  }
-
-  const primary = await callArkResponses(prompt, model)
-  if (primary.ok) return primary
-
-  if (primary.status === 403 || primary.status === 404) {
+  if (chat.status === 403 || chat.status === 404) {
     console.warn(
-      '[ledger-api][doubao] Responses 失败，回退 Chat:',
-      primary.status,
-      pickArkErrorMessage(primary.errorData, primary.errorText),
+      '[ledger-api][doubao] Chat 失败，尝试 Responses:',
+      chat.status,
+      pickArkErrorMessage(chat.errorData, chat.errorText),
     )
-    const fallback = await callArkChat(prompt, model)
-    if (fallback.ok) return fallback
-    return fallback
+    const responses = await callArkResponses(prompt, model)
+    if (responses.ok) return responses
+    return responses.status >= chat.status ? responses : chat
   }
 
-  return primary
+  return chat
 }
 
 function normalizeBuyerFieldValue(value: string, buyerLabel: string): string {
@@ -639,7 +644,14 @@ export async function parseVoiceOnServer(
     return {
       success: false,
       error:
-        '服务端未配置豆包：请在 ledger-api 环境变量设置 DOUBAO_API_KEY（及可选 DOUBAO_MODEL）。',
+        '服务端未配置豆包：请在 ledger-api 环境变量设置 DOUBAO_API_KEY（及 DOUBAO_MODEL）。',
+    }
+  }
+  if (!voiceParseModelReady()) {
+    return {
+      success: false,
+      error:
+        '服务端未配置 DOUBAO_MODEL。请在火山方舟「模型推理」创建接入点（建议 Doubao-lite），将接入点 ID（ep- 开头）写入环境变量后重启 ledger-api。',
     }
   }
 

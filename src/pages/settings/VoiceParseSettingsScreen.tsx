@@ -9,6 +9,7 @@ import {
 
 type VoiceParseHealth = {
   doubaoEnvReady?: boolean
+  voiceParseModelReady?: boolean
   voiceParseModel?: string
 }
 
@@ -74,9 +75,14 @@ export function VoiceParseSettingsScreen({ onBack }: Props) {
               {model}
             </p>
           ) : (
-            <p className="mt-2 text-sm text-kj-muted">服务端未返回模型信息</p>
+            <p className="mt-2 text-sm text-kj-muted">未配置 DOUBAO_MODEL</p>
           )}
 
+          {!loading && !error && health?.doubaoEnvReady && !model ? (
+            <p className="mt-2 text-[11px] text-amber-800 dark:text-amber-300">
+              请在服务端设置火山方舟推理接入点 ID（ep- 开头），并重启 ledger-api
+            </p>
+          ) : null}
           {!loading && !error && health?.doubaoEnvReady === false ? (
             <p className="mt-2 text-[11px] text-amber-800 dark:text-amber-300">
               未配置 DOUBAO_API_KEY，智能解析不可用
@@ -111,7 +117,7 @@ export async function fetchVoiceParseModelSubtitle(): Promise<string> {
     if (!r.ok) return '无法读取服务端'
     const j = (await r.json()) as VoiceParseHealth
     const m = j.voiceParseModel?.trim()
-    if (!m) return j.doubaoEnvReady ? '已配置' : '未配置豆包'
+    if (!m) return j.doubaoEnvReady ? '未配置模型' : '未配置豆包'
     return m.length > 28 ? `${m.slice(0, 26)}…` : m
   } catch {
     return '无法连接服务端'

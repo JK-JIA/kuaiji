@@ -25,6 +25,7 @@ import {
   doubaoEnvReady,
   getVoiceParseModelId,
   parseVoiceOnServer,
+  voiceParseModelReady,
 } from './voiceParse.js'
 import {
   alipayAppId,
@@ -280,6 +281,7 @@ app.get('/api/asr/health', (_req, res) => {
     volcAsrEnvReady: volcAsrEnvReady(),
     xfyunAsrEnvReady: xfyunAsrEnvReady(),
     doubaoEnvReady: doubaoEnvReady(),
+    voiceParseModelReady: voiceParseModelReady(),
     /** 语音转文字后智能解析（商品/数量等）所用豆包模型 */
     voiceParseModel: getVoiceParseModelId(),
     /** 豆包流式 ASR 资源 ID（非 LLM 模型） */
@@ -323,6 +325,14 @@ app.post('/api/voice/parse', async (req, res) => {
     res.status(503).json({
       success: false,
       error: '服务端未配置豆包解析（DOUBAO_API_KEY）',
+    })
+    return
+  }
+  if (!voiceParseModelReady()) {
+    res.status(503).json({
+      success: false,
+      error:
+        '服务端未配置 DOUBAO_MODEL。请在火山方舟创建推理接入点，将 ep- 开头的接入点 ID 写入环境变量后重启 ledger-api。',
     })
     return
   }
@@ -885,9 +895,13 @@ async function bootstrap() {
     console.warn(
       '[ledger-api] 未配置 DOUBAO_API_KEY：语音智能解析不可用，直至在服务端环境变量中设置',
     )
+  } else if (!voiceParseModelReady()) {
+    console.warn(
+      '[ledger-api] 已配置 DOUBAO_API_KEY 但未配置 DOUBAO_MODEL：请在火山方舟创建推理接入点，将 ep- 开头的 ID 写入 DOUBAO_MODEL',
+    )
   } else {
     console.log(
-      `[ledger-api] 豆包语音解析已启用，模型=${process.env.DOUBAO_MODEL?.trim() || 'doubao-1-5-pro-256k-250115'}`,
+      `[ledger-api] 豆包语音解析已启用，模型=${getVoiceParseModelId()}`,
     )
   }
   if (xfyunAsrEnvReady()) {

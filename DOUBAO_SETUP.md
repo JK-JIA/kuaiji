@@ -68,10 +68,11 @@ copy .env.example .env
 
 ```
 DOUBAO_API_KEY=你的方舟_API_Key
-DOUBAO_MODEL=doubao-1-5-pro-256k-250115
-# 可选
-# DOUBAO_ENDPOINT=https://ark.cn-beijing.volces.com/api/v3/responses
+DOUBAO_MODEL=ep-20241211185157-xqxfh
+DOUBAO_ENDPOINT=https://ark.cn-beijing.volces.com/api/v3/chat/completions
 ```
+
+`DOUBAO_MODEL` **必须**填你在控制台创建的**推理接入点 ID**（`ep-` 开头），不要填未在账号开通的模型名（如 `doubao-1-5-pro-256k-250115` 会报 NotFound）。
 
 App 登录后调用 `POST /api/voice/parse`，由服务端请求火山方舟。修改后 **重启 api 容器** 即可生效。
 
@@ -146,8 +147,8 @@ APK 位置：`android\app\build\outputs\apk\debug\app-debug.apk`
 **Q: 按钮一直是「填入首行」**  
 A: 检查 App 是否配置 `VITE_API_URL` 并已登录；智能解析只走服务端 `/api/voice/parse`。
 
-**Q: 模型报错或未开通**  
-A: 在服务端设置 `DOUBAO_MODEL` 为火山方舟已开通的模型 ID，重启 ledger-api；App 内 **设置 → 智能解析** 可核对当前模型。
+**Q: 模型报错 `InvalidEndpointOrModel.NotFound`**  
+A: 到 [模型推理](https://console.volcengine.com/ark/region:ark+cn-beijing/endpoint) 创建接入点（推荐 **Doubao-lite**），把列表里的 **接入点 ID**（`ep-` 开头）写入服务端 `DOUBAO_MODEL`，`DOUBAO_ENDPOINT` 用 `chat/completions`，重启 ledger-api。
 
 **Q: 提示"API Key 无效"**  
 A: 检查 API Key 是否正确，是否有多余的空格
