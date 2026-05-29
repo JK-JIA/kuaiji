@@ -21,6 +21,7 @@ import {
   applyCorrectionToProductName,
   type VoiceProductCorrection,
 } from './voiceProductCorrections'
+import { applySpokenHintsToProductLines } from './voiceParseHints'
 import {
   setLastVoicePipelineProducts,
   type VoiceParseDebugTrace,
@@ -172,12 +173,16 @@ export async function runVoiceParsePipeline(
 
   const emptyVals = emptyLedgerFieldValues(layout.sortedFields)
   const emptyLines = [createEmptyLineForm()]
+  const hintedLines = applySpokenHintsToProductLines(
+    text,
+    aiRaw.productLines ?? [],
+  )
   let { values, lines } = applyVoiceParsedToDraft(
     layout,
     emptyVals,
     emptyLines,
     aiRaw.data,
-    aiRaw.productLines,
+    hintedLines.length > 0 ? hintedLines : aiRaw.productLines,
     productCatalog,
   )
   lines = lines.map((l) => ({
