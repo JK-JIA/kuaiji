@@ -6,18 +6,31 @@ import { isDoubaoConfigured } from '../utils/doubaoParser'
 import type { LedgerLineForm } from '../utils/ledgerRecordDraft'
 import { messageIfPremiumFeatureBlocked } from '../utils/premiumGate'
 import { runVoiceParsePipeline } from '../utils/voiceParsePipeline'
+import { parseEmbeddedUnit } from '../utils/productUnits'
 import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
 import { useLedger } from '../context/LedgerContext'
 
 function lineFormsToDoubaoLines(lines: LedgerLineForm[]): DoubaoProductLine[] {
   return lines
     .filter((l) => l.product.trim() || l.quantity.trim())
-    .map((l) => ({
-      product: l.product.trim(),
-      quantity: l.quantity.trim(),
-      unitPrice: l.unitPrice.trim() || undefined,
-      lineAmount: l.lineAmount.trim() || undefined,
-    }))
+    .map((l) => {
+      let quantity = l.quantity.trim()
+      const unit = l.quantityUnit.trim()
+      if (
+        quantity &&
+        unit &&
+        !parseEmbeddedUnit(quantity) &&
+        /^\d+(?:\.\d+)?$/.test(quantity)
+      ) {
+        quantity = `${quantity}${unit}`
+      }
+      return {
+        product: l.product.trim(),
+        quantity,
+        unitPrice: l.unitPrice.trim() || undefined,
+        lineAmount: l.lineAmount.trim() || undefined,
+      }
+    })
 }
 
 type Props = {

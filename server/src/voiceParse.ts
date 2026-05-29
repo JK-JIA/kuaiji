@@ -342,6 +342,67 @@ function normalizeSpokenUnitToken(raw: string): string {
   return u
 }
 
+type SpokenLineHint = {
+  quantity?: string
+  unitPrice?: string
+  lineAmount?: string
+}
+
+/** 按逗号分句，从原话提取每行数量/单价/行金额（优先于 AI 误算） */
+function parseSpokenLineHints(userText: string): SpokenLineHint[] {
+  const parts = userText
+    .split(/[，,；;]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const hints: SpokenLineHint[] = []
+
+  for (const part of parts) {
+    if (!/\d/.test(part)) continue
+    if (/买的$/.test(part) && !/(?:包|斤|公斤|千克|kg)/i.test(part)) continue
+
+    const mulJin = part.match(
+      /(\d+(?:\.\d+)?)\s*[*×xX]\s*(\d+(?:\.\d+)?)\s*斤/,
+    )
+    if (mulJin) {
+      hints.push({
+        quantity: `${mulJin[1]}斤`,
+        unitPrice: mulJin[2],
+      })
+      continue
+    }
+
+    const packYuan = part.match(/(\d+(?:\.\d+)?)\s*包\s*(\d+(?:\.\d+)?)\s*元/)
+    if (packYuan) {
+      hints.push({
+        quantity: `${packYuan[1]}包`,
+        lineAmount: packYuan[2],
+      })
+      continue
+    }
+
+    const jinPrice = part.match(
+      /(\d+(?:\.\d+)?)\s*斤\s*(\d+(?:\.\d+)?)\s*(?:元|块|块钱)?/,
+    )
+    if (jinPrice) {
+      hints.push({
+        quantity: `${jinPrice[1]}斤`,
+        unitPrice: jinPrice[2],
+      })
+      continue
+    }
+
+    const qu = part.match(
+      /(\d+(?:\.\d+)?)\s*(斤|千克|公斤|kg|包|箱|袋|个|吨|两)/i,
+    )
+    if (qu) {
+      hints.push({
+        quantity: `${qu[1]}${normalizeSpokenUnitToken(qu[2]!)}`,
+      })
+    }
+  }
+  return hints
+}
+
 /** 按原话出现顺序提取「数字+单位」，用于纠正 AI 把多行都写成斤 */
 function extractQtyUnitSegmentsFromUserText(userText: string): string[] {
   const re =
@@ -376,6 +437,28 @@ function enrichLineQuantitiesFromUserText(
   })
 }
 
+function applySpokenLineHints(
+  userText: string,
+  lines: VoiceProductLine[],
+): VoiceProductLine[] {
+  const hints = parseSpokenLineHints(userText)
+  if (!hints.length) return enrichLineQuantitiesFromUserText(userText, lines)
+
+  return lines.map((row, i) => {
+    const h = hints[i]
+    if (!h) return row
+    const next: VoiceProductLine = { ...row }
+    if (h.quantity) next.quantity = h.quantity
+    if (h.unitPrice) {
+      next.unitPrice = normalizeMoneyDigits(h.unitPrice)
+    }
+    if (h.lineAmount) {
+      next.lineAmount = normalizeMoneyDigits(h.lineAmount)
+    }
+    return next
+  })
+}
+
 function supplementFromUserText(
   userText: string,
   fields: VoiceFieldMeta[],
@@ -404,7 +487,7 @@ function supplementFromUserText(
 
   const qtyField = fields.find((f) => f.key === 'quantity')
   if (pl?.length) {
-    pl = enrichLineQuantitiesFromUserText(userText, pl)
+    pl = applySpokenLineHints(userText, pl)
     if (qtyField && pl[0]?.quantity) next[qtyField.id] = pl[0].quantity
   }
 
@@ -509,6 +592,8 @@ function buildVoiceParsePrompt(
 - **数量一律写成数字+单位**，例如：5斤、100斤、12.5公斤、3包；禁止只写「100」不写单位（除非原文完全没有单位则用「斤」）。
 - **每一行的单位必须与用户原话一致**；同一商品多行时各行单位可不同（如一行「1包」、另一行「20斤」），禁止全部改成斤。
 - **单价**：用户说「每斤3块」「单价2.5」等，写成阿拉伯数字的 "单价" 字段（元/斤）。
+- **「N*M斤」或「N×M斤」**：表示数量 **N斤**、单价 **M**（元/斤），**禁止**把 N×M 算成数量（如 1.2*50斤 → 数量「1.2斤」、单价「50」，不是数量 60）。
+- **「N包M元」**：表示数量 **N包**、该行金额 **M**（元），可写 "金额":"M"。
 - 用户说「五斤」「一百斤」分别写成「5斤」「100斤」。
 - 多种商品禁止把名称堆在一个字段里用顿号拼接；每种一行。
 
@@ -538,6 +623,15 @@ function buildVoiceParsePrompt(
   "商品明细": [
     { "商品": "紫薯", "数量": "1包" },
     { "商品": "紫薯", "数量": "20斤" }
+  ],
+  "${buyerLabel}": "孙悟空"
+}
+
+「包+元」与「*斤」示例（用户：圆紫薯1包50元，圆紫薯1.2*50斤，孙悟空买的）：
+{
+  "商品明细": [
+    { "商品": "圆紫薯", "数量": "1包", "金额": "50" },
+    { "商品": "圆紫薯", "数量": "1.2斤", "单价": "50" }
   ],
   "${buyerLabel}": "孙悟空"
 }
