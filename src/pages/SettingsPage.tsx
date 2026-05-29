@@ -66,6 +66,7 @@ import {
   SettingsScrollBody,
   SettingsSubHeader,
 } from './settings/settingsShell'
+import { useSettingsPanelNavigation } from './settings/useSettingsPanelNavigation'
 
 function maskPhone(raw: string | null | undefined): string {
   const d = (raw ?? '').replace(/\D/g, '')
@@ -455,7 +456,8 @@ export function SettingsPage() {
   const [name, setName] = useState('')
   const [type, setType] = useState<'text' | 'number'>('text')
   const [busy, setBusy] = useState(false)
-  const [panel, setPanel] = useState<SettingsPanel>('main')
+  const { panel, openPanel, closeSubPanel } =
+    useSettingsPanelNavigation<SettingsPanel>('main')
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readThemeMode())
   const [userProfile, setUserProfile] = useState(() => readUserProfile())
   const [proBenefitsOpen, setProBenefitsOpen] = useState(false)
@@ -697,11 +699,11 @@ export function SettingsPage() {
   useEffect(() => {
     if (panel === 'main') return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPanel('main')
+      if (e.key === 'Escape') closeSubPanel()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [panel])
+  }, [panel, closeSubPanel])
 
   if (!ready) {
     return (
@@ -716,9 +718,9 @@ export function SettingsPage() {
   if (panel === 'account' || (panel === 'profile' && needsAccountLogin)) {
     return (
       <div className={SETTINGS_SHELL_BG}>
-        <SettingsSubHeader title="账号与安全" onBack={() => setPanel('main')} />
+        <SettingsSubHeader title="账号与安全" onBack={closeSubPanel} />
         <SettingsPanelBody>
-          <SettingsHomeAccountSection onLoginSuccess={() => setPanel('main')} />
+          <SettingsHomeAccountSection onLoginSuccess={closeSubPanel} />
         </SettingsPanelBody>
       </div>
     )
@@ -727,8 +729,8 @@ export function SettingsPage() {
   if (panel === 'profile') {
     return (
       <SettingsAboutYouScreen
-        onBack={() => setPanel('main')}
-        onOpenAccount={() => setPanel('account')}
+        onBack={closeSubPanel}
+        onOpenAccount={() => openPanel('account')}
       />
     )
   }
@@ -736,7 +738,7 @@ export function SettingsPage() {
   if (panel === 'fields') {
     return (
       <LedgerFieldsSubScreen
-        onBack={() => setPanel('main')}
+        onBack={closeSubPanel}
         sorted={sorted}
         name={name}
         setName={setName}
@@ -754,7 +756,7 @@ export function SettingsPage() {
   if (panel === 'display') {
     return (
       <div className={SETTINGS_SHELL_BG}>
-        <SettingsSubHeader title="外观与显示" onBack={() => setPanel('main')} />
+        <SettingsSubHeader title="外观与显示" onBack={closeSubPanel} />
         <SettingsPanelBody>
           <div className={SETTINGS_CARD_CLASS}>
             <p className="mb-1 text-sm font-semibold text-kj-primary">
@@ -860,20 +862,20 @@ export function SettingsPage() {
             hotwordsSuppressed,
           )
         }}
-        onBack={() => setPanel('main')}
+        onBack={closeSubPanel}
       />
     )
   }
 
   if (panel === 'asrProvider') {
-    return <AsrProviderSettingsScreen onBack={() => setPanel('main')} />
+    return <AsrProviderSettingsScreen onBack={closeSubPanel} />
   }
 
   if (panel === 'voiceParse') {
     return (
       <VoiceParseSettingsScreen
         onBack={() => {
-          setPanel('main')
+          closeSubPanel()
           void fetchVoiceParseModelSubtitle().then(setVoiceParseSubtitle)
         }}
       />
@@ -883,7 +885,7 @@ export function SettingsPage() {
   if (panel === 'catalog') {
     return (
       <div className={SETTINGS_SHELL_BG}>
-        <SettingsSubHeader title="商品管理" onBack={() => setPanel('main')} />
+        <SettingsSubHeader title="商品管理" onBack={closeSubPanel} />
         <SettingsPanelBody>
           <p className="px-1 text-sm leading-relaxed text-stone-500">
             配置商品与单位换算，记账选单位，统计自动折合斤。
@@ -1022,7 +1024,9 @@ export function SettingsPage() {
           accountLine={accountLine}
           recordCount={records.length}
           membershipActive={membershipActive}
-          onOpenProfile={() => setPanel(needsAccountLogin ? 'account' : 'profile')}
+          onOpenProfile={() =>
+            openPanel(needsAccountLogin ? 'account' : 'profile')
+          }
           onUpgradePro={handleUpgradePro}
           onViewBenefits={handleViewBenefits}
         />
@@ -1040,7 +1044,7 @@ export function SettingsPage() {
           hasToken={Boolean(token)}
           membershipActive={membershipActive}
           membershipExpiresAt={membershipExpiresAt}
-          onNeedLogin={() => setPanel('account')}
+          onNeedLogin={() => openPanel('account')}
           onRedeem={handleRedeem}
           onPurchaseSuccess={refreshProfile}
           onCancelMembership={cancelMembership}
@@ -1060,32 +1064,32 @@ export function SettingsPage() {
               icon={<IconFields className="h-[18px] w-[18px]" />}
               title="自定义账本字段"
               subtitle={fieldsRowSubtitle}
-              onClick={() => setPanel('fields')}
+              onClick={() => openPanel('fields')}
             />
             <SettingsNavRowButton
               icon={<IconBox className="h-[18px] w-[18px]" />}
               title="商品管理"
               subtitle={catalogRowSubtitle}
-              onClick={() => setPanel('catalog')}
+              onClick={() => openPanel('catalog')}
             />
             <SettingsNavRowButton
               icon={<IconMic className="h-[18px] w-[18px]" />}
               title="语音热词与别名"
               subtitle={voiceLexiconSubtitle}
-              onClick={() => setPanel('voiceLexicon')}
+              onClick={() => openPanel('voiceLexicon')}
             />
             <SettingsNavRowButton
               icon={<IconSparkles className="h-[18px] w-[18px]" />}
               title="智能解析"
               subtitle={voiceParseSubtitle}
-              onClick={() => setPanel('voiceParse')}
+              onClick={() => openPanel('voiceParse')}
             />
             <SettingsNavRowButton
               last
               icon={<IconMic className="h-[18px] w-[18px]" />}
               title="语音识别引擎"
               subtitle={asrProviderSubtitle}
-              onClick={() => setPanel('asrProvider')}
+              onClick={() => openPanel('asrProvider')}
             />
           </SettingsInsetList>
         </section>
@@ -1109,7 +1113,7 @@ export function SettingsPage() {
               icon={<IconFontSize className="h-[18px] w-[18px]" />}
               title="字体大小"
               value={fontSizeLabel}
-              onClick={() => setPanel('display')}
+              onClick={() => openPanel('display')}
             />
           </SettingsInsetList>
         </section>

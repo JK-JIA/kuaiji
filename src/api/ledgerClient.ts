@@ -532,3 +532,60 @@ export async function parseVoiceLedger(
   }
   return { httpStatus: res.status, result: data }
 }
+
+export type BillLedgerParseResponse = {
+  result: DoubaoParseResult
+  httpStatus: number
+}
+
+/** 账单图片 → 结构化字段（走服务端 /api/bill/parse） */
+export async function parseBillLedger(
+  base: string,
+  token: string,
+  imageBase64: string,
+  mimeType: string,
+  fields: Array<{ id: string; name: string; key?: string }>,
+  catalogOpts?: {
+    productCatalog?: string[]
+    productCatalogPromptSection?: string
+  },
+): Promise<BillLedgerParseResponse> {
+  const res = await fetchWithTimeout(
+    `${base.replace(/\/$/, '')}/api/bill/parse`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        imageBase64,
+        mimeType,
+        fields,
+        productCatalog: catalogOpts?.productCatalog,
+        productCatalogPromptSection:
+          catalogOpts?.productCatalogPromptSection,
+      }),
+    },
+    60_000,
+  )
+  let data: DoubaoParseResult & { error?: string }
+  try {
+    data = (await res.json()) as DoubaoParseResult & { error?: string }
+  } catch {
+    return {
+      httpStatus: res.status,
+      result: { success: false, error: `解析服务异常（${res.status}）` },
+    }
+  }
+  if (!res.ok) {
+    return {
+      httpStatus: res.status,
+      result: {
+        success: false,
+        error: data.error ?? `解析服务错误（${res.status}）`,
+      },
+    }
+  }
+  return { httpStatus: res.status, result: data }
+}

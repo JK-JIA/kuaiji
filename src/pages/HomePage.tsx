@@ -33,12 +33,14 @@ import {
 import { recordMatchesHomeSearch } from '../utils/homeRecordSearch'
 import { collectAsrHotwordsFromLedger } from '../utils/asrHotwordsFromLedger'
 import { isDoubaoConfigured } from '../utils/doubaoParser'
+import { isBillParseConfigured } from '../utils/billImageParser'
+import { compressImageForBillParse } from '../utils/billImageCompress'
 import {
   buildLedgerRecordForSave,
   getLedgerFormLayout,
   validateRecordForm,
 } from '../utils/ledgerRecordDraft'
-import { runVoiceParsePipeline } from '../utils/voiceParsePipeline'
+import { runVoiceParsePipeline, runBillParsePipeline } from '../utils/voiceParsePipeline'
 import { messageIfPremiumFeatureBlocked } from '../utils/premiumGate'
 import { findFieldIdByName, sumAmount } from '../utils/stats'
 import type { FieldDef, LedgerRecord, ReconcilePayload } from '../types'
@@ -89,6 +91,7 @@ export function HomePage() {
   const [searchDateExpanded, setSearchDateExpanded] = useState(false)
   const [showTopBtn, setShowTopBtn] = useState(false)
   const [voiceParsing, setVoiceParsing] = useState(false)
+  const [billParsing, setBillParsing] = useState(false)
   const [voiceBanner, setVoiceBanner] = useState<string | null>(null)
   const [voiceFormPrefill, setVoiceFormPrefill] =
     useState<VoiceFormPrefillPayload | null>(null)
@@ -171,6 +174,45 @@ export function HomePage() {
   )
 
   const emptySpeechToastRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const billCameraInputRef = useRef<HTMLInputElement>(null)
+  const billGalleryInputRef = useRef<HTMLInputElement>(null)
+
+  const openParsedPrefillModal = useCallback(
+    (
+      values: Record<string, string>,
+      lines: Array<{
+        product: string
+        quantity: string
+        quantityUnit?: string
+        unitPrice?: string
+        lineAmount?: string
+      }>,
+      prefillMessages: string[],
+      needConfirmHint?: string | null,
+    ) => {
+      setVoiceFormPrefill({
+        values,
+        lines: lines.map((l) => ({
+          product: l.product,
+          quantity: l.quantity,
+          quantityUnit: l.quantityUnit,
+          unitPrice: l.unitPrice ?? '',
+          lineAmount: l.lineAmount ?? '',
+        })),
+        recordDate: todayStr,
+        dealInput: '',
+        formError:
+          prefillMessages.length > 0
+            ? prefillMessages.join('\n\n')
+            : needConfirmHint ?? null,
+      })
+      setVoiceFormPrefillKey((k) => k + 1)
+      setEditingRecord(null)
+      setModalOpen(true)
+      setVoiceBanner(null)
+    },
+    [todayStr],
+  )
 
   const runVoicePipeline = useCallback(
     async (rawText: string) => {
@@ -254,28 +296,14 @@ export function HomePage() {
         )
 
         const openVoicePrefillModal = () => {
-          setVoiceFormPrefill({
+          openParsedPrefillModal(
             values,
-            lines: lines.map((l) => ({
-              product: l.product,
-              quantity: l.quantity,
-              quantityUnit: l.quantityUnit,
-              unitPrice: l.unitPrice,
-              lineAmount: l.lineAmount,
-            })),
-            recordDate: todayStr,
-            dealInput: '',
-            formError:
-              prefillMessages.length > 0
-                ? prefillMessages.join('\n\n')
-                : fuzzy.needConfirm
-                  ? '请核对购买方与商品是否正确后再保存'
-                  : null,
-          })
-          setVoiceFormPrefillKey((k) => k + 1)
-          setEditingRecord(null)
-          setModalOpen(true)
-          setVoiceBanner(null)
+            lines,
+            prefillMessages,
+            fuzzy.needConfirm
+              ? '请核对购买方与商品是否正确后再保存'
+              : null,
+          )
         }
 
         if (err === '缺少商品或数量字段配置') {
@@ -324,6 +352,101 @@ export function HomePage() {
     ],
   )
 
+  const runBillPipeline = useCallback(
+    async (file: File) => {
+      const block = messageIfPremiumFeatureBlocked({
+        apiBase,
+        token,
+        membershipActive,
+      })
+      if (block) {
+        setVoiceBanner(`${block}\n\n请重新选择图片`)
+        return
+      }
+
+      if (!isBillParseConfigured({ apiBase })) {
+        setVoiceBanner(
+          '未配置图片识别服务。请确认已登录且服务端已配置豆包视觉模型。',
+        )
+        return
+      }
+
+      setBillParsing(true)
+      setVoiceBanner('正在识别图片…')
+      try {
+        const compressed = await compressImageForBillParse(file)
+        const pipeline = await runBillParsePipeline({
+          imageBase64: compressed.base64,
+          mimeType: compressed.mimeType,
+          asrHotwords: voiceAsrHotwords,
+          fields: ledgerLayout.sortedFields,
+          records,
+          productCatalog,
+          productCorrections: voiceProductCorrections,
+          apiBase,
+          token,
+        })
+        if (!pipeline.success) {
+          setVoiceBanner(`${pipeline.error ?? '识别失败'}\n\n请重新选择图片`)
+          return
+        }
+
+        if (pipeline.catalogWithAliases) {
+          await mergeVoiceCatalogAliases(pipeline.catalogWithAliases)
+        }
+
+        const { values, lines } = pipeline
+        const fuzzy = pipeline
+        const err = validateRecordForm(ledgerLayout, {
+          values,
+          lines,
+          dealInput: '',
+        })
+        const prefillMessages = [err, fuzzy.confirmHint].filter(
+          (x): x is string => Boolean(x && String(x).trim()),
+        )
+
+        if (err === '缺少商品或数量字段配置') {
+          setVoiceBanner(`${err}\n\n请重新选择图片`)
+          return
+        }
+
+        openParsedPrefillModal(
+          values,
+          lines,
+          prefillMessages,
+          '图片识别结果请核对后再保存',
+        )
+      } catch (e) {
+        setVoiceBanner(
+          `${e instanceof Error ? e.message : '识别失败'}\n\n请重新选择图片`,
+        )
+      } finally {
+        setBillParsing(false)
+      }
+    },
+    [
+      apiBase,
+      token,
+      membershipActive,
+      ledgerLayout,
+      records,
+      productCatalog,
+      voiceProductCorrections,
+      voiceAsrHotwords,
+      mergeVoiceCatalogAliases,
+      openParsedPrefillModal,
+    ],
+  )
+
+  const onBillImagePicked = useCallback(
+    (file: File | undefined | null) => {
+      if (!file) return
+      void runBillPipeline(file)
+    },
+    [runBillPipeline],
+  )
+
   const voicePipelineRef = useRef(runVoicePipeline)
   voicePipelineRef.current = runVoicePipeline
 
@@ -358,6 +481,16 @@ export function HomePage() {
       openAddRecordModal()
     },
   })
+
+  const onBillCameraClick = useCallback(() => {
+    if (billParsing || voiceParsing || voiceRecording) return
+    billCameraInputRef.current?.click()
+  }, [billParsing, voiceParsing, voiceRecording])
+
+  const onBillGalleryClick = useCallback(() => {
+    if (billParsing || voiceParsing || voiceRecording) return
+    billGalleryInputRef.current?.click()
+  }, [billParsing, voiceParsing, voiceRecording])
 
   const onRecordBarClick = () => {
     if (ignoreNextRecordBarClickRef.current) {
@@ -1008,7 +1141,7 @@ export function HomePage() {
         </button>
       )}
 
-      {(voiceParsing || voiceBanner || voiceMicHint) && (
+      {(voiceParsing || billParsing || voiceBanner || voiceMicHint) && (
         <div
           className="fixed bottom-[9.5rem] left-1/2 z-30 w-max min-w-0 max-w-[min(32rem,calc(100vw-2rem-env(safe-area-inset-left)-env(safe-area-inset-right)))] -translate-x-1/2 rounded-xl border border-kj-border-strong/80 bg-kj-surface/95 px-3 py-2 text-sm leading-snug text-kj-primary shadow-md backdrop-blur-md whitespace-pre-line break-words"
           role="status"
@@ -1016,11 +1149,35 @@ export function HomePage() {
           {voiceMicHint
             ? voiceMicHint
             : voiceBanner ??
-              (voiceParsing ? '正在识别中…' : '')}
+              (billParsing
+                ? '正在识别图片…'
+                : voiceParsing
+                  ? '正在识别中…'
+                  : '')}
         </div>
       )}
 
-
+      <input
+        ref={billCameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          onBillImagePicked(e.target.files?.[0])
+          e.target.value = ''
+        }}
+      />
+      <input
+        ref={billGalleryInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          onBillImagePicked(e.target.files?.[0])
+          e.target.value = ''
+        }}
+      />
       <div className="pointer-events-none fixed bottom-20 left-1/2 z-30 w-full max-w-lg -translate-x-1/2 px-4">
         <div className="pointer-events-auto mx-auto flex w-full max-w-full flex-col items-center gap-2">
           {homeVoiceEnabled && (voiceHoldPressActive || voiceRecording) ? (
@@ -1063,6 +1220,7 @@ export function HomePage() {
               )}
             </div>
           ) : null}
+          <div className="flex w-full max-w-md items-center justify-center gap-2.5">
           <button
             ref={homeRecordBarRef}
             type="button"
@@ -1073,14 +1231,14 @@ export function HomePage() {
             onClick={onRecordBarClick}
             className={
               voiceRecording
-                ? 'flex min-h-11 w-[52%] max-w-[220px] min-w-[10.5rem] select-none items-center justify-center gap-2 rounded-full bg-neutral-500 py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-white shadow-lg'
+                ? 'flex min-h-11 min-w-0 flex-1 select-none items-center justify-center gap-2 rounded-full bg-neutral-500 py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-white shadow-lg'
                 : homeVoiceEnabled
-                  ? `flex min-h-11 w-[52%] max-w-[220px] min-w-[10.5rem] select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-white shadow-lg active:bg-neutral-500 ${
+                  ? `flex min-h-11 min-w-0 flex-1 select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-white shadow-lg active:bg-neutral-500 ${
                       voiceHoldPressActive && !voiceRecording
                         ? 'ring-2 ring-[#2ecc71]/55 ring-offset-2 ring-offset-kj-bg'
                         : ''
                     }`
-                  : 'flex min-h-11 w-[52%] max-w-[220px] min-w-[10.5rem] select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-neutral-500 shadow-lg'
+                  : 'flex min-h-11 min-w-0 flex-1 select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-neutral-500 shadow-lg'
             }
             title={
               voiceRecording
@@ -1114,6 +1272,29 @@ export function HomePage() {
               </>
             )}
           </button>
+          <div className="flex shrink-0 flex-col items-center gap-1.5">
+            <button
+              type="button"
+              onClick={onBillCameraClick}
+              disabled={billParsing || voiceParsing || voiceRecording}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black text-white shadow-lg active:bg-neutral-500 disabled:opacity-50"
+              title="拍照识别账单"
+              aria-label="拍照识别账单"
+            >
+              <ScanCameraGlyph className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={onBillGalleryClick}
+              disabled={billParsing || voiceParsing || voiceRecording}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black text-white/85 shadow-md active:bg-neutral-500 disabled:opacity-50"
+              title="从相册选择"
+              aria-label="从相册选择账单图片"
+            >
+              <ScanGalleryGlyph className="h-4 w-4" />
+            </button>
+          </div>
+          </div>
         </div>
       </div>
 
@@ -1422,6 +1603,51 @@ function ChevronUpGlyph({ className }: { className?: string }) {
       aria-hidden
     >
       <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+    </svg>
+  )
+}
+
+function ScanCameraGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={1.5}
+      stroke="currentColor"
+      className={className}
+      aria-hidden
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"
+      />
+    </svg>
+  )
+}
+
+function ScanGalleryGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={1.5}
+      stroke="currentColor"
+      className={className}
+      aria-hidden
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
+      />
     </svg>
   )
 }

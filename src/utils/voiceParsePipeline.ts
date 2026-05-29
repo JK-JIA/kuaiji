@@ -1,6 +1,7 @@
 import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
 import type { DoubaoParseResult } from '../types/voiceParse'
 import { parseWithDoubao } from './doubaoParser'
+import { parseBillImageWithDoubao } from './billImageParser'
 import {
   applyVoiceParsedToDraft,
   createEmptyLineForm,
@@ -108,57 +109,20 @@ function collectAliasCandidates(
   }))
 }
 
-export async function runVoiceParsePipeline(
-  input: VoiceParsePipelineInput,
+async function processDoubaoParseResult(
+  input: Omit<VoiceParsePipelineInput, 'asrText'> & { hintText: string },
+  aiRaw: DoubaoParseResult,
+  debug: VoiceParseDebugTrace,
 ): Promise<VoiceParsePipelineResult> {
   const {
-    asrText,
-    asrHotwords,
+    hintText,
     fields,
     records,
     productCatalog,
     productCorrections,
-    apiBase,
-    token,
   } = input
-
-  const text = asrText.trim()
+  const text = hintText.trim()
   const layout: LedgerFormLayout = getLedgerFormLayout(fields)
-  const debug: VoiceParseDebugTrace = {
-    at: Date.now(),
-    asrRawText: text,
-    asrHotwords: [...asrHotwords],
-    productCatalogPrompt: [
-      buildAiProductCatalogPromptSection(productCatalog),
-    ],
-    aiRaw: null,
-    afterDraft: null,
-    afterUserCorrections: null,
-    fuzzyProductSteps: [],
-    afterFuzzy: null,
-    needConfirm: false,
-    aliasAutoAttached: [],
-    correctionsApplied: [],
-  }
-
-  if (!text) {
-    return {
-      success: false,
-      error: '没有识别到语音内容',
-      values: emptyLedgerFieldValues(layout.sortedFields),
-      lines: [createEmptyLineForm()],
-      needConfirm: false,
-      debug,
-    }
-  }
-
-  const aiRaw: DoubaoParseResult = await parseWithDoubao(text, fields, {
-    apiBase,
-    token,
-    productCatalogPromptSection:
-      buildAiProductCatalogPromptSection(productCatalog),
-  })
-  debug.aiRaw = aiRaw
 
   if (!aiRaw.success || !aiRaw.data) {
     return {
@@ -261,7 +225,6 @@ export async function runVoiceParsePipeline(
     }
   }
 
-  /** 保存前对比用：记 fuzzy 纠正前的商品名（如 鼹鼠），保存时若表单为 烟薯 可写入用户纠错表 */
   const preFuzzyProducts =
     debug.afterDraft?.lines.map((l) => l.product.trim()).filter(Boolean) ??
     fuzzy.lines.map((l) => l.product).filter(Boolean)
@@ -275,4 +238,123 @@ export async function runVoiceParsePipeline(
     catalogWithAliases,
     debug,
   }
+}
+
+export type BillParsePipelineInput = Omit<VoiceParsePipelineInput, 'asrText'> & {
+  imageBase64: string
+  mimeType: string
+}
+
+export async function runBillParsePipeline(
+  input: BillParsePipelineInput,
+): Promise<VoiceParsePipelineResult> {
+  const {
+    imageBase64,
+    mimeType,
+    asrHotwords,
+    fields,
+    productCatalog,
+    apiBase,
+    token,
+  } = input
+
+  const debug: VoiceParseDebugTrace = {
+    at: Date.now(),
+    asrRawText: '[图片账单]',
+    asrHotwords: [...asrHotwords],
+    productCatalogPrompt: [
+      buildAiProductCatalogPromptSection(productCatalog),
+    ],
+    aiRaw: null,
+    afterDraft: null,
+    afterUserCorrections: null,
+    fuzzyProductSteps: [],
+    afterFuzzy: null,
+    needConfirm: false,
+    aliasAutoAttached: [],
+    correctionsApplied: [],
+  }
+
+  const aiRaw: DoubaoParseResult = await parseBillImageWithDoubao(
+    imageBase64,
+    mimeType,
+    fields,
+    {
+      apiBase,
+      token,
+      productCatalogPromptSection:
+        buildAiProductCatalogPromptSection(productCatalog),
+    },
+  )
+  debug.aiRaw = aiRaw
+
+  const result = await processDoubaoParseResult(
+    { ...input, hintText: '' },
+    aiRaw,
+    debug,
+  )
+  if (result.success) {
+    result.needConfirm = true
+    result.confirmHint =
+      result.confirmHint ??
+      '图片识别结果请核对购买方与商品是否正确后再保存'
+  }
+  return result
+}
+
+export async function runVoiceParsePipeline(
+  input: VoiceParsePipelineInput,
+): Promise<VoiceParsePipelineResult> {
+  const {
+    asrText,
+    asrHotwords,
+    fields,
+    productCatalog,
+    apiBase,
+    token,
+  } = input
+
+  const text = asrText.trim()
+  const layout: LedgerFormLayout = getLedgerFormLayout(fields)
+  const debug: VoiceParseDebugTrace = {
+    at: Date.now(),
+    asrRawText: text,
+    asrHotwords: [...asrHotwords],
+    productCatalogPrompt: [
+      buildAiProductCatalogPromptSection(productCatalog),
+    ],
+    aiRaw: null,
+    afterDraft: null,
+    afterUserCorrections: null,
+    fuzzyProductSteps: [],
+    afterFuzzy: null,
+    needConfirm: false,
+    aliasAutoAttached: [],
+    correctionsApplied: [],
+  }
+
+  if (!text) {
+    return {
+      success: false,
+      error: '没有识别到语音内容',
+      values: emptyLedgerFieldValues(layout.sortedFields),
+      lines: [createEmptyLineForm()],
+      needConfirm: false,
+      debug,
+    }
+  }
+
+  const aiRaw: DoubaoParseResult = await parseWithDoubao(text, fields, {
+    apiBase,
+    token,
+    productCatalogPromptSection:
+      buildAiProductCatalogPromptSection(productCatalog),
+  })
+  debug.aiRaw = aiRaw
+
+  return processDoubaoParseResult(
+    { ...input, hintText: text },
+    aiRaw,
+    debug,
+  )
 }

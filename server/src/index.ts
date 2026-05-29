@@ -28,6 +28,11 @@ import {
   voiceParseModelReady,
 } from './voiceParse.js'
 import {
+  billParseModelReady,
+  getBillParseModelId,
+  parseBillImageOnServer,
+} from './billParse.js'
+import {
   alipayAppId,
   alipayConfigWarnings,
   alipayEnvReady,
@@ -112,6 +117,22 @@ const PurchaseStatusSchema = z.object({
 
 const VoiceParseSchema = z.object({
   text: z.string().min(1).max(8000),
+  fields: z.array(
+    z.object({
+      id: z.string().min(1).max(128),
+      name: z.string().min(1).max(128),
+      key: z.string().max(64).optional(),
+    }),
+  ),
+  productCatalog: z.array(z.string().min(1).max(120)).max(300).optional(),
+  productCatalogPromptSection: z.string().max(12_000).optional(),
+})
+
+const BillParseSchema = z.object({
+  imageBase64: z.string().min(100).max(4_000_000),
+  mimeType: z
+    .enum(['image/jpeg', 'image/png', 'image/webp', 'image/jpg'])
+    .optional(),
   fields: z.array(
     z.object({
       id: z.string().min(1).max(128),
@@ -282,8 +303,11 @@ app.get('/api/asr/health', (_req, res) => {
     xfyunAsrEnvReady: xfyunAsrEnvReady(),
     doubaoEnvReady: doubaoEnvReady(),
     voiceParseModelReady: voiceParseModelReady(),
+    billParseModelReady: billParseModelReady(),
     /** 语音转文字后智能解析（商品/数量等）所用豆包模型 */
     voiceParseModel: getVoiceParseModelId(),
+    /** 图片账单识别所用视觉模型 */
+    billParseModel: getBillParseModelId(),
     /** 豆包流式 ASR 资源 ID（非 LLM 模型） */
     volcAsrResourceId: getVolcAsrResourceId(),
     websocketPaths: {
@@ -349,6 +373,71 @@ app.post('/api/voice/parse', async (req, res) => {
     res.status(result.success ? 200 : 502).json(result)
   } catch (e) {
     console.error('[ledger-api][voice/parse]', e)
+    res.status(500).json({
+      success: false,
+      error: e instanceof Error ? e.message : '解析服务异常',
+    })
+  }
+})
+
+app.post('/api/bill/parse', async (req, res) => {
+  const token = authHeader(req)
+  if (!token) {
+    res.status(401).json({ success: false, error: '未登录' })
+    return
+  }
+  const userId = userIdFromToken(token)
+  if (!userId) {
+    res.status(401).json({ success: false, error: '无效令牌' })
+    return
+  }
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  if (!user || !membershipActive(user.membershipExpiresAt)) {
+    res.status(403).json({
+      success: false,
+      error: '需要有效会员才能使用图片识别',
+      code: 'membership_required',
+    })
+    return
+  }
+  const parsed = BillParseSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ success: false, error: '请求体须包含 imageBase64 与 fields' })
+    return
+  }
+  if (!doubaoEnvReady()) {
+    res.status(503).json({
+      success: false,
+      error: '服务端未配置豆包解析（DOUBAO_API_KEY）',
+    })
+    return
+  }
+  if (!billParseModelReady()) {
+    res.status(503).json({
+      success: false,
+      error:
+        '服务端未配置 DOUBAO_VISION_MODEL。请设置图片识别模型（如 doubao-seed-2-0-mini-260428）后重启 ledger-api。',
+    })
+    return
+  }
+  try {
+    const mime =
+      parsed.data.mimeType === 'image/jpg'
+        ? 'image/jpeg'
+        : parsed.data.mimeType ?? 'image/jpeg'
+    const result = await parseBillImageOnServer(
+      parsed.data.imageBase64,
+      mime,
+      parsed.data.fields,
+      {
+        productCatalog: parsed.data.productCatalog,
+        productCatalogPromptSection:
+          parsed.data.productCatalogPromptSection,
+      },
+    )
+    res.status(result.success ? 200 : 502).json(result)
+  } catch (e) {
+    console.error('[ledger-api][bill/parse]', e)
     res.status(500).json({
       success: false,
       error: e instanceof Error ? e.message : '解析服务异常',
@@ -902,6 +991,15 @@ async function bootstrap() {
   } else {
     console.log(
       `[ledger-api] 豆包语音解析已启用，模型=${getVoiceParseModelId()}`,
+    )
+  }
+  if (doubaoEnvReady() && billParseModelReady()) {
+    console.log(
+      `[ledger-api] 图片账单识别已启用，模型=${getBillParseModelId()}`,
+    )
+  } else if (doubaoEnvReady()) {
+    console.warn(
+      '[ledger-api] 已配置 DOUBAO_API_KEY 但未配置 DOUBAO_VISION_MODEL：图片识别不可用',
     )
   }
   if (xfyunAsrEnvReady()) {

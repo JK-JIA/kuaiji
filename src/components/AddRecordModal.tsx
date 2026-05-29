@@ -737,7 +737,7 @@ export function AddRecordModal({
                 ) : (
                   <div className="min-w-0 pt-2">
                     <div
-                      className="grid w-full grid-cols-[minmax(4rem,1.5fr)_1fr_1fr_minmax(2.25rem,0.58fr)_1fr] items-center gap-x-1.5 gap-y-2.5"
+                      className="grid w-full grid-cols-[minmax(4rem,1.2fr)_minmax(2.25rem,0.72fr)_minmax(2.25rem,0.72fr)_minmax(1.75rem,0.5fr)_minmax(3.75rem,0.88fr)] items-center gap-x-2 gap-y-2.5"
                       role="table"
                     >
                       <span
@@ -777,6 +777,8 @@ export function AddRecordModal({
                         const rowBorder =
                           idx > 0 ? 'border-t border-stone-100 pt-2.5' : ''
                         const cell = `min-w-0 ${rowBorder}`
+                        const fieldBox =
+                          'w-full min-w-0 rounded-xl border border-kj-border-strong bg-kj-raised px-1.5 py-2 text-sm tabular-nums text-kj-primary placeholder:text-kj-muted'
                         return (
                           <Fragment key={line.id}>
                             <input
@@ -801,7 +803,7 @@ export function AddRecordModal({
                                   ),
                                 )
                               }}
-                              className={`${cell} w-full rounded-xl border border-kj-border-strong bg-kj-raised px-2 py-2 text-sm text-kj-primary placeholder:text-kj-muted`}
+                              className={`${cell} ${fieldBox}`}
                               placeholder="商品名称"
                               aria-label={prodField.name}
                             />
@@ -837,7 +839,7 @@ export function AddRecordModal({
                                   }),
                                 )
                               }}
-                              className={`${cell} w-full rounded-xl border border-kj-border-strong bg-kj-raised px-1 py-2 text-center text-sm tabular-nums text-kj-primary placeholder:text-kj-muted`}
+                              className={`${cell} ${fieldBox} px-1 text-center`}
                               placeholder={`元/${lineUnit}`}
                               aria-label={unitPriceField?.name ?? '单价'}
                               autoComplete="off"
@@ -875,7 +877,7 @@ export function AddRecordModal({
                                   }),
                                 )
                               }}
-                              className={`${cell} w-full rounded-xl border border-kj-border-strong bg-kj-raised px-1 py-2 text-center text-sm tabular-nums text-kj-primary placeholder:text-kj-muted`}
+                              className={`${cell} ${fieldBox} px-1 text-center`}
                               placeholder="数"
                               aria-label={qtyFieldDisplayName}
                               autoComplete="off"
@@ -896,7 +898,7 @@ export function AddRecordModal({
                               }
                               className={`${cell} w-full min-w-0 rounded-xl border border-kj-border-strong bg-kj-raised px-0.5 py-2 text-center text-xs font-medium`}
                             />
-                            <div className={`${cell} flex min-w-0 items-center gap-1`}>
+                            <div className={`${cell} relative min-w-0`}>
                               <input
                                 type="text"
                                 inputMode="decimal"
@@ -929,7 +931,7 @@ export function AddRecordModal({
                                     }),
                                   )
                                 }}
-                                className="min-w-0 flex-1 rounded-xl border border-kj-border-strong bg-kj-raised px-1.5 py-2 text-right text-sm font-semibold tabular-nums text-amber-900 placeholder:text-kj-muted placeholder:font-normal"
+                                className={`${fieldBox} w-full pr-5 text-right font-semibold text-amber-900 placeholder:font-normal`}
                                 placeholder="金额"
                                 aria-label={amountField?.name ?? '金额'}
                                 title="默认改单价或数量会重算金额；单独改金额后以金额为准"
@@ -940,7 +942,7 @@ export function AddRecordModal({
                                 <button
                                   type="button"
                                   onClick={() => removeLine(idx)}
-                                  className="shrink-0 rounded-lg p-1 text-sm text-kj-muted hover:bg-stone-100 hover:text-rose-600"
+                                  className="absolute right-0.5 top-1/2 -translate-y-1/2 rounded p-1 text-xs leading-none text-kj-muted hover:text-rose-600"
                                   aria-label="移除此行"
                                 >
                                   ×
@@ -950,7 +952,8 @@ export function AddRecordModal({
                           </Fragment>
                         )
                       })}
-                      <div className="col-span-full flex justify-end border-t border-stone-100 pt-2.5">
+                    </div>
+                      <div className="flex justify-end border-t border-stone-100 pt-2.5">
                         <button
                           type="button"
                           onClick={addLine}
@@ -959,7 +962,6 @@ export function AddRecordModal({
                           + 一行
                         </button>
                       </div>
-                    </div>
                   </div>
                 )}
 

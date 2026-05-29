@@ -645,7 +645,7 @@ function buildVoiceParsePrompt(
 }`
 }
 
-function mapModelContentToResult(
+export function mapModelContentToResult(
   content: string,
   text: string,
   fields: VoiceFieldMeta[],

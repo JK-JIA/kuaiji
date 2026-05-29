@@ -11,6 +11,8 @@ type VoiceParseHealth = {
   doubaoEnvReady?: boolean
   voiceParseModelReady?: boolean
   voiceParseModel?: string
+  billParseModelReady?: boolean
+  billParseModel?: string
 }
 
 type Props = {
@@ -56,7 +58,7 @@ export function VoiceParseSettingsScreen({ onBack }: Props) {
       <SettingsSubHeader title="智能解析" onBack={onBack} />
       <SettingsPanelBody>
         <p className="px-1 text-[12px] leading-relaxed text-stone-500">
-          语音转文字之后，由豆包从口语中提取购买方、商品、数量、金额等。模型在服务端配置，改后需重启
+          语音转文字之后，由豆包从口语中提取购买方、商品、数量、金额等；首页「扫一扫」使用视觉模型识别账单图片。模型在服务端配置，改后需重启
           API。
         </p>
 
@@ -91,6 +93,26 @@ export function VoiceParseSettingsScreen({ onBack }: Props) {
           {!loading && !error && health?.doubaoEnvReady && model ? (
             <p className="mt-2 text-[11px] text-emerald-700 dark:text-emerald-400">
               与服务器环境变量 DOUBAO_MODEL 一致；不一致请重启 ledger-api
+            </p>
+          ) : null}
+        </div>
+
+        <div className={`mt-3 ${SETTINGS_CARD_CLASS} px-4 py-4`}>
+          <p className="text-[11px] font-medium text-kj-secondary">
+            图片识别模型
+          </p>
+          {loading ? (
+            <p className="mt-2 text-sm text-kj-muted">读取中…</p>
+          ) : error ? null : health?.billParseModel?.trim() ? (
+            <p className="mt-2 break-all font-mono text-[15px] font-semibold leading-snug text-kj-primary">
+              {health.billParseModel.trim()}
+            </p>
+          ) : (
+            <p className="mt-2 text-sm text-kj-muted">未配置 DOUBAO_VISION_MODEL</p>
+          )}
+          {!loading && !error && health?.billParseModelReady ? (
+            <p className="mt-2 text-[11px] text-emerald-700 dark:text-emerald-400">
+              与服务器环境变量 DOUBAO_VISION_MODEL 一致
             </p>
           ) : null}
         </div>
