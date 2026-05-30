@@ -1,4 +1,4 @@
-import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
+import type { FieldDef, LedgerRecord, ProductCatalogEntry, CustomerEntry } from '../types'
 import type { VoiceProductCorrection } from '../utils/voiceProductCorrections'
 import type { DoubaoParseResult } from '../types/voiceParse'
 import type { AsrProviderId } from '../utils/asrProvider'
@@ -272,6 +272,8 @@ export type LedgerPayload = {
   voiceProductCorrections?: VoiceProductCorrection[]
   /** 手动排除的 ASR 热词（归一化 token） */
   asrHotwordsSuppressed?: string[]
+  customerCatalog?: CustomerEntry[]
+  customerCatalogSuppressed?: string[]
 }
 
 export type LedgerApiResponse = LedgerPayload & {

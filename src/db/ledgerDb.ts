@@ -1,11 +1,12 @@
 import Dexie, { type Table } from 'dexie'
 import { getDefaultFieldDefs } from '../constants/defaultLedgerFields'
 import { mergeMissingDefaultFields } from '../constants/mergeBuiltinFields'
-import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
+import type { FieldDef, LedgerRecord, ProductCatalogEntry, CustomerEntry } from '../types'
 import type { VoiceProductCorrection } from '../utils/voiceProductCorrections'
 import { parseVoiceProductCorrections } from '../utils/voiceProductCorrections'
 import { DEFAULT_FIELD_KEYS } from '../types'
 import { normalizeCatalogEntry } from '../utils/productCatalogHelpers'
+import { normalizeCustomerEntry } from '../utils/customerCatalogHelpers'
 
 export type ProductCatalogSettingsRow = {
   id: 'singleton'
@@ -18,12 +19,19 @@ export type VoiceCorrectionsSettingsRow = {
   corrections: VoiceProductCorrection[]
 }
 
+export type CustomerCatalogSettingsRow = {
+  id: 'singleton'
+  suppressedNormalizedKeys: string[]
+}
+
 export class LedgerDatabase extends Dexie {
   fields!: Table<FieldDef>
   records!: Table<LedgerRecord>
   productCatalog!: Table<ProductCatalogEntry>
   productCatalogSettings!: Table<ProductCatalogSettingsRow>
   voiceCorrectionsSettings!: Table<VoiceCorrectionsSettingsRow>
+  customerCatalog!: Table<CustomerEntry>
+  customerCatalogSettings!: Table<CustomerCatalogSettingsRow>
 
   constructor() {
     super('personal_ledger_db')
@@ -69,6 +77,15 @@ export class LedgerDatabase extends Dexie {
       productCatalog: '&id, name',
       productCatalogSettings: '&id',
       voiceCorrectionsSettings: '&id',
+    })
+    this.version(6).stores({
+      fields: '&id, order',
+      records: '&id, date, createdAt',
+      productCatalog: '&id, name',
+      productCatalogSettings: '&id',
+      voiceCorrectionsSettings: '&id',
+      customerCatalog: '&id, buyerKey',
+      customerCatalogSettings: '&id',
     })
   }
 }
@@ -175,4 +192,42 @@ export async function replaceVoiceProductCorrectionsInDb(
     id: CATALOG_SETTINGS_ID,
     corrections: [...corrections],
   })
+}
+
+export async function getCustomerCatalogFromDb(): Promise<CustomerEntry[]> {
+  const rows = await db.customerCatalog.toArray()
+  const out: CustomerEntry[] = []
+  for (const r of rows) {
+    const n = normalizeCustomerEntry(r as CustomerEntry)
+    if (n) out.push(n)
+  }
+  return out.sort((a, b) =>
+    a.buyerKey.localeCompare(b.buyerKey, 'zh-CN'),
+  )
+}
+
+export async function getCustomerCatalogSuppressedFromDb(): Promise<string[]> {
+  const row = await db.customerCatalogSettings.get(CATALOG_SETTINGS_ID)
+  return row?.suppressedNormalizedKeys?.length
+    ? [...row.suppressedNormalizedKeys]
+    : []
+}
+
+export async function replaceCustomerCatalogInDb(
+  entries: CustomerEntry[],
+  suppressedNormalizedKeys: string[],
+): Promise<void> {
+  await db.transaction(
+    'rw',
+    db.customerCatalog,
+    db.customerCatalogSettings,
+    async () => {
+      await db.customerCatalog.clear()
+      if (entries.length) await db.customerCatalog.bulkPut(entries)
+      await db.customerCatalogSettings.put({
+        id: CATALOG_SETTINGS_ID,
+        suppressedNormalizedKeys: [...suppressedNormalizedKeys],
+      })
+    },
+  )
 }

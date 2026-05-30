@@ -13,7 +13,6 @@ import {
   computedLineAmountFromUnitAndQty,
   deriveUnitPriceFromAmountAndQty,
   emptyLineTripleTouched,
-  getPlateValue,
   parseMoney,
   parseNonNegativeMoney,
   patchLineTripleTouched,
@@ -45,6 +44,14 @@ import {
 } from '../utils/voiceParseDebug'
 import { CalendarPickerModal } from './CalendarPickerModal'
 import { VoiceInputSection } from './VoiceInputSection'
+import {
+  ProductNamePickerField,
+  ProductPickerModal,
+} from './ProductPickerModal'
+import {
+  CustomerPickerField,
+  CustomerPickerModal,
+} from './CustomerPickerModal'
 
 /** 首页语音低置信度或校验失败时预填「记一笔」 */
 export type VoiceFormPrefillPayload = {
@@ -106,6 +113,7 @@ export function AddRecordModal({
   const {
     records,
     productCatalog,
+    customerCatalog,
     asrHotwordsSuppressed,
     learnVoiceProductFromSave,
   } = useLedger()
@@ -124,6 +132,10 @@ export function AddRecordModal({
   const [voicePanelOpen, setVoicePanelOpen] = useState(false)
   /** 校验失败文案（弹窗内展示；避免 WebView / 原生校验拦截导致无提示） */
   const [formError, setFormError] = useState<string | null>(null)
+  const [productPickerLineIdx, setProductPickerLineIdx] = useState<
+    number | null
+  >(null)
+  const [buyerPickerOpen, setBuyerPickerOpen] = useState(false)
   const lineSubtotal = useMemo(
     () => lines.reduce((s, l) => s + parseMoney(l.lineAmount), 0),
     [lines],
@@ -143,27 +155,28 @@ export function AddRecordModal({
   }, [lineSubtotal, dealNum])
 
   const recentProductNames = useMemo(() => {
-    const seen = new Set<string>()
-    const out: string[] = []
-    for (const e of productCatalog) {
-      const t = e.name.trim()
-      if (!t || seen.has(t)) continue
-      seen.add(t)
-      out.push(t)
-    }
-    for (const n of recentProductNamesFromRecords(records, prodId, 14)) {
-      if (!n || seen.has(n)) continue
-      seen.add(n)
-      out.push(n)
-    }
-    return out.slice(0, 24)
-  }, [records, prodId, productCatalog])
+    return recentProductNamesFromRecords(records, prodId, 200)
+  }, [records, prodId])
+
+  const selectProductForLine = useCallback(
+    (idx: number, name: string) => {
+      const trimmed = name.trim()
+      if (!trimmed) return
+      const unit = defaultUnitForProduct(trimmed, productCatalog)
+      setLines((prev) =>
+        prev.map((row, i) =>
+          i === idx
+            ? { ...row, product: trimmed, quantityUnit: unit }
+            : row,
+        ),
+      )
+    },
+    [productCatalog],
+  )
 
   const plateFieldId = sortedFields.find((f) => f.key === 'plate')?.id
-  const recentBuyerNames = useMemo(
-    () => recentTopBuyersFromRecords(records, fields, 3),
-    [records, fields],
-  )
+  const plateFieldName =
+    sortedFields.find((f) => f.key === 'plate')?.name ?? '购买方'
 
   const modalAsrHotwords = useMemo(
     () =>
@@ -182,32 +195,13 @@ export function AddRecordModal({
     }
   }, [recordDate])
 
-  const applyRecentBuyer = useCallback((name: string) => {
-    const trimmed = name.trim()
-    if (!trimmed || !plateFieldId) return
-    setValues((v) => ({ ...v, [plateFieldId]: trimmed }))
-  }, [plateFieldId])
-
-  const applyRecentProduct = useCallback(
+  const applyBuyerKey = useCallback(
     (name: string) => {
       const trimmed = name.trim()
-      if (!trimmed) return
-      const unit = defaultUnitForProduct(trimmed, productCatalog)
-      setLines((prev) => {
-        const emptyIdx = prev.findIndex((l) => !l.product.trim())
-        if (emptyIdx >= 0) {
-          return prev.map((row, i) =>
-            i === emptyIdx
-              ? { ...row, product: trimmed, quantityUnit: unit }
-              : row,
-          )
-        }
-        return prev.map((row, i) =>
-          i === 0 ? { ...row, product: trimmed, quantityUnit: unit } : row,
-        )
-      })
+      if (!trimmed || !plateFieldId) return
+      setValues((v) => ({ ...v, [plateFieldId]: trimmed }))
     },
-    [productCatalog],
+    [plateFieldId],
   )
 
   useEffect(() => {
@@ -221,7 +215,10 @@ export function AddRecordModal({
 
   useEffect(() => {
     if (open) setFormError(null)
-    else setVoicePanelOpen(false)
+    else {
+      setVoicePanelOpen(false)
+      setProductPickerLineIdx(null)
+    }
   }, [open])
 
   /** 防止保存别名目录 refresh 时因 sortedFields 引用变化而清空已填入的表单 */
@@ -552,42 +549,35 @@ export function AddRecordModal({
                         )}
                       </span>
                     )}
-                    {f.key === 'plate' && recentBuyerNames.length > 0 && (
-                      <div className="mb-2">
-                        <p className="mb-2 text-xs font-medium text-kj-secondary">
-                          常用
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          {recentBuyerNames.map((name) => (
-                            <button
-                              key={name}
-                              type="button"
-                              onClick={() => applyRecentBuyer(name)}
-                              className="max-w-full truncate rounded-full border border-kj-border-strong/80 bg-stone-100/90 px-3 py-1.5 text-xs font-medium text-kj-primary active:bg-stone-200"
-                            >
-                              {name}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                    {f.key === 'plate' ? (
+                      <CustomerPickerField
+                        value={values[f.id] ?? ''}
+                        placeholder={`请选择${f.name}`}
+                        onClick={() => setBuyerPickerOpen(true)}
+                        className="mt-1.5"
+                        aria-label={`选择${f.name}`}
+                      />
+                    ) : (
+                      <>
+                        <input
+                          type="text"
+                          inputMode={f.type === 'number' ? 'decimal' : 'text'}
+                          value={values[f.id] ?? ''}
+                          onChange={(e) => {
+                            const raw = e.target.value
+                            const next =
+                              f.type === 'number'
+                                ? sanitizeUnsignedDecimalInput(raw)
+                                : raw
+                            setValues((v) => ({ ...v, [f.id]: next }))
+                          }}
+                          className="mt-1.5 w-full rounded-xl border border-kj-border-strong bg-kj-raised px-3 py-2.5 text-base text-kj-primary placeholder:text-kj-muted"
+                          placeholder={f.name}
+                          autoComplete="off"
+                          spellCheck={f.type === 'number' ? false : undefined}
+                        />
+                      </>
                     )}
-                    <input
-                      type="text"
-                      inputMode={f.type === 'number' ? 'decimal' : 'text'}
-                      value={values[f.id] ?? ''}
-                      onChange={(e) => {
-                        const raw = e.target.value
-                        const next =
-                          f.type === 'number'
-                            ? sanitizeUnsignedDecimalInput(raw)
-                            : raw
-                        setValues((v) => ({ ...v, [f.id]: next }))
-                      }}
-                      className="mt-1.5 w-full rounded-xl border border-kj-border-strong bg-kj-raised px-3 py-2.5 text-base text-kj-primary placeholder:text-kj-muted"
-                      placeholder={f.name}
-                      autoComplete="off"
-                      spellCheck={f.type === 'number' ? false : undefined}
-                    />
                   </label>
                 )
               })}
@@ -605,25 +595,6 @@ export function AddRecordModal({
                   商品明细
                 </p>
               </div>
-              {recentProductNames.length > 0 && (
-                <div className="mb-3">
-                  <p className="mb-2 text-xs font-medium text-kj-secondary">
-                    常用
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {recentProductNames.map((name) => (
-                      <button
-                        key={name}
-                        type="button"
-                        onClick={() => applyRecentProduct(name)}
-                        className="max-w-full truncate rounded-full border border-kj-border-strong/80 bg-stone-100/90 px-3 py-1.5 text-xs font-medium text-kj-primary active:bg-stone-200"
-                      >
-                        {name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
               <div className="rounded-2xl border border-kj-border-strong/80 bg-kj-surface p-4 shadow-sm">
                 {!showDetailAmounts || !canonicalAmountId ? (
                   <div className="space-y-3 pt-2">
@@ -643,31 +614,13 @@ export function AddRecordModal({
                               *
                             </span>
                           )}
-                          <input
-                            value={line.product}
-                            onChange={(e) => {
-                              const p = e.target.value
-                              const unit = defaultUnitForProduct(
-                                p.trim(),
-                                productCatalog,
-                              )
-                              setLines((prev) =>
-                                prev.map((row, i) =>
-                                  i === idx
-                                    ? {
-                                        ...row,
-                                        product: p,
-                                        quantityUnit: p.trim()
-                                          ? unit
-                                          : row.quantityUnit,
-                                      }
-                                    : row,
-                                ),
-                              )
-                            }}
-                            className="mt-1 w-full rounded-xl border border-kj-border-strong bg-kj-surface px-3 py-2.5 text-base text-kj-primary"
-                            placeholder="商品名称"
-                          />
+                          <div className="mt-1">
+                            <ProductNamePickerField
+                              value={line.product}
+                              onClick={() => setProductPickerLineIdx(idx)}
+                              aria-label={prodField.name}
+                            />
+                          </div>
                         </label>
                         <label className="w-[6.5rem] shrink-0 text-left text-xs font-medium text-kj-secondary">
                           {qtyFieldDisplayName}
@@ -781,32 +734,14 @@ export function AddRecordModal({
                           'w-full min-w-0 rounded-xl border border-kj-border-strong bg-kj-raised px-1.5 py-2 text-sm tabular-nums text-kj-primary placeholder:text-kj-muted'
                         return (
                           <Fragment key={line.id}>
-                            <input
-                              value={line.product}
-                              onChange={(e) => {
-                                const p = e.target.value
-                                const unit = defaultUnitForProduct(
-                                  p.trim(),
-                                  productCatalog,
-                                )
-                                setLines((prev) =>
-                                  prev.map((row, i) =>
-                                    i === idx
-                                      ? {
-                                          ...row,
-                                          product: p,
-                                          quantityUnit: p.trim()
-                                            ? unit
-                                            : row.quantityUnit,
-                                        }
-                                      : row,
-                                  ),
-                                )
-                              }}
-                              className={`${cell} ${fieldBox}`}
-                              placeholder="商品名称"
-                              aria-label={prodField.name}
-                            />
+                            <div className={cell}>
+                              <ProductNamePickerField
+                                value={line.product}
+                                onClick={() => setProductPickerLineIdx(idx)}
+                                className={`${fieldBox} text-left`}
+                                aria-label={prodField.name}
+                              />
+                            </div>
                             <input
                               type="text"
                               inputMode="decimal"
@@ -1041,6 +976,25 @@ export function AddRecordModal({
         </footer>
       </form>
     </div>
+    <ProductPickerModal
+      open={productPickerLineIdx !== null}
+      onClose={() => setProductPickerLineIdx(null)}
+      productCatalog={productCatalog}
+      extraNames={recentProductNames}
+      title={prodField?.name ? `选择${prodField.name}` : '选择商品'}
+      onSelect={(name) => {
+        if (productPickerLineIdx === null) return
+        selectProductForLine(productPickerLineIdx, name)
+      }}
+    />
+    <CustomerPickerModal
+      open={buyerPickerOpen}
+      onClose={() => setBuyerPickerOpen(false)}
+      customerCatalog={customerCatalog}
+      title={`选择${plateFieldName}`}
+      fieldLabel={plateFieldName}
+      onSelect={applyBuyerKey}
+    />
     <CalendarPickerModal
       open={datePickerOpen}
       onClose={() => setDatePickerOpen(false)}
@@ -1107,24 +1061,6 @@ function CloseGlyph({ className }: { className?: string }) {
       <path d="M18 6L6 18M6 6l12 12" />
     </svg>
   )
-}
-
-function recentTopBuyersFromRecords(
-  list: LedgerRecord[],
-  fieldDefs: FieldDef[],
-  limit: number,
-): string[] {
-  if (limit <= 0) return []
-  const freq = new Map<string, number>()
-  for (const r of list) {
-    const t = getPlateValue(r, fieldDefs).trim()
-    if (!t) continue
-    freq.set(t, (freq.get(t) ?? 0) + 1)
-  }
-  return [...freq.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-CN'))
-    .slice(0, limit)
-    .map(([name]) => name)
 }
 
 function recentProductNamesFromRecords(

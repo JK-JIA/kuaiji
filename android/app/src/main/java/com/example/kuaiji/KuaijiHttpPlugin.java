@@ -107,6 +107,13 @@ public class KuaijiHttpPlugin extends Plugin {
     }
 
     private static void httpDownloadToFile(String urlStr, java.io.File out) throws Exception {
+        if (out.exists() && !out.delete()) {
+            throw new Exception("无法清理旧安装包缓存");
+        }
+        java.io.File tmp = new java.io.File(out.getAbsolutePath() + ".part");
+        if (tmp.exists()) {
+            tmp.delete();
+        }
         HttpURLConnection conn = openConnection(urlStr);
         conn.setRequestMethod("GET");
         int code = conn.getResponseCode();
@@ -115,7 +122,7 @@ public class KuaijiHttpPlugin extends Plugin {
             throw new Exception("HTTP " + code);
         }
         try (InputStream in = new BufferedInputStream(conn.getInputStream());
-                FileOutputStream fos = new FileOutputStream(out)) {
+                FileOutputStream fos = new FileOutputStream(tmp)) {
             byte[] buf = new byte[16384];
             int n;
             while ((n = in.read(buf)) != -1) {
@@ -123,6 +130,18 @@ public class KuaijiHttpPlugin extends Plugin {
             }
         } finally {
             conn.disconnect();
+        }
+        if (tmp.length() < 1024) {
+            tmp.delete();
+            throw new Exception("下载文件过小，可能不完整");
+        }
+        if (out.exists() && !out.delete()) {
+            tmp.delete();
+            throw new Exception("无法写入安装包缓存");
+        }
+        if (!tmp.renameTo(out)) {
+            tmp.delete();
+            throw new Exception("无法保存安装包");
         }
     }
 
@@ -132,7 +151,11 @@ public class KuaijiHttpPlugin extends Plugin {
         conn.setConnectTimeout(CONNECT_MS);
         conn.setReadTimeout(READ_MS);
         conn.setInstanceFollowRedirects(true);
+        conn.setUseCaches(false);
         conn.setRequestProperty("Accept", "*/*");
+        conn.setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate");
+        conn.setRequestProperty("Pragma", "no-cache");
+        conn.setRequestProperty("Expires", "0");
         return conn;
     }
 }

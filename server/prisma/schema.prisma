@@ -26,6 +26,8 @@ model Ledger {
   recordsJson                  Json     @default("[]")
   productCatalogJson           Json     @default("[]")
   productCatalogSuppressedJson Json     @default("[]")
+  customerCatalogJson          Json     @default("[]")
+  customerCatalogSuppressedJson Json    @default("[]")
   voiceProductCorrectionsJson  Json     @default("[]")
   asrHotwordsSuppressedJson   Json     @default("[]")
   updatedAt                    DateTime @updatedAt

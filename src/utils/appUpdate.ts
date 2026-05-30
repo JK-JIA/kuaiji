@@ -6,6 +6,14 @@ import { KuaijiHttp } from '../plugins/kuaijiHttp'
 export const ANDROID_UPDATE_SKIP_TAG_KEY = 'kuaiji_android_update_skip_tag'
 export const ANDROID_UPDATE_CACHE_FILENAME = 'kuaiji-latest.apk'
 
+/** 下载 APK / manifest 时追加时间戳，避免运营商或中间层返回旧缓存 */
+export function withDownloadCacheBust(url: string): string {
+  const u = String(url || '').trim()
+  if (!u) return u
+  const sep = u.includes('?') ? '&' : '?'
+  return `${u}${sep}_=${Date.now()}`
+}
+
 /** 生产构建未配置时，与自建下载页默认一致（见 website/docker-compose） */
 const DEFAULT_RELEASES_JSON_URL = 'http://8.153.12.131:8080/releases.json'
 
@@ -82,9 +90,10 @@ export function compareSemver(a: string, b: string): number {
 }
 
 async function fetchUrlAsText(manifestUrl: string): Promise<string> {
+  const url = withDownloadCacheBust(manifestUrl)
   if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
     try {
-      const r = await KuaijiHttp.getText({ url: manifestUrl })
+      const r = await KuaijiHttp.getText({ url })
       return r.body
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -94,7 +103,7 @@ async function fetchUrlAsText(manifestUrl: string): Promise<string> {
     }
   }
   try {
-    const res = await fetch(manifestUrl, { cache: 'no-store' })
+    const res = await fetch(url, { cache: 'no-store' })
     if (!res.ok) throw new Error(`无法读取版本列表（${res.status}）`)
     return await res.text()
   } catch (e) {
@@ -253,7 +262,10 @@ export async function downloadApkAsArrayBuffer(
   apkUrl: string,
   onProgress?: (loaded: number, total: number | null) => void,
 ): Promise<ArrayBuffer> {
-  const res = await fetch(apkUrl, { method: 'GET' })
+  const res = await fetch(withDownloadCacheBust(apkUrl), {
+    method: 'GET',
+    cache: 'no-store',
+  })
   if (!res.ok) throw new Error(`下载失败（${res.status}）`)
   const lenHeader = res.headers.get('Content-Length')
   const total = lenHeader ? parseInt(lenHeader, 10) : null
@@ -295,7 +307,10 @@ export async function downloadApkIntoCapacitorCache(
 ): Promise<void> {
   if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
     try {
-      await KuaijiHttp.downloadFile({ url: apkUrl, filename })
+      await KuaijiHttp.downloadFile({
+        url: withDownloadCacheBust(apkUrl),
+        filename,
+      })
       return
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

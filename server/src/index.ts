@@ -77,6 +77,8 @@ const LedgerPutSchema = z.object({
   records: z.array(z.unknown()),
   productCatalog: z.array(z.unknown()).optional(),
   productCatalogSuppressed: z.array(z.string()).optional(),
+  customerCatalog: z.array(z.unknown()).optional(),
+  customerCatalogSuppressed: z.array(z.string()).optional(),
   voiceProductCorrections: z.array(z.unknown()).optional(),
   asrHotwordsSuppressed: z.array(z.string()).optional(),
 })
@@ -865,6 +867,10 @@ app.get('/api/ledger', async (req, res) => {
     asrHotwordsSuppressed: jsonStringArray(
       ledger.asrHotwordsSuppressedJson,
     ),
+    customerCatalog: jsonArrayUnknown(ledger.customerCatalogJson),
+    customerCatalogSuppressed: jsonStringArray(
+      ledger.customerCatalogSuppressedJson,
+    ),
     updatedAt: ledger.updatedAt.toISOString(),
   })
 })
@@ -898,6 +904,8 @@ app.put('/api/ledger', async (req, res) => {
     records,
     productCatalog,
     productCatalogSuppressed,
+    customerCatalog,
+    customerCatalogSuppressed,
     voiceProductCorrections,
     asrHotwordsSuppressed,
   } = parsed.data
@@ -906,6 +914,8 @@ app.put('/api/ledger', async (req, res) => {
     recordsJson: object[]
     productCatalogJson?: object[]
     productCatalogSuppressedJson?: string[]
+    customerCatalogJson?: object[]
+    customerCatalogSuppressedJson?: string[]
     voiceProductCorrectionsJson?: object[]
     asrHotwordsSuppressedJson?: string[]
   } = {
@@ -917,6 +927,12 @@ app.put('/api/ledger', async (req, res) => {
   }
   if (productCatalogSuppressed !== undefined) {
     data.productCatalogSuppressedJson = productCatalogSuppressed
+  }
+  if (customerCatalog !== undefined) {
+    data.customerCatalogJson = customerCatalog as object[]
+  }
+  if (customerCatalogSuppressed !== undefined) {
+    data.customerCatalogSuppressedJson = customerCatalogSuppressed
   }
   if (voiceProductCorrections !== undefined) {
     data.voiceProductCorrectionsJson = voiceProductCorrections as object[]
@@ -940,6 +956,10 @@ app.put('/api/ledger', async (req, res) => {
     ),
     asrHotwordsSuppressed: jsonStringArray(
       ledger.asrHotwordsSuppressedJson,
+    ),
+    customerCatalog: jsonArrayUnknown(ledger.customerCatalogJson),
+    customerCatalogSuppressed: jsonStringArray(
+      ledger.customerCatalogSuppressedJson,
     ),
     updatedAt: ledger.updatedAt.toISOString(),
   })

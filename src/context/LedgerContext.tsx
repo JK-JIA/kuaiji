@@ -18,6 +18,7 @@ import {
   normalizeBuiltinFieldLabels,
 } from '../constants/mergeBuiltinFields'
 import type {
+  CustomerEntry,
   FieldDef,
   LedgerRecord,
   ProductCatalogEntry,
@@ -29,14 +30,24 @@ import {
   deleteRecord,
   ensureDefaultFields,
   getAsrHotwordsSuppressedFromDb,
+  getCustomerCatalogFromDb,
+  getCustomerCatalogSuppressedFromDb,
   getProductCatalogFromDb,
   getProductCatalogSuppressedFromDb,
   getVoiceProductCorrectionsFromDb,
   replaceAllData,
+  replaceCustomerCatalogInDb,
   replaceProductCatalogInDb,
   replaceVoiceProductCorrectionsInDb,
   updateFields,
 } from '../db/ledgerDb'
+import {
+  parseCustomerCatalogSuppressed,
+  parseCustomerEntries,
+} from '../utils/customerCatalogHelpers'
+import { tryMergeCustomerCatalogFromRecords, filterNewAutoForSavedBuyer } from '../utils/customerCatalogSync'
+import type { CustomerAutoPromptItem } from '../utils/customerAutoPrompt'
+import { clearCustomerAutoPromptQueue } from '../utils/customerAutoPrompt'
 import {
   parseAsrHotwordsSuppressed,
   parseProductCatalogEntries,
@@ -62,7 +73,7 @@ type RecordsContextValue = {
   ready: boolean
   records: LedgerRecord[]
   refresh: () => Promise<void>
-  saveRecord: (rec: LedgerRecord) => Promise<void>
+  saveRecord: (rec: LedgerRecord) => Promise<CustomerAutoPromptItem[]>
   removeRecord: (id: string) => Promise<void>
   setRecordPayment: (id: string, payload: ReconcilePayload) => Promise<void>
   restoreFullBackup: (fields: FieldDef[], records: LedgerRecord[]) => Promise<void>
@@ -86,6 +97,12 @@ type CatalogContextValue = {
   /** 语音 fuzzy 后静默合并商品别名 */
   mergeVoiceCatalogAliases: (
     nextCatalog: ProductCatalogEntry[],
+  ) => Promise<void>
+  customerCatalog: CustomerEntry[]
+  customerCatalogSuppressed: string[]
+  saveCustomerCatalog: (
+    next: CustomerEntry[],
+    nextSuppressed: string[],
   ) => Promise<void>
 }
 
@@ -115,6 +132,10 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const [voiceProductCorrections, setVoiceProductCorrections] = useState<
     VoiceProductCorrection[]
   >([])
+  const [customerCatalog, setCustomerCatalog] = useState<CustomerEntry[]>([])
+  const [customerCatalogSuppressed, setCustomerCatalogSuppressed] = useState<
+    string[]
+  >([])
   const [ready, setReady] = useState(false)
 
   /**
@@ -125,6 +146,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const lastRemoteSuppressedRef = useRef<string[]>([])
   const lastRemoteAsrHotwordsSuppressedRef = useRef<string[]>([])
   const lastRemoteCorrectionsRef = useRef<VoiceProductCorrection[]>([])
+  const lastRemoteCustomerCatalogRef = useRef<CustomerEntry[]>([])
+  const lastRemoteCustomerSuppressedRef = useRef<string[]>([])
 
   const ledgerExtras = useCallback(
     () => ({
@@ -132,12 +155,16 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       productCatalogSuppressed,
       asrHotwordsSuppressed,
       voiceProductCorrections,
+      customerCatalog,
+      customerCatalogSuppressed,
     }),
     [
       productCatalog,
       productCatalogSuppressed,
       asrHotwordsSuppressed,
       voiceProductCorrections,
+      customerCatalog,
+      customerCatalogSuppressed,
     ],
   )
 
@@ -178,6 +205,27 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     setAsrHotwordsSuppressed(asrHotwordsLocal)
     const correctionsLocal = await getVoiceProductCorrectionsFromDb()
     setVoiceProductCorrections(correctionsLocal)
+
+    let customersLocal = await getCustomerCatalogFromDb()
+    let customersSuppressedLocal = await getCustomerCatalogSuppressedFromDb()
+    const customerMerge = tryMergeCustomerCatalogFromRecords({
+      records: r,
+      fields: mergedFields,
+      existing: customersLocal,
+      suppressedNormalizedKeys: customersSuppressedLocal,
+    })
+    if (customerMerge.changed) {
+      if (customerMerge.newAuto.length) {
+        clearCustomerAutoPromptQueue()
+      }
+      await replaceCustomerCatalogInDb(
+        customerMerge.merged,
+        customersSuppressedLocal,
+      )
+      customersLocal = customerMerge.merged
+    }
+    setCustomerCatalog(customersLocal)
+    setCustomerCatalogSuppressed(customersSuppressedLocal)
     setReady(true)
   }, [])
 
@@ -190,6 +238,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       const hasSuppressedKey = 'productCatalogSuppressed' in raw
       const hasAsrHotwordsKey = 'asrHotwordsSuppressed' in raw
       const hasCorrectionsKey = 'voiceProductCorrections' in raw
+      const hasCustomerKey = 'customerCatalog' in raw
+      const hasCustomerSuppressedKey = 'customerCatalogSuppressed' in raw
 
       let fieldsNext = data.fields as FieldDef[]
       let recordsNext = sortRecordsDesc(data.records as LedgerRecord[])
@@ -205,6 +255,12 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       let correctionsNext = hasCorrectionsKey
         ? parseVoiceProductCorrections(raw.voiceProductCorrections)
         : [...lastRemoteCorrectionsRef.current]
+      let customersNext = hasCustomerKey
+        ? parseCustomerEntries(raw.customerCatalog)
+        : [...lastRemoteCustomerCatalogRef.current]
+      let customersSuppressedNext = hasCustomerSuppressedKey
+        ? parseCustomerCatalogSuppressed(raw.customerCatalogSuppressed)
+        : [...lastRemoteCustomerSuppressedRef.current]
 
       if (hasCatalogKey) lastRemoteCatalogRef.current = catalogNext
       if (hasSuppressedKey) lastRemoteSuppressedRef.current = suppressedNext
@@ -212,6 +268,10 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         lastRemoteAsrHotwordsSuppressedRef.current = asrHotwordsNext
       }
       if (hasCorrectionsKey) lastRemoteCorrectionsRef.current = correctionsNext
+      if (hasCustomerKey) lastRemoteCustomerCatalogRef.current = customersNext
+      if (hasCustomerSuppressedKey) {
+        lastRemoteCustomerSuppressedRef.current = customersSuppressedNext
+      }
 
       const persistRemote = async (
         f: FieldDef[],
@@ -220,6 +280,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         s: string[],
         hw: string[],
         vc: VoiceProductCorrection[],
+        cc: CustomerEntry[],
+        cs: string[],
       ) => {
         return putLedger(apiBase, token, {
           fields: f,
@@ -228,6 +290,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           productCatalogSuppressed: s,
           asrHotwordsSuppressed: hw,
           voiceProductCorrections: vc,
+          customerCatalog: cc,
+          customerCatalogSuppressed: cs,
         })
       }
 
@@ -240,6 +304,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           suppressedNext,
           asrHotwordsNext,
           correctionsNext,
+          customersNext,
+          customersSuppressedNext,
         )
       } else if (!fieldsNext.some((f) => f.key === 'unitPrice')) {
         fieldsNext = mergeMissingDefaultFields(fieldsNext)
@@ -250,6 +316,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           suppressedNext,
           asrHotwordsNext,
           correctionsNext,
+          customersNext,
+          customersSuppressedNext,
         )
       }
       const normalized = normalizeBuiltinFieldLabels(fieldsNext)
@@ -265,6 +333,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           suppressedNext,
           asrHotwordsNext,
           correctionsNext,
+          customersNext,
+          customersSuppressedNext,
         )
         fieldsNext = normalized
       } else {
@@ -288,11 +358,41 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
             suppressedNext,
             asrHotwordsNext,
             correctionsNext,
+            customersNext,
+            customersSuppressedNext,
           )
           catalogNext = mergedCatalog
           lastRemoteCatalogRef.current = catalogNext
         } else if (!hasCatalogKey && !wouldShrink) {
           catalogNext = mergedCatalog
+        }
+      }
+
+      const customerMerge = tryMergeCustomerCatalogFromRecords({
+        records: recordsNext,
+        fields: fieldsNext,
+        existing: customersNext,
+        suppressedNormalizedKeys: customersSuppressedNext,
+      })
+      if (customerMerge.changed) {
+        const wouldShrinkCustomers =
+          customerMerge.merged.length < customersNext.length
+        if (customerMerge.newAuto.length) {
+          clearCustomerAutoPromptQueue()
+        }
+        if (!wouldShrinkCustomers) {
+          await persistRemote(
+            fieldsNext,
+            recordsNext,
+            catalogNext,
+            suppressedNext,
+            asrHotwordsNext,
+            correctionsNext,
+            customerMerge.merged,
+            customersSuppressedNext,
+          )
+          customersNext = customerMerge.merged
+          lastRemoteCustomerCatalogRef.current = customersNext
         }
       }
 
@@ -302,10 +402,14 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       setProductCatalogSuppressed(suppressedNext)
       setAsrHotwordsSuppressed(asrHotwordsNext)
       setVoiceProductCorrections(correctionsNext)
+      setCustomerCatalog(customersNext)
+      setCustomerCatalogSuppressed(customersSuppressedNext)
       lastRemoteCatalogRef.current = catalogNext
       lastRemoteSuppressedRef.current = suppressedNext
       lastRemoteAsrHotwordsSuppressedRef.current = asrHotwordsNext
       lastRemoteCorrectionsRef.current = correctionsNext
+      lastRemoteCustomerCatalogRef.current = customersNext
+      lastRemoteCustomerSuppressedRef.current = customersSuppressedNext
       setReady(true)
       return
     }
@@ -322,6 +426,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         setProductCatalog([])
         setProductCatalogSuppressed([])
         setAsrHotwordsSuppressed([])
+        setCustomerCatalog([])
+        setCustomerCatalogSuppressed([])
         setReady(true)
       }
     }
@@ -349,25 +455,68 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         }
       }
 
+      const recordsAfterSave = sortRecordsDesc([
+        ...records.filter((x) => x.id !== next.id),
+        next,
+      ])
+      const customerMerge = tryMergeCustomerCatalogFromRecords({
+        records: recordsAfterSave,
+        fields,
+        existing: customerCatalog,
+        suppressedNormalizedKeys: customerCatalogSuppressed,
+      })
+      const customerCatalogForSave = customerMerge.changed
+        ? customerMerge.merged
+        : customerCatalog
+      const newAutoPrompts: CustomerAutoPromptItem[] =
+        filterNewAutoForSavedBuyer(
+          customerMerge.newAuto,
+          next,
+          fields,
+        ).map((e) => ({
+          id: e.id,
+          buyerKey: e.buyerKey,
+        }))
+
       if (useRemoteLedger && apiBase && token) {
-        const list = records.filter((x) => x.id !== next.id)
-        list.push(next)
         await putLedger(apiBase, token, {
           fields,
-          records: sortRecordsDesc(list),
-          ...ledgerExtras(),
+          records: recordsAfterSave,
+          productCatalog,
+          productCatalogSuppressed,
+          asrHotwordsSuppressed,
+          voiceProductCorrections,
+          customerCatalog: customerCatalogForSave,
+          customerCatalogSuppressed,
         })
+        if (customerMerge.changed) {
+          lastRemoteCustomerCatalogRef.current = customerCatalogForSave
+          setCustomerCatalog(customerCatalogForSave)
+        }
         await refresh()
-        return
+        return newAutoPrompts
       }
 
       await addRecord(next)
+      if (customerMerge.changed) {
+        await replaceCustomerCatalogInDb(
+          customerCatalogForSave,
+          customerCatalogSuppressed,
+        )
+        setCustomerCatalog(customerCatalogForSave)
+      }
       await refresh()
+      return newAutoPrompts
     },
     [
       fields,
       records,
-      ledgerExtras,
+      customerCatalog,
+      customerCatalogSuppressed,
+      productCatalog,
+      productCatalogSuppressed,
+      asrHotwordsSuppressed,
+      voiceProductCorrections,
       useRemoteLedger,
       apiBase,
       token,
@@ -506,6 +655,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           productCatalogSuppressed: nextSuppressed,
           asrHotwordsSuppressed: nextAsrHotwordsSuppressed,
           voiceProductCorrections,
+          customerCatalog,
+          customerCatalogSuppressed,
         })
         const rawPut = data as Record<string, unknown>
         const catParsed =
@@ -551,6 +702,57 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       fields,
       records,
       voiceProductCorrections,
+      customerCatalog,
+      customerCatalogSuppressed,
+      useRemoteLedger,
+      apiBase,
+      token,
+    ],
+  )
+
+  const saveCustomerCatalog = useCallback(
+    async (next: CustomerEntry[], nextSuppressed: string[]) => {
+      if (useRemoteLedger && apiBase && token) {
+        const data = await putLedger(apiBase, token, {
+          fields,
+          records,
+          productCatalog,
+          productCatalogSuppressed,
+          asrHotwordsSuppressed,
+          voiceProductCorrections,
+          customerCatalog: next,
+          customerCatalogSuppressed: nextSuppressed,
+        })
+        const rawPut = data as Record<string, unknown>
+        const parsed =
+          'customerCatalog' in rawPut
+            ? parseCustomerEntries(rawPut.customerCatalog)
+            : next
+        const supParsed =
+          'customerCatalogSuppressed' in rawPut
+            ? parseCustomerCatalogSuppressed(rawPut.customerCatalogSuppressed)
+            : nextSuppressed
+        const final =
+          next.length > parsed.length ? next : parsed
+        const supFinal =
+          nextSuppressed.length > supParsed.length ? nextSuppressed : supParsed
+        lastRemoteCustomerCatalogRef.current = final
+        lastRemoteCustomerSuppressedRef.current = supFinal
+        setCustomerCatalog(final)
+        setCustomerCatalogSuppressed(supFinal)
+        return
+      }
+      await replaceCustomerCatalogInDb(next, nextSuppressed)
+      setCustomerCatalog(next)
+      setCustomerCatalogSuppressed(nextSuppressed)
+    },
+    [
+      fields,
+      records,
+      productCatalog,
+      productCatalogSuppressed,
+      asrHotwordsSuppressed,
+      voiceProductCorrections,
       useRemoteLedger,
       apiBase,
       token,
@@ -568,6 +770,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           productCatalogSuppressed,
           asrHotwordsSuppressed,
           voiceProductCorrections: next,
+          customerCatalog,
+          customerCatalogSuppressed,
         })
         lastRemoteCorrectionsRef.current = next
         return
@@ -580,6 +784,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       productCatalog,
       productCatalogSuppressed,
       asrHotwordsSuppressed,
+      customerCatalog,
+      customerCatalogSuppressed,
       useRemoteLedger,
       apiBase,
       token,
@@ -654,6 +860,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveProductCatalog,
       learnVoiceProductFromSave,
       mergeVoiceCatalogAliases,
+      customerCatalog,
+      customerCatalogSuppressed,
+      saveCustomerCatalog,
     }),
     [
       productCatalog,
@@ -663,6 +872,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       saveProductCatalog,
       learnVoiceProductFromSave,
       mergeVoiceCatalogAliases,
+      customerCatalog,
+      customerCatalogSuppressed,
+      saveCustomerCatalog,
     ],
   )
 

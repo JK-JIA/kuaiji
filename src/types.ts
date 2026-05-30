@@ -73,3 +73,17 @@ export interface ProductCatalogEntry {
    */
   aliases?: string[]
 }
+
+/** 客户目录：购买方标识 + 可选联系信息（与账单 field_plate 值对应） */
+export interface CustomerEntry {
+  id: string
+  /** 购买方（记账时写入 plate 字段） */
+  buyerKey: string
+  /** 姓名（可选） */
+  name?: string
+  /** 地址（可选） */
+  address?: string
+  /** 联系方式（可选） */
+  contact?: string
+  source: 'manual' | 'auto'
+}

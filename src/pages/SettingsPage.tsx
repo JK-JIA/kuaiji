@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import type { FieldDef, ProductCatalogEntry } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { useLedger } from '../context/LedgerContext'
@@ -36,6 +37,7 @@ import {
   VoiceParseSettingsScreen,
 } from './settings/VoiceParseSettingsScreen'
 import { VoiceLexiconSettingsScreen } from './settings/VoiceLexiconSettingsScreen'
+import { CustomerCatalogSettingsScreen } from './settings/CustomerCatalogSettingsScreen'
 import { ProductCatalogUnitEditor } from './settings/ProductCatalogUnitEditor'
 import { SwipeDeleteRow } from '../components/SwipeDeleteRow'
 import { catalogEntryWithUnits } from '../utils/productCatalogHelpers'
@@ -48,6 +50,7 @@ import {
   IconBox,
   IconMic,
   IconSparkles,
+  IconUsers,
   IconFields,
   IconFontSize,
   IconImportExport,
@@ -423,6 +426,7 @@ type SettingsPanel =
   | 'account'
   | 'display'
   | 'catalog'
+  | 'customers'
   | 'voiceLexicon'
   | 'asrProvider'
   | 'voiceParse'
@@ -452,12 +456,16 @@ export function SettingsPage() {
     productCatalogSuppressed,
     asrHotwordsSuppressed,
     saveProductCatalog,
+    customerCatalog,
+    customerCatalogSuppressed,
+    saveCustomerCatalog,
   } = useLedger()
   const [name, setName] = useState('')
   const [type, setType] = useState<'text' | 'number'>('text')
   const [busy, setBusy] = useState(false)
   const { panel, openPanel, closeSubPanel } =
     useSettingsPanelNavigation<SettingsPanel>('main')
+  const location = useLocation()
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readThemeMode())
   const [userProfile, setUserProfile] = useState(() => readUserProfile())
   const [proBenefitsOpen, setProBenefitsOpen] = useState(false)
@@ -487,6 +495,22 @@ export function SettingsPage() {
         ? '管理商品与库存'
         : `共 ${sortedProductCatalog.length} 条 · 管理商品与库存`,
     [sortedProductCatalog.length],
+  )
+
+  const sortedCustomerCatalog = useMemo(
+    () =>
+      [...customerCatalog].sort((a, b) =>
+        a.buyerKey.localeCompare(b.buyerKey, 'zh-CN'),
+      ),
+    [customerCatalog],
+  )
+
+  const customersRowSubtitle = useMemo(
+    () =>
+      sortedCustomerCatalog.length === 0
+        ? '管理购买方与联系方式'
+        : `共 ${sortedCustomerCatalog.length} 条 · 管理购买方与联系方式`,
+    [sortedCustomerCatalog.length],
   )
 
   const voiceLexiconSubtitle = useMemo(() => {
@@ -538,6 +562,19 @@ export function SettingsPage() {
   useEffect(() => {
     if (panel === 'main') setUserProfile(readUserProfile())
   }, [panel])
+
+  useEffect(() => {
+    const st = location.state as {
+      openPanel?: SettingsPanel
+    } | null
+    if (st?.openPanel === 'customers') {
+      openPanel('customers')
+      window.history.replaceState(
+        { ...(window.history.state as object), settingsPanel: 'customers' },
+        '',
+      )
+    }
+  }, [location.state, openPanel])
 
   const addField = async () => {
     const n = name.trim()
@@ -848,40 +885,6 @@ export function SettingsPage() {
     )
   }
 
-  if (panel === 'voiceLexicon') {
-    return (
-      <VoiceLexiconSettingsScreen
-        records={records}
-        fields={fields}
-        productCatalog={productCatalog}
-        asrHotwordsSuppressed={asrHotwordsSuppressed}
-        onSaveLexicon={async (catalog, hotwordsSuppressed) => {
-          await saveProductCatalog(
-            catalog,
-            productCatalogSuppressed,
-            hotwordsSuppressed,
-          )
-        }}
-        onBack={closeSubPanel}
-      />
-    )
-  }
-
-  if (panel === 'asrProvider') {
-    return <AsrProviderSettingsScreen onBack={closeSubPanel} />
-  }
-
-  if (panel === 'voiceParse') {
-    return (
-      <VoiceParseSettingsScreen
-        onBack={() => {
-          closeSubPanel()
-          void fetchVoiceParseModelSubtitle().then(setVoiceParseSubtitle)
-        }}
-      />
-    )
-  }
-
   if (panel === 'catalog') {
     return (
       <div className={SETTINGS_SHELL_BG}>
@@ -970,6 +973,51 @@ export function SettingsPage() {
           </div>
         </SettingsPanelBody>
       </div>
+    )
+  }
+
+  if (panel === 'customers') {
+    return (
+      <CustomerCatalogSettingsScreen
+        customerCatalog={customerCatalog}
+        customerCatalogSuppressed={customerCatalogSuppressed}
+        onSave={saveCustomerCatalog}
+        onBack={closeSubPanel}
+      />
+    )
+  }
+
+  if (panel === 'voiceLexicon') {
+    return (
+      <VoiceLexiconSettingsScreen
+        records={records}
+        fields={fields}
+        productCatalog={productCatalog}
+        asrHotwordsSuppressed={asrHotwordsSuppressed}
+        onSaveLexicon={async (catalog, hotwordsSuppressed) => {
+          await saveProductCatalog(
+            catalog,
+            productCatalogSuppressed,
+            hotwordsSuppressed,
+          )
+        }}
+        onBack={closeSubPanel}
+      />
+    )
+  }
+
+  if (panel === 'asrProvider') {
+    return <AsrProviderSettingsScreen onBack={closeSubPanel} />
+  }
+
+  if (panel === 'voiceParse') {
+    return (
+      <VoiceParseSettingsScreen
+        onBack={() => {
+          closeSubPanel()
+          void fetchVoiceParseModelSubtitle().then(setVoiceParseSubtitle)
+        }}
+      />
     )
   }
 
@@ -1071,6 +1119,12 @@ export function SettingsPage() {
               title="商品管理"
               subtitle={catalogRowSubtitle}
               onClick={() => openPanel('catalog')}
+            />
+            <SettingsNavRowButton
+              icon={<IconUsers className="h-[18px] w-[18px]" />}
+              title="客户管理"
+              subtitle={customersRowSubtitle}
+              onClick={() => openPanel('customers')}
             />
             <SettingsNavRowButton
               icon={<IconMic className="h-[18px] w-[18px]" />}

@@ -11,6 +11,8 @@ import { requestBillCameraPermissions } from '../plugins/kuaijiPermissions'
 import { CalendarPickerModal } from '../components/CalendarPickerModal'
 import { HomeSearchDateRangeBlock } from '../components/HomeSearchDateRangeBlock'
 import { ReconcileModal } from '../components/ReconcileModal'
+import { CustomerAutoAddedModal } from '../components/CustomerAutoAddedModal'
+import type { CustomerAutoPromptItem } from '../utils/customerAutoPrompt'
 import { RecordCard } from '../components/RecordCard'
 import { useAuth } from '../context/AuthContext'
 import { useHoldVolcTranscript } from '../hooks/useHoldVolcTranscript'
@@ -115,6 +117,26 @@ export function HomePage() {
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({})
   /** 已对当前 savedHighlightId 滚过屏，避免核账等更新 records 时再次跳到带 New 的条目 */
   const scrolledForHighlightRef = useRef<string | null>(null)
+  const [customerAutoPrompt, setCustomerAutoPrompt] =
+    useState<CustomerAutoPromptItem | null>(null)
+
+  const showCustomerAutoPromptIfAny = useCallback(
+    (items: CustomerAutoPromptItem[]) => {
+      if (items.length > 0) setCustomerAutoPrompt(items[0])
+    },
+    [],
+  )
+
+  const dismissCustomerAutoPrompt = useCallback(() => {
+    setCustomerAutoPrompt(null)
+  }, [])
+
+  const viewCustomerAutoPrompt = useCallback(() => {
+    setCustomerAutoPrompt(null)
+    navigate('/settings', {
+      state: { openPanel: 'customers' },
+    })
+  }, [navigate])
 
   const todayStr = format(new Date(), 'yyyy-MM-dd')
 
@@ -158,12 +180,13 @@ export function HomePage() {
 
   const handleModalSave = useCallback(
     async (rec: LedgerRecord) => {
-      await saveRecord(rec)
+      const newAuto = await saveRecord(rec)
       scrolledForHighlightRef.current = null
       setReconcileHighlightId(null)
       setSavedHighlightId(rec.id)
+      showCustomerAutoPromptIfAny(newAuto)
     },
-    [saveRecord],
+    [saveRecord, showCustomerAutoPromptIfAny],
   )
 
   const handleReconcileConfirm = useCallback(
@@ -319,10 +342,11 @@ export function HomePage() {
             recordDate: todayStr,
             recordToEdit: null,
           })
-          await saveRecord(rec)
+          const newAuto = await saveRecord(rec)
           scrolledForHighlightRef.current = null
           setSavedHighlightId(rec.id)
           setVoiceBanner(null)
+          showCustomerAutoPromptIfAny(newAuto)
           return
         }
 
@@ -343,6 +367,7 @@ export function HomePage() {
       ledgerLayout,
       todayStr,
       saveRecord,
+      showCustomerAutoPromptIfAny,
       records,
       fields,
       productCatalog,
@@ -427,10 +452,11 @@ export function HomePage() {
           recordDate: todayStr,
           recordToEdit: null,
         })
-        await saveRecord(rec)
+        const newAuto = await saveRecord(rec)
         scrolledForHighlightRef.current = null
         setSavedHighlightId(rec.id)
         setVoiceBanner(null)
+        showCustomerAutoPromptIfAny(newAuto)
         return { success: true }
       } catch (e) {
         if (e instanceof DOMException && e.name === 'AbortError') {
@@ -449,6 +475,7 @@ export function HomePage() {
       ledgerLayout,
       todayStr,
       saveRecord,
+      showCustomerAutoPromptIfAny,
       records,
       productCatalog,
       voiceProductCorrections,
@@ -1316,6 +1343,13 @@ export function HomePage() {
           )
           window.setTimeout(() => scrollToDate(jumpDate), 120)
         }}
+      />
+
+      <CustomerAutoAddedModal
+        open={customerAutoPrompt !== null}
+        buyerKey={customerAutoPrompt?.buyerKey ?? ''}
+        onView={viewCustomerAutoPrompt}
+        onDismiss={dismissCustomerAutoPrompt}
       />
 
     </div>

@@ -1,6 +1,7 @@
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { useEffect, useRef, useState } from 'react'
+import ReactDOM from 'react-dom'
 import { Capacitor } from '@capacitor/core'
 import { Directory, Filesystem } from '@capacitor/filesystem'
 import { Share } from '@capacitor/share'
@@ -210,16 +211,16 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
 
   if (!open) return null
 
-  return (
-    <div className="fixed inset-0 z-[60] flex flex-col justify-end bg-black/50">
+  return ReactDOM.createPortal(
+    <div className="fixed inset-0 z-[100] flex flex-col bg-black/50 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-[max(0.5rem,env(safe-area-inset-top))]">
       <button
         type="button"
         className="absolute inset-0"
         aria-label="关闭"
         onClick={onClose}
       />
-      <div className="relative max-h-[90dvh] overflow-y-auto rounded-t-2xl bg-kj-surface px-4 pb-8 pt-4 shadow-xl">
-        <div className="mb-3 flex items-center justify-between">
+      <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col overflow-hidden rounded-2xl bg-kj-surface shadow-xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-kj-border/80 px-4 py-2.5">
           <h2 className="text-base font-bold text-kj-primary">小票预览</h2>
           <button
             type="button"
@@ -230,111 +231,113 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
           </button>
         </div>
 
-        {/* 截图区域仅用 hex/rgb 内联色：html2canvas 无法解析 Tailwind v4 的 oklch() */}
-        <div
-          ref={captureRef}
-          style={{
-            width: 280,
-            margin: '0 auto',
-            boxSizing: 'border-box',
-            border: '1px dashed #d6d3d1',
-            backgroundColor: '#ffffff',
-            padding: '20px 16px',
-            fontFamily:
-              'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-            fontSize: 12,
-            lineHeight: 1.625,
-            color: '#171717',
-            boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.06)',
-          }}
-        >
-          <p
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-3 py-2">
+          {/* 截图区域仅用 hex/rgb 内联色：html2canvas 无法解析 Tailwind v4 的 oklch() */}
+          <div
+            ref={captureRef}
             style={{
-              textAlign: 'center',
-              fontSize: 14,
-              fontWeight: 700,
-              letterSpacing: '0.2em',
-              margin: 0,
+              width: 'min(280px, 100%)',
+              margin: '0 auto',
+              boxSizing: 'border-box',
+              border: '1px dashed #d6d3d1',
+              backgroundColor: '#ffffff',
+              padding: '12px 14px',
+              fontFamily:
+                'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+              fontSize: 11,
+              lineHeight: 1.45,
+              color: '#171717',
+              boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.06)',
             }}
           >
-            kuaiji
-          </p>
-          <p
-            style={{
-              marginTop: 4,
-              textAlign: 'center',
-              fontSize: 12,
-              color: '#666666',
-            }}
-          >
-            记账小票
-          </p>
-          <div
-            style={{
-              margin: '12px 0',
-              borderTop: '1px dashed #d6d3d1',
-            }}
-          />
-          <p style={{ margin: 0 }}>日期 {record.date}</p>
-          <p style={{ margin: 0 }}>
-            时间 {format(created, 'HH:mm', { locale: zhCN })}
-          </p>
-          <p style={{ margin: 0 }}>
-            {buyerLabel} {plate}
-          </p>
-          <div
-            style={{
-              margin: '8px 0',
-              borderTop: '1px dashed #e7e5e4',
-            }}
-          />
-          {lines.map((line, i) => {
-            const amt = parseMoney(line.lineAmountStr)
-            const up = parseMoney(line.unitPriceStr)
-            return (
-              <div key={`ln-${i}`} style={{ marginBottom: 6 }}>
-                <p style={{ margin: 0, fontWeight: 600 }}>
-                  {line.product || '—'}
-                </p>
-                <p style={{ margin: 0, fontSize: 12, color: '#666666' }}>
-                  {unitPriceId && up > 0 ? `单价 ¥${fmtMoney(up)} · ` : ''}
-                  斤数 {line.quantity || '—'}
-                  {amt > 0 ? ` · 小计 ¥${fmtMoney(amt)}` : ''}
-                </p>
-              </div>
-            )
-          })}
-          <div
-            style={{
-              margin: '8px 0',
-              borderTop: '1px dashed #e7e5e4',
-            }}
-          />
-          {amountId ? (
-            <>
-              <p style={{ margin: 0 }}>应收 ¥{fmtMoney(exp)}</p>
-              <p style={{ margin: 0 }}>已收 ¥{fmtMoney(rec)}</p>
-            </>
-          ) : null}
-          <p
-            style={{
-              marginTop: 8,
-              marginBottom: 0,
-              textAlign: 'center',
-              fontSize: 12,
-              color: '#999999',
-            }}
-          >
-            由 kuaiji 生成 · 仅供参考
-          </p>
+            <p
+              style={{
+                textAlign: 'center',
+                fontSize: 13,
+                fontWeight: 700,
+                letterSpacing: '0.16em',
+                margin: 0,
+              }}
+            >
+              kuaiji
+            </p>
+            <p
+              style={{
+                marginTop: 2,
+                textAlign: 'center',
+                fontSize: 11,
+                color: '#666666',
+              }}
+            >
+              记账小票
+            </p>
+            <div
+              style={{
+                margin: '8px 0',
+                borderTop: '1px dashed #d6d3d1',
+              }}
+            />
+            <p style={{ margin: 0 }}>日期 {record.date}</p>
+            <p style={{ margin: 0 }}>
+              时间 {format(created, 'HH:mm', { locale: zhCN })}
+            </p>
+            <p style={{ margin: 0 }}>
+              {buyerLabel} {plate}
+            </p>
+            <div
+              style={{
+                margin: '6px 0',
+                borderTop: '1px dashed #e7e5e4',
+              }}
+            />
+            {lines.map((line, i) => {
+              const amt = parseMoney(line.lineAmountStr)
+              const up = parseMoney(line.unitPriceStr)
+              return (
+                <div key={`ln-${i}`} style={{ marginBottom: 4 }}>
+                  <p style={{ margin: 0, fontWeight: 600 }}>
+                    {line.product || '—'}
+                  </p>
+                  <p style={{ margin: 0, fontSize: 11, color: '#666666' }}>
+                    {unitPriceId && up > 0 ? `单价 ¥${fmtMoney(up)} · ` : ''}
+                    斤数 {line.quantity || '—'}
+                    {amt > 0 ? ` · 小计 ¥${fmtMoney(amt)}` : ''}
+                  </p>
+                </div>
+              )
+            })}
+            <div
+              style={{
+                margin: '6px 0',
+                borderTop: '1px dashed #e7e5e4',
+              }}
+            />
+            {amountId ? (
+              <>
+                <p style={{ margin: 0 }}>应收 ¥{fmtMoney(exp)}</p>
+                <p style={{ margin: 0 }}>已收 ¥{fmtMoney(rec)}</p>
+              </>
+            ) : null}
+            <p
+              style={{
+                marginTop: 6,
+                marginBottom: 0,
+                textAlign: 'center',
+                fontSize: 10,
+                color: '#999999',
+              }}
+            >
+              由 kuaiji 生成 · 仅供参考
+            </p>
+          </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="shrink-0 border-t border-kj-border/80 px-4 py-3">
           <button
             type="button"
             disabled={busy}
             onClick={() => startSave()}
-            className="flex-1 rounded-xl bg-[#2ecc71] py-3 text-sm font-semibold text-white disabled:opacity-50"
+            className="w-full rounded-xl bg-[#2ecc71] py-2.5 text-sm font-semibold text-white disabled:opacity-50"
           >
             {busy ? '处理中…' : '保存图片'}
           </button>
@@ -342,7 +345,7 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
       </div>
 
       {explainOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 px-4">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 px-4">
           <div className="max-w-sm rounded-2xl bg-kj-surface p-5 shadow-xl">
             <p className="text-sm font-bold text-kj-primary">保存小票说明</p>
             <p className="mt-2 text-xs leading-relaxed text-kj-secondary">
@@ -370,6 +373,7 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
           </div>
         </div>
       )}
-    </div>
+    </div>,
+    document.body,
   )
 }
