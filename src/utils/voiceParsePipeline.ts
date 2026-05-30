@@ -243,6 +243,7 @@ async function processDoubaoParseResult(
 export type BillParsePipelineInput = Omit<VoiceParsePipelineInput, 'asrText'> & {
   imageBase64: string
   mimeType: string
+  signal?: AbortSignal
 }
 
 export async function runBillParsePipeline(
@@ -256,6 +257,7 @@ export async function runBillParsePipeline(
     productCatalog,
     apiBase,
     token,
+    signal,
   } = input
 
   const debug: VoiceParseDebugTrace = {
@@ -284,22 +286,16 @@ export async function runBillParsePipeline(
       token,
       productCatalogPromptSection:
         buildAiProductCatalogPromptSection(productCatalog),
+      signal,
     },
   )
   debug.aiRaw = aiRaw
 
-  const result = await processDoubaoParseResult(
-    { ...input, hintText: '' },
-    aiRaw,
-    debug,
-  )
-  if (result.success) {
-    result.needConfirm = true
-    result.confirmHint =
-      result.confirmHint ??
-      '请核对识别结果后保存'
+  if (signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError')
   }
-  return result
+
+  return processDoubaoParseResult({ ...input, hintText: '' }, aiRaw, debug)
 }
 
 export async function runVoiceParsePipeline(

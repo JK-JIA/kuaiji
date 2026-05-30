@@ -6,7 +6,8 @@ import {
   AddRecordModal,
   type VoiceFormPrefillPayload,
 } from '../components/AddRecordModal'
-import { BillCameraCaptureModal } from '../components/BillCameraCaptureModal'
+import { BillCameraCaptureModal, type BillRecognizeResult } from '../components/BillCameraCaptureModal'
+import { requestBillCameraPermissions } from '../plugins/kuaijiPermissions'
 import { CalendarPickerModal } from '../components/CalendarPickerModal'
 import { HomeSearchDateRangeBlock } from '../components/HomeSearchDateRangeBlock'
 import { ReconcileModal } from '../components/ReconcileModal'
@@ -92,7 +93,6 @@ export function HomePage() {
   const [searchDateExpanded, setSearchDateExpanded] = useState(false)
   const [showTopBtn, setShowTopBtn] = useState(false)
   const [voiceParsing, setVoiceParsing] = useState(false)
-  const [billParsing, setBillParsing] = useState(false)
   const [billCameraOpen, setBillCameraOpen] = useState(false)
   const [voiceBanner, setVoiceBanner] = useState<string | null>(null)
   const [voiceFormPrefill, setVoiceFormPrefill] =
@@ -352,29 +352,35 @@ export function HomePage() {
     ],
   )
 
-  const runBillPipeline = useCallback(
-    async (file: File) => {
+  const handleBillRecognize = useCallback(
+    async (file: File, signal: AbortSignal): Promise<BillRecognizeResult> => {
       const block = messageIfPremiumFeatureBlocked({
         apiBase,
         token,
         membershipActive,
       })
       if (block) {
-        setVoiceBanner(`${block}\n\n请重新选择图片`)
-        return
+        return { success: false, error: block }
       }
 
       if (!isBillParseConfigured({ apiBase })) {
-        setVoiceBanner(
-          '未配置图片识别服务。请确认已登录且服务端已配置豆包视觉模型。',
-        )
-        return
+        return {
+          success: false,
+          error:
+            '未配置图片识别服务。请确认已登录且服务端已配置豆包视觉模型。',
+        }
       }
 
-      setBillParsing(true)
-      setVoiceBanner('正在识别图片…')
+      if (signal.aborted) {
+        throw new DOMException('Aborted', 'AbortError')
+      }
+
       try {
         const compressed = await compressImageForBillParse(file)
+        if (signal.aborted) {
+          throw new DOMException('Aborted', 'AbortError')
+        }
+
         const pipeline = await runBillParsePipeline({
           imageBase64: compressed.base64,
           mimeType: compressed.mimeType,
@@ -385,10 +391,14 @@ export function HomePage() {
           productCorrections: voiceProductCorrections,
           apiBase,
           token,
+          signal,
         })
+        if (signal.aborted) {
+          throw new DOMException('Aborted', 'AbortError')
+        }
+
         if (!pipeline.success) {
-          setVoiceBanner(`${pipeline.error ?? '识别失败'}\n\n请重新选择图片`)
-          return
+          return { success: false, error: pipeline.error ?? '识别失败' }
         }
 
         if (pipeline.catalogWithAliases) {
@@ -396,33 +406,40 @@ export function HomePage() {
         }
 
         const { values, lines } = pipeline
-        const fuzzy = pipeline
         const err = validateRecordForm(ledgerLayout, {
           values,
           lines,
           dealInput: '',
         })
-        const prefillMessages = [err, err ? null : fuzzy.confirmHint].filter(
-          (x): x is string => Boolean(x && String(x).trim()),
-        )
 
         if (err === '缺少商品或数量字段配置') {
-          setVoiceBanner(`${err}\n\n请重新选择图片`)
-          return
+          return { success: false, error: err }
         }
 
-        openParsedPrefillModal(
+        if (err) {
+          return { success: false, error: err }
+        }
+
+        const rec = buildLedgerRecordForSave(ledgerLayout, {
           values,
           lines,
-          prefillMessages,
-          '请核对识别结果后保存',
-        )
+          dealInput: '',
+          recordDate: todayStr,
+          recordToEdit: null,
+        })
+        await saveRecord(rec)
+        scrolledForHighlightRef.current = null
+        setSavedHighlightId(rec.id)
+        setVoiceBanner(null)
+        return { success: true }
       } catch (e) {
-        setVoiceBanner(
-          `${e instanceof Error ? e.message : '识别失败'}\n\n请重新选择图片`,
-        )
-      } finally {
-        setBillParsing(false)
+        if (e instanceof DOMException && e.name === 'AbortError') {
+          throw e
+        }
+        return {
+          success: false,
+          error: e instanceof Error ? e.message : '识别失败',
+        }
       }
     },
     [
@@ -430,21 +447,14 @@ export function HomePage() {
       token,
       membershipActive,
       ledgerLayout,
+      todayStr,
+      saveRecord,
       records,
       productCatalog,
       voiceProductCorrections,
       voiceAsrHotwords,
       mergeVoiceCatalogAliases,
-      openParsedPrefillModal,
     ],
-  )
-
-  const onBillImagePicked = useCallback(
-    (file: File | undefined | null) => {
-      if (!file) return
-      void runBillPipeline(file)
-    },
-    [runBillPipeline],
   )
 
   const voicePipelineRef = useRef(runVoicePipeline)
@@ -482,10 +492,16 @@ export function HomePage() {
     },
   })
 
-  const onBillCameraClick = useCallback(() => {
-    if (billParsing || voiceParsing || voiceRecording) return
+  const onBillCameraClick = useCallback(async () => {
+    if (voiceParsing || voiceRecording) return
+    const perms = await requestBillCameraPermissions()
+    if (!perms.camera) {
+      setVoiceBanner('需要相机权限才能拍照识别')
+      return
+    }
+    setVoiceBanner(null)
     setBillCameraOpen(true)
-  }, [billParsing, voiceParsing, voiceRecording])
+  }, [voiceParsing, voiceRecording])
 
   const onRecordBarClick = () => {
     if (ignoreNextRecordBarClickRef.current) {
@@ -1136,7 +1152,7 @@ export function HomePage() {
         </button>
       )}
 
-      {(voiceParsing || billParsing || voiceBanner || voiceMicHint) && (
+      {(voiceParsing || voiceBanner || voiceMicHint) && (
         <div
           className="fixed bottom-[9.5rem] left-1/2 z-30 w-max min-w-0 max-w-[min(32rem,calc(100vw-2rem-env(safe-area-inset-left)-env(safe-area-inset-right)))] -translate-x-1/2 rounded-xl border border-kj-border-strong/80 bg-kj-surface/95 px-3 py-2 text-sm leading-snug text-kj-primary shadow-md backdrop-blur-md whitespace-pre-line break-words"
           role="status"
@@ -1144,21 +1160,14 @@ export function HomePage() {
           {voiceMicHint
             ? voiceMicHint
             : voiceBanner ??
-              (billParsing
-                ? '正在识别图片…'
-                : voiceParsing
-                  ? '正在识别中…'
-                  : '')}
+              (voiceParsing ? '正在识别中…' : '')}
         </div>
       )}
 
       <BillCameraCaptureModal
         open={billCameraOpen}
         onClose={() => setBillCameraOpen(false)}
-        onImagePicked={(file) => {
-          setBillCameraOpen(false)
-          onBillImagePicked(file)
-        }}
+        onRecognize={handleBillRecognize}
       />
 
       <div className="pointer-events-none fixed bottom-20 left-1/2 z-30 w-full max-w-lg -translate-x-1/2 px-4">
@@ -1203,7 +1212,8 @@ export function HomePage() {
               )}
             </div>
           ) : null}
-          <div className="flex w-full max-w-md items-center justify-center gap-2.5">
+          <div className="flex w-full items-center justify-center">
+          <div className="flex items-center gap-1.5">
           <button
             ref={homeRecordBarRef}
             type="button"
@@ -1214,14 +1224,14 @@ export function HomePage() {
             onClick={onRecordBarClick}
             className={
               voiceRecording
-                ? 'flex min-h-11 min-w-0 flex-1 select-none items-center justify-center gap-2 rounded-full bg-neutral-500 py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-white shadow-lg'
+                ? 'flex min-h-12 w-[min(52vw,13.5rem)] min-w-[11rem] select-none items-center justify-center gap-2 rounded-full bg-neutral-500 py-3 pl-4 pr-4 text-[15px] font-semibold tracking-wide text-white shadow-lg'
                 : homeVoiceEnabled
-                  ? `flex min-h-11 min-w-0 flex-1 select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-white shadow-lg active:bg-neutral-500 ${
+                  ? `flex min-h-12 w-[min(52vw,13.5rem)] min-w-[11rem] select-none items-center justify-center gap-2 rounded-full bg-black py-3 pl-4 pr-4 text-[15px] font-semibold tracking-wide text-white shadow-lg active:bg-neutral-500 ${
                       voiceHoldPressActive && !voiceRecording
                         ? 'ring-2 ring-[#2ecc71]/55 ring-offset-2 ring-offset-kj-bg'
                         : ''
                     }`
-                  : 'flex min-h-11 min-w-0 flex-1 select-none items-center justify-center gap-2 rounded-full bg-black py-2.5 pl-3 pr-3 text-sm font-semibold tracking-wide text-neutral-500 shadow-lg'
+                  : 'flex min-h-12 w-[min(52vw,13.5rem)] min-w-[11rem] select-none items-center justify-center gap-2 rounded-full bg-black py-3 pl-4 pr-4 text-[15px] font-semibold tracking-wide text-neutral-500 shadow-lg'
             }
             title={
               voiceRecording
@@ -1258,13 +1268,14 @@ export function HomePage() {
           <button
             type="button"
             onClick={onBillCameraClick}
-            disabled={billParsing || voiceParsing || voiceRecording}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black text-white shadow-lg active:bg-neutral-500 disabled:opacity-50"
+            disabled={voiceParsing || voiceRecording}
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-black text-white shadow-lg active:bg-neutral-500 disabled:opacity-50"
             title="拍照识别账单"
             aria-label="拍照识别账单"
           >
             <ScanCameraGlyph className="h-5 w-5" />
           </button>
+          </div>
           </div>
         </div>
       </div>

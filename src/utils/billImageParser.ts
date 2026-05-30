@@ -14,6 +14,7 @@ export type BillImageParseOptions = {
   token?: string | null
   productCatalogPromptSection?: string
   productCatalog?: string[]
+  signal?: AbortSignal
 }
 
 /** 是否可走服务端图片识别（已配置 VITE_API_URL） */
@@ -55,6 +56,7 @@ export async function parseBillImageWithDoubao(
       {
         productCatalogPromptSection: opts?.productCatalogPromptSection,
         productCatalog: opts?.productCatalog,
+        signal: opts?.signal,
       },
     )
     if (!result.success && httpStatus === 404) {

@@ -434,18 +434,30 @@ async function fetchWithTimeout(
   url: string,
   init: RequestInit,
   timeoutMs = 20_000,
+  externalSignal?: AbortSignal,
 ): Promise<Response> {
+  if (externalSignal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError')
+  }
+
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), timeoutMs)
+  const onExternalAbort = () => ac.abort()
+  externalSignal?.addEventListener('abort', onExternalAbort)
+
   try {
     return await fetch(url, { ...init, signal: ac.signal })
   } catch (e) {
+    if (externalSignal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
+    }
     if (e instanceof Error && e.name === 'AbortError') {
       throw new Error('连接服务器超时，请检查网络或 API 地址')
     }
     throw e
   } finally {
     clearTimeout(timer)
+    externalSignal?.removeEventListener('abort', onExternalAbort)
   }
 }
 
@@ -548,6 +560,7 @@ export async function parseBillLedger(
   catalogOpts?: {
     productCatalog?: string[]
     productCatalogPromptSection?: string
+    signal?: AbortSignal
   },
 ): Promise<BillLedgerParseResponse> {
   const res = await fetchWithTimeout(
@@ -568,6 +581,7 @@ export async function parseBillLedger(
       }),
     },
     60_000,
+    catalogOpts?.signal,
   )
   let data: DoubaoParseResult & { error?: string }
   try {

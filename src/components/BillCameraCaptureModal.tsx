@@ -1,27 +1,52 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  requestCameraPermission,
-  requestPhotosPermission,
-} from '../plugins/kuaijiPermissions'
+import { ensurePhotosPermission } from '../plugins/kuaijiPermissions'
+
+export type BillRecognizeResult =
+  | { success: true }
+  | { success: false; error: string }
 
 type Props = {
   open: boolean
   onClose: () => void
-  onImagePicked: (file: File) => void
+  onRecognize: (file: File, signal: AbortSignal) => Promise<BillRecognizeResult>
 }
+
+type Phase = 'camera' | 'review' | 'recognizing'
+type FocusPoint = { x: number; y: number; key: number }
 
 export function BillCameraCaptureModal({
   open,
   onClose,
-  onImagePicked,
+  onRecognize,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const previewRef = useRef<HTMLDivElement>(null)
   const galleryInputRef = useRef<HTMLInputElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const recognizeAbortRef = useRef<AbortController | null>(null)
+  const capturedUrlRef = useRef<string | null>(null)
+
+  const [phase, setPhase] = useState<Phase>('camera')
+  const [capturedFile, setCapturedFile] = useState<File | null>(null)
+  const [capturedUrl, setCapturedUrl] = useState<string | null>(null)
   const [cameraReady, setCameraReady] = useState(false)
   const [cameraStarting, setCameraStarting] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
+  const [recognizeError, setRecognizeError] = useState<string | null>(null)
   const [capturing, setCapturing] = useState(false)
+  const [torchOn, setTorchOn] = useState(false)
+  const [torchSupported, setTorchSupported] = useState(false)
+  const [focusPoint, setFocusPoint] = useState<FocusPoint | null>(null)
+
+  const clearCapturedPreview = useCallback(() => {
+    if (capturedUrlRef.current) {
+      URL.revokeObjectURL(capturedUrlRef.current)
+      capturedUrlRef.current = null
+    }
+    setCapturedUrl(null)
+    setCapturedFile(null)
+  }, [])
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop())
@@ -30,15 +55,49 @@ export function BillCameraCaptureModal({
     if (video) video.srcObject = null
     setCameraReady(false)
     setCameraStarting(false)
+    setTorchOn(false)
+    setTorchSupported(false)
   }, [])
 
-  useEffect(() => {
-    if (!open) {
-      stopCamera()
-      setCameraError(null)
-      setCapturing(false)
+  const cancelRecognize = useCallback(() => {
+    recognizeAbortRef.current?.abort()
+    recognizeAbortRef.current = null
+    setPhase('review')
+    setRecognizeError(null)
+  }, [])
+
+  const resetAll = useCallback(() => {
+    recognizeAbortRef.current?.abort()
+    recognizeAbortRef.current = null
+    stopCamera()
+    clearCapturedPreview()
+    setPhase('camera')
+    setCameraError(null)
+    setRecognizeError(null)
+    setCapturing(false)
+    setFocusPoint(null)
+    if (focusTimerRef.current) {
+      clearTimeout(focusTimerRef.current)
+      focusTimerRef.current = null
     }
-  }, [open, stopCamera])
+  }, [clearCapturedPreview, stopCamera])
+
+  useEffect(() => {
+    if (!open) resetAll()
+  }, [open, resetAll])
+
+  const applyTorch = useCallback(async (on: boolean) => {
+    const track = streamRef.current?.getVideoTracks()[0]
+    if (!track) return false
+    try {
+      const advanced = [{ torch: on }] as unknown as MediaTrackConstraintSet[]
+      await track.applyConstraints({ advanced })
+      setTorchOn(on)
+      return true
+    } catch {
+      return false
+    }
+  }, [])
 
   const startCamera = useCallback(async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -49,11 +108,22 @@ export function BillCameraCaptureModal({
     setCameraError(null)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' } },
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
         audio: false,
       })
       streamRef.current?.getTracks().forEach((t) => t.stop())
       streamRef.current = stream
+
+      const track = stream.getVideoTracks()[0]
+      const caps = track.getCapabilities?.() as MediaTrackCapabilities & {
+        torch?: boolean
+      }
+      setTorchSupported(Boolean(caps?.torch))
+
       const video = videoRef.current
       if (!video) {
         stream.getTracks().forEach((t) => t.stop())
@@ -65,13 +135,63 @@ export function BillCameraCaptureModal({
       setCameraReady(true)
       return true
     } catch {
-      setCameraError('无法打开相机，请检查权限后重试')
+      setCameraError('无法打开相机')
       setCameraReady(false)
       return false
     } finally {
       setCameraStarting(false)
     }
   }, [])
+
+  useEffect(() => {
+    if (!open || phase !== 'camera') return
+    void startCamera()
+  }, [open, phase, startCamera])
+
+  const enterReview = useCallback(
+    (file: File) => {
+      stopCamera()
+      clearCapturedPreview()
+      const url = URL.createObjectURL(file)
+      capturedUrlRef.current = url
+      setCapturedUrl(url)
+      setCapturedFile(file)
+      setRecognizeError(null)
+      setCameraError(null)
+      setPhase('review')
+    },
+    [clearCapturedPreview, stopCamera],
+  )
+
+  const handlePreviewTap = useCallback(
+    async (e: React.PointerEvent<HTMLDivElement>) => {
+      if (phase !== 'camera' || !cameraReady || !previewRef.current) return
+      const rect = previewRef.current.getBoundingClientRect()
+      const x = e.clientX - rect.left
+      const y = e.clientY - rect.top
+      const normX = Math.min(1, Math.max(0, x / rect.width))
+      const normY = Math.min(1, Math.max(0, y / rect.height))
+
+      setFocusPoint({ x, y, key: Date.now() })
+      if (focusTimerRef.current) clearTimeout(focusTimerRef.current)
+      focusTimerRef.current = setTimeout(() => setFocusPoint(null), 1200)
+
+      const track = streamRef.current?.getVideoTracks()[0]
+      if (!track) return
+      try {
+        const advanced = [
+          {
+            focusMode: 'single-shot',
+            pointsOfInterest: [{ x: normX, y: normY }],
+          },
+        ] as unknown as MediaTrackConstraintSet[]
+        await track.applyConstraints({ advanced })
+      } catch {
+        /* 部分 WebView 不支持手动对焦，仅显示对焦框 */
+      }
+    },
+    [cameraReady, phase],
+  )
 
   const handleCapture = useCallback(async () => {
     const video = videoRef.current
@@ -97,37 +217,58 @@ export function BillCameraCaptureModal({
           0.92,
         )
       })
-      const file = new File([blob], `bill-${Date.now()}.jpg`, {
-        type: 'image/jpeg',
-      })
-      onImagePicked(file)
+      enterReview(
+        new File([blob], `bill-${Date.now()}.jpg`, { type: 'image/jpeg' }),
+      )
     } catch {
       setCameraError('拍照失败，请重试')
     } finally {
       setCapturing(false)
     }
-  }, [cameraReady, capturing, onImagePicked])
+  }, [cameraReady, capturing, enterReview])
 
-  const handleShutterClick = useCallback(async () => {
-    if (capturing || cameraStarting) return
+  const handleRetake = useCallback(() => {
+    clearCapturedPreview()
+    setRecognizeError(null)
+    setPhase('camera')
+  }, [clearCapturedPreview])
 
-    if (!cameraReady) {
-      const granted = await requestCameraPermission()
-      if (!granted) {
-        setCameraError('需要相机权限才能拍照')
+  const handleConfirmRecognize = useCallback(async () => {
+    if (!capturedFile) return
+    setRecognizeError(null)
+    setPhase('recognizing')
+    const ac = new AbortController()
+    recognizeAbortRef.current = ac
+    try {
+      const result = await onRecognize(capturedFile, ac.signal)
+      if (ac.signal.aborted) return
+      if (result.success) {
+        onClose()
         return
       }
-      const ok = await startCamera()
-      if (!ok) return
-      return
+      setRecognizeError(result.error)
+      setPhase('review')
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        setPhase('review')
+        return
+      }
+      setRecognizeError(e instanceof Error ? e.message : '识别失败')
+      setPhase('review')
+    } finally {
+      if (recognizeAbortRef.current === ac) {
+        recognizeAbortRef.current = null
+      }
     }
+  }, [capturedFile, onClose, onRecognize])
 
-    await handleCapture()
-  }, [cameraReady, cameraStarting, capturing, handleCapture, startCamera])
+  const handleTorchToggle = useCallback(() => {
+    void applyTorch(!torchOn)
+  }, [applyTorch, torchOn])
 
   const handleGalleryClick = useCallback(async () => {
-    const granted = await requestPhotosPermission()
-    if (!granted) {
+    const ok = await ensurePhotosPermission()
+    if (!ok) {
       setCameraError('需要相册权限才能选图')
       return
     }
@@ -135,72 +276,161 @@ export function BillCameraCaptureModal({
     galleryInputRef.current?.click()
   }, [])
 
+  const handleTopClose = useCallback(() => {
+    if (phase === 'recognizing') {
+      cancelRecognize()
+      return
+    }
+    onClose()
+  }, [cancelRecognize, onClose, phase])
+
   if (!open) return null
 
-  const hint = cameraReady
-    ? '对准账单，再次点击拍照'
-    : cameraStarting
-      ? '正在打开相机…'
-      : '点击拍照并授权相机'
+  const showLiveCamera = phase === 'camera'
+  const showReview = phase === 'review' && capturedUrl
+  const showRecognizing = phase === 'recognizing'
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black">
-      <video
-        ref={videoRef}
-        className={`absolute inset-0 h-full w-full object-cover ${
-          cameraReady ? 'opacity-100' : 'opacity-0'
-        }`}
-        playsInline
-        muted
-        autoPlay
-        aria-hidden
-      />
+      {showLiveCamera ? (
+        <video
+          ref={videoRef}
+          className="absolute inset-0 h-full w-full object-cover"
+          playsInline
+          muted
+          autoPlay
+          aria-hidden
+        />
+      ) : null}
 
-      {!cameraReady && !cameraStarting ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-neutral-900">
-          <ScanCameraGlyph className="h-20 w-20 text-white/15" />
+      {showReview ? (
+        <img
+          src={capturedUrl}
+          alt="照片预览"
+          className="absolute inset-0 h-full w-full object-contain bg-black"
+        />
+      ) : null}
+
+      {showLiveCamera ? (
+        <div
+          ref={previewRef}
+          className="absolute inset-0 z-[1]"
+          onPointerDown={(e) => void handlePreviewTap(e)}
+          aria-hidden
+        />
+      ) : null}
+
+      {showLiveCamera && focusPoint ? (
+        <div
+          key={focusPoint.key}
+          className="pointer-events-none absolute z-[2] h-[4.5rem] w-[4.5rem] -translate-x-1/2 -translate-y-1/2"
+          style={{ left: focusPoint.x, top: focusPoint.y }}
+          aria-hidden
+        >
+          <span className="absolute inset-0 animate-ping rounded-sm border border-white/80 opacity-60" />
+          <span className="absolute inset-0 rounded-sm border-2 border-white shadow-[0_0_8px_rgba(0,0,0,0.35)]" />
         </div>
       ) : null}
 
-      {cameraError ? (
-        <div className="absolute inset-x-0 top-[calc(env(safe-area-inset-top)+3.5rem)] z-10 px-4">
-          <p className="rounded-xl bg-black/70 px-3 py-2 text-center text-sm text-white/90">
-            {cameraError}
+      {showLiveCamera && cameraStarting && !cameraReady ? (
+        <div className="absolute inset-0 z-[3] flex items-center justify-center bg-black/60">
+          <p className="text-sm text-white/80">正在打开相机…</p>
+        </div>
+      ) : null}
+
+      {showRecognizing ? (
+        <div className="absolute inset-0 z-[5] flex flex-col items-center justify-center bg-black/55">
+          <SpinnerGlyph className="h-11 w-11 animate-spin text-white" />
+          <p className="mt-4 text-base font-medium text-white">正在智能识别</p>
+          <p className="mt-2 text-xs text-white/65">点击左上角返回可取消</p>
+        </div>
+      ) : null}
+
+      {(cameraError || recognizeError) && !showRecognizing ? (
+        <div className="absolute inset-x-0 top-[calc(env(safe-area-inset-top)+3.25rem)] z-[4] px-4">
+          <p className="rounded-lg bg-black/70 px-3 py-2 text-center text-sm text-white/90">
+            {recognizeError ?? cameraError}
           </p>
         </div>
       ) : null}
 
-      <div className="relative z-10 flex items-center justify-between px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+      <div className="relative z-10 flex items-center justify-between px-3 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
         <button
           type="button"
-          onClick={onClose}
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm"
-          aria-label="关闭"
+          onClick={handleTopClose}
+          className="flex h-11 w-11 items-center justify-center text-white"
+          aria-label={showRecognizing ? '取消识别' : '关闭'}
         >
-          <CloseGlyph className="h-5 w-5" />
+          {showRecognizing ? (
+            <BackGlyph className="h-6 w-6" />
+          ) : (
+            <CloseGlyph className="h-6 w-6" />
+          )}
         </button>
-        <button
-          type="button"
-          onClick={() => void handleGalleryClick()}
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-sm"
-          aria-label="从相册选择"
-        >
-          <GalleryGlyph className="h-5 w-5" />
-        </button>
+        <span className="text-[17px] font-medium text-white">拍账单</span>
+        {showLiveCamera ? (
+          <div className="flex items-center gap-1">
+            {torchSupported ? (
+              <button
+                type="button"
+                onClick={handleTorchToggle}
+                className={`flex h-11 w-11 items-center justify-center rounded-full ${
+                  torchOn ? 'bg-white/20 text-amber-300' : 'text-white'
+                }`}
+                aria-label={torchOn ? '关闭闪光灯' : '打开闪光灯'}
+              >
+                <FlashGlyph className="h-6 w-6" on={torchOn} />
+              </button>
+            ) : (
+              <span className="h-11 w-11" aria-hidden />
+            )}
+            <button
+              type="button"
+              onClick={() => void handleGalleryClick()}
+              className="flex h-11 w-11 items-center justify-center text-white"
+              aria-label="从相册选择"
+            >
+              <GalleryGlyph className="h-6 w-6" />
+            </button>
+          </div>
+        ) : (
+          <span className="h-11 w-11" aria-hidden />
+        )}
       </div>
 
-      <div className="relative z-10 mt-auto flex flex-col items-center gap-3 px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-        <p className="text-sm text-white/80">{hint}</p>
-        <button
-          type="button"
-          onClick={() => void handleShutterClick()}
-          disabled={cameraStarting || capturing}
-          className="flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-full border-4 border-white bg-white/20 backdrop-blur-sm disabled:opacity-40"
-          aria-label={cameraReady ? '拍照' : '授权并打开相机'}
-        >
-          <span className="h-[3.25rem] w-[3.25rem] rounded-full bg-white" />
-        </button>
-      </div>
+      {showLiveCamera ? (
+        <div className="relative z-10 mt-auto flex flex-col items-center gap-2 px-4 pb-[max(1.75rem,env(safe-area-inset-bottom))]">
+          <p className="text-xs text-white/70">画面不清晰时，轻触要对焦的位置</p>
+          <button
+            type="button"
+            onClick={() => void handleCapture()}
+            disabled={!cameraReady || capturing || cameraStarting}
+            className="flex h-[4.75rem] w-[4.75rem] items-center justify-center rounded-full border-[3px] border-white disabled:opacity-40"
+            aria-label="拍照"
+          >
+            <span className="h-[3.85rem] w-[3.85rem] rounded-full bg-white" />
+          </button>
+        </div>
+      ) : null}
+
+      {showReview ? (
+        <div className="relative z-10 mt-auto flex items-center justify-center gap-8 px-6 pb-[max(1.75rem,env(safe-area-inset-bottom))]">
+          <button
+            type="button"
+            onClick={handleRetake}
+            className="min-w-[5.5rem] rounded-full border border-white/80 px-5 py-2.5 text-[15px] font-medium text-white"
+          >
+            重拍
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleConfirmRecognize()}
+            className="min-w-[5.5rem] rounded-full bg-[#07c160] px-5 py-2.5 text-[15px] font-semibold text-white"
+          >
+            确定
+          </button>
+        </div>
+      ) : null}
 
       <input
         ref={galleryInputRef}
@@ -210,10 +440,52 @@ export function BillCameraCaptureModal({
         onChange={(e) => {
           const file = e.target.files?.[0]
           e.target.value = ''
-          if (file) onImagePicked(file)
+          if (file) enterReview(file)
         }}
       />
     </div>
+  )
+}
+
+function SpinnerGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      className={className}
+      aria-hidden
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="3"
+      />
+      <path
+        className="opacity-90"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"
+      />
+    </svg>
+  )
+}
+
+function BackGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={2}
+      stroke="currentColor"
+      className={className}
+      aria-hidden
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+    </svg>
   )
 }
 
@@ -253,27 +525,31 @@ function GalleryGlyph({ className }: { className?: string }) {
   )
 }
 
-function ScanCameraGlyph({ className }: { className?: string }) {
+function FlashGlyph({ className, on }: { className?: string; on?: boolean }) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       fill="none"
       viewBox="0 0 24 24"
-      strokeWidth={1.5}
+      strokeWidth={1.75}
       stroke="currentColor"
       className={className}
       aria-hidden
     >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"
-      />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z"
-      />
+      {on ? (
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"
+          fill="currentColor"
+        />
+      ) : (
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"
+        />
+      )}
     </svg>
   )
 }

@@ -5,8 +5,8 @@ export type CompressedBillImage = {
   mimeType: 'image/jpeg' | 'image/png' | 'image/webp'
 }
 
-const MAX_SIDE = 1600
-const JPEG_QUALITY = 0.85
+const MAX_SIDE = 1200
+const JPEG_QUALITY = 0.82
 const MAX_FILE_BYTES = 8 * 1024 * 1024
 
 function readFileAsDataUrl(file: File): Promise<string> {

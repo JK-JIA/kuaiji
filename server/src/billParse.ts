@@ -17,6 +17,11 @@ const ARK_CHAT_ENDPOINT =
   'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
 
 const MAX_IMAGE_BASE64_LEN = 4_000_000
+/** 账单 OCR 类任务：关闭深度思考，直接输出 JSON */
+const BILL_VISION_REASONING_EFFORT = 'minimal'
+const BILL_VISION_MAX_TOKENS = 512
+const BILL_VISION_TEMPERATURE = 0
+const BILL_VISION_IMAGE_DETAIL = 'low'
 
 export function billParseModelReady(): boolean {
   return DOUBAO_VISION_MODEL.length > 0
@@ -71,36 +76,14 @@ function buildImageBillParsePrompt(
         : ''
     })()
 
-  return `你是一个批发记账助手，从用户上传的账单图片（手写或打印批发单据、小票、记账本页面）中提取结构化信息，输出严格 JSON。
-
-须提取的字段名必须与系统一致（含自定义列）：${fieldDescriptions || `${buyerLabel}等`}；其中**金额类字段名固定为「${amountLabel}」**（不要用收款、价钱等别的键名）。${productCatalogBlock}
-
-【商品与数量】
-- 多种商品：必须用「商品明细」数组，每项一条：{ "商品":"名称", "数量":"数字+单位（如斤）", "单价":"数字（元/斤，可选）" }；若图片中有**该行货款**或**小计**，再加 "金额":"数字"（该行小计，元）。
-- **数量一律写成数字+单位**，例如：5斤、100斤、12.5公斤、3包；禁止只写数字不写单位（除非图片中完全没有单位则用「斤」）。
-- **每一行的单位必须与图片一致**；同一商品多行时各行单位可不同。
-- **单价**：图片中「每斤3块」「单价2.5」等，写成阿拉伯数字的 "单价" 字段（元/斤）。
-- **「N*M斤」或「N×M斤」**：默认 **单价×数量** —— 单价 **N**（元/斤）、数量 **M斤**。
-- **「N包M元」**：表示数量 **N包**、该行金额 **M**（元）。
-- 多种商品禁止把名称堆在一个字段里用顿号拼接；每种一行。
-
-【金额 ${amountLabel}】
-- 图片中的合计、实收、货款等钱款必须填「${amountLabel}」，值为**阿拉伯数字**（不要中文数字），可带小数。
-
-【${buyerLabel}】可填车牌号、摊位号、姓名、手机尾号等购买方标识。
-- 值只写标识本身，不要把列名复述进值里。
-
-【输出】只输出一个 JSON 对象，不要 markdown、不要解释。若图片模糊或无法识别某字段，可省略该字段，不要编造。
-
-多商品示例：
-{
-  "商品明细": [
-    { "商品": "红薯", "数量": "30斤", "单价": "2", "金额": "60" },
-    { "商品": "白薯", "数量": "15斤", "单价": "2" }
-  ],
-  "${buyerLabel}": "京A8899",
-  "${amountLabel}": "90"
-}`
+  return `从批发账单图片提取 JSON，字段名须与系统一致：${fieldDescriptions || `${buyerLabel}等`}；金额键固定「${amountLabel}」。${productCatalogBlock}
+规则：
+- 多商品用「商品明细」数组，每项 { "商品","数量"(数字+单位如5斤), "单价"(可选), "金额"(行小计，可选) }；禁止顿号拼多个商品。
+- 「N*M斤」「N×M斤」= 单价N、数量M斤；「N包M元」= 数量N包、金额M。
+- ${amountLabel}：合计/实收，阿拉伯数字。
+- ${buyerLabel}：车牌/摊位/姓名/尾号，只写值不写列名。
+只输出 JSON，无 markdown。看不清的字段省略，勿编造。
+示例：{"商品明细":[{"商品":"红薯","数量":"30斤","单价":"2","金额":"60"}],"${buyerLabel}":"京A8899","${amountLabel}":"60"}`
 }
 
 function pickArkErrorMessage(errorData: unknown, errorText: string): string {
@@ -188,7 +171,10 @@ async function callArkVision(
           content: [
             {
               type: 'image_url',
-              image_url: { url: imageDataUrl },
+              image_url: {
+                url: imageDataUrl,
+                detail: BILL_VISION_IMAGE_DETAIL,
+              },
             },
             {
               type: 'text',
@@ -197,6 +183,10 @@ async function callArkVision(
           ],
         },
       ],
+      max_tokens: BILL_VISION_MAX_TOKENS,
+      temperature: BILL_VISION_TEMPERATURE,
+      reasoning_effort: BILL_VISION_REASONING_EFFORT,
+      thinking: { type: 'disabled' },
     }),
   })
   if (!response.ok) {
