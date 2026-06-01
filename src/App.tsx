@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppUpdateGate } from './components/AppUpdateGate'
+import { WelcomeOfferGate } from './components/WelcomeOfferGate'
 import { BottomNav } from './components/BottomNav'
 import { AuthProvider } from './context/AuthContext'
 import { LedgerProvider } from './context/LedgerContext'
@@ -25,6 +26,7 @@ export default function App() {
       <LedgerProvider>
       <BrowserRouter>
         <AppUpdateGate />
+        <WelcomeOfferGate />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route

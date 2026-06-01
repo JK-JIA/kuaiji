@@ -170,6 +170,8 @@ export function ProRedeemSheet({
   membershipExpiresAt,
   onNeedLogin,
   onRedeem,
+  onClaimWelcome,
+  welcomeMembershipClaimed,
   onPurchaseSuccess,
   onCancelMembership,
 }: {
@@ -179,13 +181,17 @@ export function ProRedeemSheet({
   hasToken: boolean
   membershipActive: boolean
   membershipExpiresAt: string | null
+  welcomeMembershipClaimed: boolean
   onNeedLogin: () => void
   onRedeem: (code: string) => Promise<void>
+  onClaimWelcome: () => Promise<void>
   onPurchaseSuccess?: () => Promise<void>
   onCancelMembership?: () => Promise<void>
 }) {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
+  const [welcomeBusy, setWelcomeBusy] = useState(false)
+  const [welcomeMsg, setWelcomeMsg] = useState('')
   const [cancelBusy, setCancelBusy] = useState(false)
   const [purchaseBusy, setPurchaseBusy] = useState<MembershipPlanId | null>(null)
   const [plans, setPlans] = useState<MembershipPlanInfo[]>([])
@@ -201,10 +207,33 @@ export function ProRedeemSheet({
     if (open) {
       setCode('')
       setPayMsg('')
+      setWelcomeMsg('')
       setPayDebugOpen(false)
       setPayDebugCopied(false)
     }
   }, [open])
+
+  const claimWelcome = async () => {
+    if (welcomeBusy || busy || purchaseBusy) return
+    if (!hasToken) {
+      onNeedLogin()
+      return
+    }
+    setWelcomeBusy(true)
+    setWelcomeMsg('')
+    try {
+      await onClaimWelcome()
+      setWelcomeMsg('领取成功，专业版已开通')
+      setTimeout(() => onClose(), 800)
+    } catch (e) {
+      setWelcomeMsg(e instanceof Error ? e.message : '领取失败')
+    } finally {
+      setWelcomeBusy(false)
+    }
+  }
+
+  const showWelcomeOffer =
+    apiBase && hasToken && !welcomeMembershipClaimed
 
   useEffect(() => {
     if (!open || !apiBase) return
@@ -421,6 +450,30 @@ export function ProRedeemSheet({
             </svg>
           </button>
         </div>
+
+        {showWelcomeOffer ? (
+          <div className="mb-4 rounded-2xl border border-amber-400/25 bg-amber-500/10 px-4 py-3.5">
+            <p className="text-[13px] font-semibold text-amber-200">新用户优惠</p>
+            <p className="mt-1 text-[12px] leading-relaxed text-kj-muted">
+              免费领取 1 个月专业版会员，含云端同步、语音记账等权益（每账号限领一次）。
+            </p>
+            {welcomeMsg ? (
+              <p className="mt-2 text-[12px] leading-relaxed text-amber-200/90">
+                {welcomeMsg}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              disabled={
+                welcomeBusy || busy || cancelBusy || purchaseBusy !== null
+              }
+              onClick={() => void claimWelcome()}
+              className="kuaiji-pro-cta-btn mt-3 w-full py-2.5 text-[14px] disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {welcomeBusy ? '领取中…' : '免费领取 1 个月会员'}
+            </button>
+          </div>
+        ) : null}
 
         {nativePay ? (
           <div className="mb-4 space-y-2">

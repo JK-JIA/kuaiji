@@ -138,7 +138,7 @@ export function StatsPage() {
   const [productShareSort, setProductShareSort] =
     useState<StatsJinAmtSort | null>(null)
   const [buyerSummarySort, setBuyerSummarySort] =
-    useState<BuyerSummarySort | null>(null)
+    useState<BuyerSummarySort>({ key: 'outstanding', dir: 'desc' })
   const [statsFilterBuyer, setStatsFilterBuyer] = useState('')
   const [statsFilterProduct, setStatsFilterProduct] = useState('')
   const [productPieMetric, setProductPieMetric] = useState<'jin' | 'amount'>(
@@ -147,7 +147,7 @@ export function StatsPage() {
   const [productShareView, setProductShareView] =
     useState<StatsShareViewMode>('chart')
   const [buyerStatsView, setBuyerStatsView] =
-    useState<StatsShareViewMode>('chart')
+    useState<StatsShareViewMode>('list')
   const [statsFilterOpen, setStatsFilterOpen] = useState(false)
   const statsFilterRef = useRef<HTMLDivElement>(null)
 
@@ -1212,23 +1212,6 @@ function BuyerSummaryTable({
           <th className={`${th} ${hasOutCol ? 'w-[22%]' : 'w-[28%]'}`}>
             {buyerFieldName}
           </th>
-          <SortableBuyerSummaryTh
-            label={`总${qtyUnitLabel}`}
-            sortKey="jin"
-            sort={sort}
-            onSortKey={onSortKey}
-            relaxed={relaxed}
-            widthClass={metricW}
-          />
-          <SortableBuyerSummaryTh
-            label="总金额"
-            sortKey="amount"
-            sort={sort}
-            onSortKey={onSortKey}
-            disabled={!amountId}
-            relaxed={relaxed}
-            widthClass={metricW}
-          />
           {hasOutCol ? (
             <SortableBuyerSummaryTh
               label="未核账"
@@ -1239,6 +1222,23 @@ function BuyerSummaryTable({
               widthClass={metricW}
             />
           ) : null}
+          <SortableBuyerSummaryTh
+            label="总金额"
+            sortKey="amount"
+            sort={sort}
+            onSortKey={onSortKey}
+            disabled={!amountId}
+            relaxed={relaxed}
+            widthClass={metricW}
+          />
+          <SortableBuyerSummaryTh
+            label={`总${qtyUnitLabel}`}
+            sortKey="jin"
+            sort={sort}
+            onSortKey={onSortKey}
+            relaxed={relaxed}
+            widthClass={metricW}
+          />
         </tr>
       </thead>
       <tbody>
@@ -1267,20 +1267,22 @@ function BuyerSummaryTable({
               className="border-b border-stone-50 last:border-0"
             >
               <td className={onBuyerClick ? 'p-0' : tdText}>{buyerCell}</td>
-              <td className={metricTd}>
-                {row.jin > 0 ? (
-                  <StatsShareMetricCell
-                    valueLine={`${fmtNum(row.jin)} ${qtyUnitLabel}`}
-                    pct={jinPct}
-                    barPct={jinBar}
-                    barClassName="bg-teal-500"
-                    valLineClass={valLine}
-                    pctTextClass={pctText}
-                  />
-                ) : (
-                  <span className="text-kj-muted">—</span>
-                )}
-              </td>
+              {hasOutCol ? (
+                <td className={metricTd}>
+                  {row.outstanding > 0.005 ? (
+                    <StatsShareMetricCell
+                      valueLine={`¥${fmtMoney(row.outstanding)}`}
+                      pct={outPct}
+                      barPct={outBar}
+                      barClassName="bg-amber-500"
+                      valLineClass={valLine}
+                      pctTextClass={pctText}
+                    />
+                  ) : (
+                    <span className="text-kj-muted">—</span>
+                  )}
+                </td>
+              ) : null}
               <td className={metricTd}>
                 {amountId ? (
                   row.amount > 0.005 ? (
@@ -1299,22 +1301,20 @@ function BuyerSummaryTable({
                   <span className="text-kj-muted">—</span>
                 )}
               </td>
-              {hasOutCol ? (
-                <td className={metricTd}>
-                  {row.outstanding > 0.005 ? (
-                    <StatsShareMetricCell
-                      valueLine={`¥${fmtMoney(row.outstanding)}`}
-                      pct={outPct}
-                      barPct={outBar}
-                      barClassName="bg-amber-500"
-                      valLineClass={valLine}
-                      pctTextClass={pctText}
-                    />
-                  ) : (
-                    <span className="text-kj-muted">—</span>
-                  )}
-                </td>
-              ) : null}
+              <td className={metricTd}>
+                {row.jin > 0 ? (
+                  <StatsShareMetricCell
+                    valueLine={`${fmtNum(row.jin)} ${qtyUnitLabel}`}
+                    pct={jinPct}
+                    barPct={jinBar}
+                    barClassName="bg-teal-500"
+                    valLineClass={valLine}
+                    pctTextClass={pctText}
+                  />
+                ) : (
+                  <span className="text-kj-muted">—</span>
+                )}
+              </td>
             </tr>
           )
         })}

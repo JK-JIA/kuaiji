@@ -20,20 +20,21 @@ const DEFAULT_RELEASES_JSON_URL = 'http://8.153.12.131:8080/releases.json'
 export type AndroidLatestDisabled = { enabled: false }
 export type AndroidLatestEnabled = {
   enabled: true
-  /** 来自 manifest 的 versionCode；未填则为 0，此时用 versionName 做 semver 比较 */
+  /** 当前应执行的步骤：整包优先，壳已最新后再热更 */
+  preferredUpdate: 'apk' | 'bundle'
+  /** 弹窗展示的版本号（对应当前步骤） */
   versionCode: number
   versionName: string
-  /** 整包 APK 下载地址；无 file 时为空串 */
+  /** 整包 APK 下载地址；当前步骤为 bundle 时也可能保留，供提示文案 */
   apkUrl: string
-  /** 热更新 zip（与 APK 同目录 downloads/）；与 apkUrl 可同时存在 */
   bundleUrl?: string
-  /** 热更新包版本号（传给 Capgo），默认同 versionName */
   bundleVersion?: string
-  /** 最低原生 versionCode；当前壳低于此值时只走 APK、不发热更 */
   minNativeVersionCode?: number
   releaseNotes: string
-  /** 与首条 release 对应，写入 localStorage 跳过 */
   skipTag: string
+  /** 完成当前整包后，重新打开是否还需热更 */
+  pendingBundleAfterApk?: boolean
+  pendingBundleVersion?: string
 }
 export type AndroidLatestResponse = AndroidLatestDisabled | AndroidLatestEnabled
 
@@ -61,13 +62,208 @@ export function getReleasesManifestUrl(): string | undefined {
   return undefined
 }
 
-function releaseItemTag(item: ReleaseManifestItem): string {
+function apkSkipTag(item: ReleaseManifestItem): string {
   const vc = item.versionCode
-  const b = String(item.bundle ?? '').trim()
+  const f = String(item.file ?? '').trim()
   if (typeof vc === 'number' && Number.isFinite(vc) && vc > 0) {
-    return b ? `vc:${vc}|b:${b}` : `vc:${vc}`
+    return `apk|vc:${vc}|f:${f}`
   }
-  return `v:${String(item.version ?? '').trim()}|f:${String(item.file ?? '').trim()}|b:${b}`
+  return `apk|v:${String(item.version ?? '').trim()}|f:${f}`
+}
+
+function bundleSkipTag(item: ReleaseManifestItem): string {
+  const b = String(item.bundle ?? '').trim()
+  const bv = String(item.bundleVersion ?? item.version ?? '').trim()
+  return `bundle|bv:${bv}|b:${b}`
+}
+
+export function positiveInt(v: unknown): number | undefined {
+  const n = typeof v === 'number' ? v : parseInt(String(v ?? ''), 10)
+  return Number.isFinite(n) && n > 0 ? n : undefined
+}
+
+/** 列表中取 versionCode / 版本号最大的 APK 记录 */
+export function pickLatestApkEntry(
+  items: ReleaseManifestItem[],
+): ReleaseManifestItem | null {
+  let best: ReleaseManifestItem | null = null
+  let bestVc = 0
+  let bestSem = ''
+  for (const item of items) {
+    if (!String(item?.file ?? '').trim()) continue
+    const vc = positiveInt(item.versionCode) ?? 0
+    const sem = String(item.version ?? '').trim()
+    if (!best) {
+      best = item
+      bestVc = vc
+      bestSem = sem
+      continue
+    }
+    if (vc > 0 && bestVc > 0) {
+      if (vc > bestVc) {
+        best = item
+        bestVc = vc
+        bestSem = sem
+      }
+      continue
+    }
+    if (vc > bestVc) {
+      best = item
+      bestVc = vc
+      bestSem = sem
+      continue
+    }
+    if (sem && (!bestSem || compareSemver(sem, bestSem) > 0)) {
+      best = item
+      bestVc = vc
+      bestSem = sem
+    }
+  }
+  return best
+}
+
+/** 列表中取 bundleVersion 最大的热更记录 */
+export function pickLatestBundleEntry(
+  items: ReleaseManifestItem[],
+): ReleaseManifestItem | null {
+  let best: ReleaseManifestItem | null = null
+  let bestBv = ''
+  for (const item of items) {
+    if (!String(item?.bundle ?? '').trim()) continue
+    const bv = String(item.bundleVersion ?? item.version ?? '').trim()
+    if (!bv) continue
+    if (!best || compareSemver(bv, bestBv) > 0) {
+      best = item
+      bestBv = bv
+    }
+  }
+  return best
+}
+
+export type ResolveAndroidUpdateInput = {
+  items: ReleaseManifestItem[]
+  manifestOrigin: string
+  localVersionCode: number
+  localVersionName: string
+  localBundleVersion: string
+  capgoAvailable: boolean
+}
+
+/**
+ * 决定本次更新步骤：若整包 APK 落后于列表最新，则先 APK；壳已满足后再推热更。
+ */
+export function resolveAndroidUpdatePlan(
+  input: ResolveAndroidUpdateInput,
+): AndroidLatestResponse {
+  const { items, manifestOrigin, localVersionCode, localVersionName } = input
+  const apkEntry = pickLatestApkEntry(items)
+  const bundleEntry = pickLatestBundleEntry(items)
+  if (!apkEntry && !bundleEntry) return { enabled: false }
+
+  const origin = manifestOrigin.replace(/\/$/, '')
+
+  let apkUrl = ''
+  let apkVersionCode = 0
+  let apkVersionName = ''
+  let apkNotes = ''
+  if (apkEntry) {
+    const file = String(apkEntry.file ?? '')
+      .trim()
+      .replace(/^\/+/, '')
+    apkUrl = `${origin}/downloads/${encodeURIComponent(file)}`
+    apkVersionCode = positiveInt(apkEntry.versionCode) ?? 0
+    apkVersionName = String(apkEntry.version ?? '').trim()
+    apkNotes = String(apkEntry.notes ?? '').trim()
+  }
+
+  let bundleUrl: string | undefined
+  let bundleVersion: string | undefined
+  let minNativeVersionCode: number | undefined
+  let bundleNotes = ''
+  if (bundleEntry) {
+    const bundleFile = String(bundleEntry.bundle ?? '')
+      .trim()
+      .replace(/^\/+/, '')
+    bundleUrl = `${origin}/downloads/${encodeURIComponent(bundleFile)}`
+    bundleVersion =
+      String(bundleEntry.bundleVersion ?? bundleEntry.version ?? '').trim() ||
+      undefined
+    minNativeVersionCode = positiveInt(bundleEntry.minNativeVersionCode)
+    bundleNotes = String(bundleEntry.notes ?? '').trim()
+  }
+
+  const apkForCompare: AndroidLatestEnabled = {
+    enabled: true,
+    preferredUpdate: 'apk',
+    versionCode: apkVersionCode,
+    versionName: apkVersionName,
+    apkUrl,
+    releaseNotes: apkNotes,
+    skipTag: apkSkipTag(apkEntry ?? {}),
+  }
+
+  const needsApk = Boolean(
+    apkUrl && isRemoteNewerThanInstalled(apkForCompare, localVersionCode, localVersionName),
+  )
+
+  const shellTooOldForBundle = Boolean(
+    bundleUrl &&
+      minNativeVersionCode != null &&
+      minNativeVersionCode > localVersionCode,
+  )
+
+  const needsBundle = Boolean(
+    bundleUrl &&
+      input.capgoAvailable &&
+      !shellTooOldForBundle &&
+      !needsApk &&
+      isRemoteBundleNewerThanLocal(
+        bundleVersion ?? '',
+        input.localBundleVersion,
+      ),
+  )
+
+  if (!needsApk && !needsBundle) return { enabled: false }
+
+  const pendingBundleAfterApk = Boolean(
+    needsApk &&
+      bundleUrl &&
+      input.capgoAvailable &&
+      isRemoteBundleNewerThanLocal(
+        bundleVersion ?? '',
+        input.localBundleVersion,
+      ),
+  )
+
+  if (needsApk) {
+    return {
+      enabled: true,
+      preferredUpdate: 'apk',
+      versionCode: apkVersionCode,
+      versionName: apkVersionName,
+      apkUrl,
+      bundleUrl,
+      bundleVersion,
+      minNativeVersionCode,
+      releaseNotes: apkNotes,
+      skipTag: apkSkipTag(apkEntry!),
+      pendingBundleAfterApk,
+      pendingBundleVersion: bundleVersion,
+    }
+  }
+
+  return {
+    enabled: true,
+    preferredUpdate: 'bundle',
+    versionCode: 0,
+    versionName: bundleVersion ?? String(bundleEntry?.version ?? '').trim(),
+    apkUrl,
+    bundleUrl,
+    bundleVersion,
+    minNativeVersionCode,
+    releaseNotes: bundleNotes,
+    skipTag: bundleSkipTag(bundleEntry!),
+  }
 }
 
 /** a > b 返回正数；用于 manifest 仅有 version 字符串时 */
@@ -116,10 +312,9 @@ async function fetchUrlAsText(manifestUrl: string): Promise<string> {
   }
 }
 
-/** 从记账本下载站 `releases.json` 取列表第一条为最新版（与 website 管理后台顺序一致） */
-export async function fetchLatestFromReleasesManifest(
+export async function loadReleasesManifest(
   manifestUrl: string,
-): Promise<AndroidLatestResponse> {
+): Promise<{ items: ReleaseManifestItem[]; origin: string }> {
   const text = await fetchUrlAsText(manifestUrl)
   let data: { items?: ReleaseManifestItem[] }
   try {
@@ -128,50 +323,34 @@ export async function fetchLatestFromReleasesManifest(
     throw new Error('版本列表不是合法 JSON')
   }
   const items = Array.isArray(data.items) ? data.items : []
-  const item = items[0]
-  const fileRaw = String(item?.file ?? '').trim()
-  const bundleRaw = String(item?.bundle ?? '').trim()
-  if (!fileRaw && !bundleRaw) return { enabled: false }
+  const origin = new URL(manifestUrl).origin
+  return { items, origin }
+}
 
-  const base = new URL(manifestUrl)
-  const file = fileRaw.replace(/^\/+/, '')
-  const apkUrl = file
-    ? `${base.origin}/downloads/${encodeURIComponent(file)}`
-    : ''
-  const bundleUrl = bundleRaw
-    ? `${base.origin}/downloads/${encodeURIComponent(bundleRaw)}`
-    : undefined
+/** 拉取版本列表并解析：先整包 APK，再热更新 zip */
+export async function fetchAndroidUpdatePlan(
+  manifestUrl: string,
+  localVersionCode: number,
+  localVersionName: string,
+  localBundleVersion: string,
+  capgoAvailable: boolean,
+): Promise<AndroidLatestResponse> {
+  const { items, origin } = await loadReleasesManifest(manifestUrl)
+  return resolveAndroidUpdatePlan({
+    items,
+    manifestOrigin: origin,
+    localVersionCode,
+    localVersionName,
+    localBundleVersion,
+    capgoAvailable,
+  })
+}
 
-  const versionName = String(item?.version ?? '').trim()
-  const notes = String(item?.notes ?? '').trim()
-  const versionCode =
-    typeof item?.versionCode === 'number' &&
-    Number.isFinite(item.versionCode) &&
-    item.versionCode > 0
-      ? item.versionCode
-      : 0
-
-  const minNative =
-    typeof item?.minNativeVersionCode === 'number' &&
-    Number.isFinite(item.minNativeVersionCode) &&
-    item.minNativeVersionCode > 0
-      ? item.minNativeVersionCode
-      : undefined
-
-  const bv = String(item?.bundleVersion ?? '').trim()
-  const bundleVersion = bv || versionName || undefined
-
-  return {
-    enabled: true,
-    versionCode,
-    versionName,
-    apkUrl,
-    bundleUrl,
-    bundleVersion,
-    minNativeVersionCode: minNative,
-    releaseNotes: notes,
-    skipTag: releaseItemTag(item ?? {}),
-  }
+/** @deprecated 使用 fetchAndroidUpdatePlan */
+export async function fetchLatestFromReleasesManifest(
+  manifestUrl: string,
+): Promise<AndroidLatestResponse> {
+  return fetchAndroidUpdatePlan(manifestUrl, 0, '', '', true)
 }
 
 export function getSkippedTag(): string | null {

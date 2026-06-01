@@ -14,8 +14,8 @@ android {
         applicationId "com.example.kuaiji"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 84
-        versionName "1.0.84"
+        versionCode 86
+        versionName "1.0.86"
         buildConfigField "String", "ALIYUN_AUTH_SECRET", "\"${aliyunAuthSecret}\""
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

@@ -57,6 +57,8 @@ const prisma = new PrismaClient()
 
 /** 与 ensureDefaultAdmin、永久兑换码一致 */
 const MEMBERSHIP_FAR_END = new Date('2099-12-31T15:59:59.000Z')
+/** 新用户登录后可免费领取的会员天数（每账号一次） */
+const WELCOME_MEMBERSHIP_DAYS = 30
 
 const PORT = Number(process.env.PORT) || 3001
 const JWT_SECRET =
@@ -190,13 +192,25 @@ function userJson(user: {
   email: string
   phone: string | null
   membershipExpiresAt: Date | null
+  welcomeMembershipClaimedAt?: Date | null
 }) {
   return {
     id: user.id,
     email: user.email,
     phone: user.phone,
     membershipExpiresAt: user.membershipExpiresAt?.toISOString() ?? null,
+    welcomeMembershipClaimed: Boolean(user.welcomeMembershipClaimedAt),
   }
+}
+
+function extendMembershipExpires(
+  current: Date | null | undefined,
+  grantedDays: number,
+): Date {
+  const now = new Date()
+  const base =
+    membershipActive(current) && current ? current : now
+  return new Date(base.getTime() + grantedDays * 24 * 60 * 60 * 1000)
 }
 
 async function loginOrRegisterByPhone(phone: string) {
@@ -764,6 +778,46 @@ app.post('/api/membership/cancel', async (req, res) => {
   res.json(userJson(user))
 })
 
+app.post('/api/membership/claim-welcome', async (req, res) => {
+  const token = authHeader(req)
+  if (!token) {
+    res.status(401).json({ error: '未登录' })
+    return
+  }
+  const userId = userIdFromToken(token)
+  if (!userId) {
+    res.status(401).json({ error: '无效令牌' })
+    return
+  }
+  try {
+    const user = await prisma.$transaction(async (tx) => {
+      const u = await tx.user.findUniqueOrThrow({ where: { id: userId } })
+      if (u.welcomeMembershipClaimedAt) {
+        throw new Error('WELCOME_ALREADY_CLAIMED')
+      }
+      const now = new Date()
+      return tx.user.update({
+        where: { id: userId },
+        data: {
+          welcomeMembershipClaimedAt: now,
+          membershipExpiresAt: extendMembershipExpires(
+            u.membershipExpiresAt,
+            WELCOME_MEMBERSHIP_DAYS,
+          ),
+        },
+      })
+    })
+    res.json(userJson(user))
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : ''
+    if (msg === 'WELCOME_ALREADY_CLAIMED') {
+      res.status(400).json({ error: '新用户优惠已领取过' })
+      return
+    }
+    throw e
+  }
+})
+
 app.post('/api/membership/redeem', async (req, res) => {
   const token = authHeader(req)
   if (!token) {
@@ -805,12 +859,10 @@ app.post('/api/membership/redeem', async (req, res) => {
       if (row.grantLifetime) {
         membershipExpiresAt = MEMBERSHIP_FAR_END
       } else {
-        const base =
-          membershipActive(u.membershipExpiresAt) && u.membershipExpiresAt
-            ? u.membershipExpiresAt
-            : now
-        const addMs = row.grantedDays * 24 * 60 * 60 * 1000
-        membershipExpiresAt = new Date(base.getTime() + addMs)
+        membershipExpiresAt = extendMembershipExpires(
+          u.membershipExpiresAt,
+          row.grantedDays,
+        )
       }
 
       return tx.user.update({

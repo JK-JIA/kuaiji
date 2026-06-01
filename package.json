@@ -1,7 +1,7 @@
 {
   "name": "ledger-notes",
   "private": true,
-  "version": "1.0.85",
+  "version": "1.0.87",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -22,6 +22,7 @@
     "@capgo/capacitor-updater": "^8.45.11",
     "date-fns": "^4.1.0",
     "dexie": "^4.4.2",
+    "exceljs": "^4.4.0",
     "html2canvas": "^1.4.1",
     "pinyin-pro": "^3.28.1",
     "react": "^19.2.5",

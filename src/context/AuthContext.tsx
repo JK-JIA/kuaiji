@@ -13,6 +13,7 @@ import {
   apiRegister,
   apiSmsLogin,
   cancelMembership,
+  claimWelcomeMembership,
   clearSession,
   fetchMe,
   getApiBase,
@@ -31,6 +32,10 @@ type AuthContextValue = {
   token: string | null
   email: string | null
   membershipExpiresAt: string | null
+  /** 是否已领取新用户 1 个月会员优惠 */
+  welcomeMembershipClaimed: boolean
+  /** 已登录时是否已完成至少一次 /api/me 同步（避免未同步前误弹新用户优惠） */
+  profileLoaded: boolean
   /** 会员有效期内可使用云端账本 */
   membershipActive: boolean
   /** 已配置 API、已登录且会员有效 */
@@ -41,6 +46,7 @@ type AuthContextValue = {
   oneClickLogin: (accessToken: string) => Promise<void>
   sendSms: (phone: string) => Promise<void>
   redeem: (code: string) => Promise<void>
+  claimWelcomeMembership: () => Promise<void>
   cancelMembership: () => Promise<void>
   refreshProfile: () => Promise<void>
   logout: () => void
@@ -55,6 +61,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [membershipExpiresAt, setMembershipExpiresAt] = useState<
     string | null
   >(() => getStoredMembershipExpires())
+  const [welcomeMembershipClaimed, setWelcomeMembershipClaimed] =
+    useState(false)
+  const [profileLoaded, setProfileLoaded] = useState(
+    () => !getStoredToken() || !getApiBase(),
+  )
 
   const membershipActive = membershipActiveFromIso(membershipExpiresAt)
   const useRemoteLedger = Boolean(apiBase && token && membershipActive)
@@ -65,36 +76,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       em: string,
       mem: string | null | undefined,
       _phone?: string | null,
+      welcomeClaimed?: boolean,
     ) => {
       persistSession(t, em, mem ?? null, _phone ?? null)
       setToken(t)
       setEmail(em)
       setMembershipExpiresAt(mem ?? null)
       setStoredMembershipExpires(mem ?? null)
+      if (welcomeClaimed !== undefined) {
+        setWelcomeMembershipClaimed(welcomeClaimed)
+      }
     },
     [],
   )
 
-  const refreshProfile = useCallback(async () => {
-    if (!apiBase || !token) return
-    const me = await fetchMe(apiBase, token)
+  const applyMe = useCallback((me: Awaited<ReturnType<typeof fetchMe>>) => {
     setMembershipExpiresAt(me.membershipExpiresAt)
     setStoredMembershipExpires(me.membershipExpiresAt)
     setEmail(me.email)
-  }, [apiBase, token])
+    setWelcomeMembershipClaimed(me.welcomeMembershipClaimed)
+  }, [])
+
+  const refreshProfile = useCallback(async () => {
+    if (!apiBase || !token) return
+    const me = await fetchMe(apiBase, token)
+    applyMe(me)
+  }, [apiBase, token, applyMe])
 
   useEffect(() => {
-    if (!apiBase || !token) return
-    void refreshProfile().catch(() => {
-      /* 离线或令牌失效时保留本地缓存 */
-    })
+    if (!apiBase || !token) {
+      setProfileLoaded(true)
+      return
+    }
+    setProfileLoaded(false)
+    void refreshProfile()
+      .catch(() => {
+        /* 离线或令牌失效时保留本地缓存 */
+      })
+      .finally(() => setProfileLoaded(true))
   }, [apiBase, token, refreshProfile])
 
   const login = useCallback(
     async (em: string, pw: string) => {
       if (!apiBase) throw new Error('未配置 VITE_API_URL')
       const r = await apiLogin(apiBase, em.trim(), pw)
-      applySession(r.token, r.email, r.membershipExpiresAt, r.phone)
+      applySession(
+        r.token,
+        r.email,
+        r.membershipExpiresAt,
+        r.phone,
+        r.welcomeMembershipClaimed,
+      )
     },
     [apiBase, applySession],
   )
@@ -103,7 +135,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (em: string, pw: string) => {
       if (!apiBase) throw new Error('未配置 VITE_API_URL')
       const r = await apiRegister(apiBase, em.trim(), pw)
-      applySession(r.token, r.email, r.membershipExpiresAt, r.phone)
+      applySession(
+        r.token,
+        r.email,
+        r.membershipExpiresAt,
+        r.phone,
+        r.welcomeMembershipClaimed,
+      )
     },
     [apiBase, applySession],
   )
@@ -112,7 +150,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (phone: string, code: string) => {
       if (!apiBase) throw new Error('未配置 VITE_API_URL')
       const r = await apiSmsLogin(apiBase, phone, code)
-      applySession(r.token, r.email, r.membershipExpiresAt, r.phone)
+      applySession(
+        r.token,
+        r.email,
+        r.membershipExpiresAt,
+        r.phone,
+        r.welcomeMembershipClaimed,
+      )
     },
     [apiBase, applySession],
   )
@@ -121,7 +165,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (accessToken: string) => {
       if (!apiBase) throw new Error('未配置 VITE_API_URL')
       const r = await apiOneClickLogin(apiBase, accessToken)
-      applySession(r.token, r.email, r.membershipExpiresAt, r.phone)
+      applySession(
+        r.token,
+        r.email,
+        r.membershipExpiresAt,
+        r.phone,
+        r.welcomeMembershipClaimed,
+      )
     },
     [apiBase, applySession],
   )
@@ -138,24 +188,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (code: string) => {
       if (!apiBase || !token) throw new Error('未登录')
       const me = await redeemMembership(apiBase, token, code)
-      setMembershipExpiresAt(me.membershipExpiresAt)
-      setStoredMembershipExpires(me.membershipExpiresAt)
+      applyMe(me)
     },
-    [apiBase, token],
+    [apiBase, token, applyMe],
   )
+
+  const claimWelcomeMembershipFn = useCallback(async () => {
+    if (!apiBase || !token) throw new Error('未登录')
+    const me = await claimWelcomeMembership(apiBase, token)
+    applyMe(me)
+  }, [apiBase, token, applyMe])
 
   const cancelMembershipFn = useCallback(async () => {
     if (!apiBase || !token) throw new Error('未登录')
     const me = await cancelMembership(apiBase, token)
-    setMembershipExpiresAt(me.membershipExpiresAt)
-    setStoredMembershipExpires(me.membershipExpiresAt)
-  }, [apiBase, token])
+    applyMe(me)
+  }, [apiBase, token, applyMe])
 
   const logout = useCallback(() => {
     clearSession()
     setToken(null)
     setEmail(null)
     setMembershipExpiresAt(null)
+    setWelcomeMembershipClaimed(false)
+    setProfileLoaded(true)
   }, [])
 
   const value = useMemo(
@@ -164,6 +220,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       token,
       email,
       membershipExpiresAt,
+      welcomeMembershipClaimed,
+      profileLoaded,
       membershipActive,
       useRemoteLedger,
       login,
@@ -172,6 +230,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       oneClickLogin,
       sendSms,
       redeem,
+      claimWelcomeMembership: claimWelcomeMembershipFn,
       cancelMembership: cancelMembershipFn,
       refreshProfile,
       logout,
@@ -181,6 +240,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       token,
       email,
       membershipExpiresAt,
+      welcomeMembershipClaimed,
+      profileLoaded,
       membershipActive,
       useRemoteLedger,
       login,
@@ -189,6 +250,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       oneClickLogin,
       sendSms,
       redeem,
+      claimWelcomeMembershipFn,
       cancelMembershipFn,
       refreshProfile,
       logout,

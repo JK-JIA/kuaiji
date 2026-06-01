@@ -2,7 +2,7 @@ import { Capacitor } from '@capacitor/core'
 import { Directory, Filesystem } from '@capacitor/filesystem'
 import { Share } from '@capacitor/share'
 import type { FieldDef, LedgerRecord } from '../types'
-import { expandProductLines, getAmountFieldId } from './recordHelpers'
+import { getAmountFieldId, getUnitPriceFieldId } from './recordHelpers'
 import { isShareDismissedByUser } from './shareDismissed'
 
 export const LAST_BACKUP_KEY = 'kuaiji_last_backup_at'
@@ -54,11 +54,18 @@ function blobToBase64(blob: Blob): Promise<string> {
   })
 }
 
-/** 桌面用 <a download>；手机 WebView 常无效，改用系统分享或写缓存后 Share */
-async function saveCsvBlobWithMobileFallback(filename: string, blob: Blob) {
-  const file = new File([blob], filename, {
-    type: 'text/csv;charset=utf-8',
-  })
+type ShareBlobOptions = {
+  filename: string
+  blob: Blob
+  mimeType: string
+  title: string
+  text: string
+  dialogTitle: string
+}
+
+async function shareBlobWithMobileFallback(options: ShareBlobOptions) {
+  const { filename, blob, mimeType, title, text, dialogTitle } = options
+  const file = new File([blob], filename, { type: mimeType })
 
   if (
     typeof navigator !== 'undefined' &&
@@ -69,7 +76,7 @@ async function saveCsvBlobWithMobileFallback(filename: string, blob: Blob) {
     try {
       await navigator.share({
         files: [file],
-        title: '记账 CSV 备份',
+        title,
       })
       return
     } catch (e) {
@@ -91,10 +98,10 @@ async function saveCsvBlobWithMobileFallback(filename: string, blob: Blob) {
     })
     try {
       await Share.share({
-        title: '导出 CSV 备份',
-        text: '在分享面板选择保存到文件或发送到电脑',
+        title,
+        text,
         url: uriResult.uri,
-        dialogTitle: '导出 CSV',
+        dialogTitle,
       })
     } catch (shareErr) {
       if (!isShareDismissedByUser(shareErr)) throw shareErr
@@ -103,6 +110,32 @@ async function saveCsvBlobWithMobileFallback(filename: string, blob: Blob) {
   }
 
   downloadBlob(filename, blob)
+}
+
+async function saveXlsxBlobWithMobileFallback(filename: string, blob: Blob) {
+  await shareBlobWithMobileFallback({
+    filename,
+    blob,
+    mimeType:
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    title: '记账 Excel 账单',
+    text: '在分享面板选择微信或保存到文件',
+    dialogTitle: '导出 Excel',
+  })
+}
+
+export async function sharePngBlobWithMobileFallback(
+  filename: string,
+  blob: Blob,
+) {
+  await shareBlobWithMobileFallback({
+    filename,
+    blob,
+    mimeType: 'image/png',
+    title: '账单小票 PNG',
+    text: '在分享面板选择微信或保存到相册',
+    dialogTitle: '导出 PNG 小票',
+  })
 }
 
 /** 解析含引号与逗号的 CSV 全文为二维数组 */
@@ -214,6 +247,156 @@ function newLineItemId(): string {
   return `li_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
 }
 
+/** 简洁导出列（导入 CSV 仍使用；导出为 Excel 表格） */
+export const SIMPLE_CSV_HEADERS = [
+  '购买方',
+  '日期',
+  '商品',
+  '单价',
+  '金额',
+  '总金额',
+  '未核账',
+  '已核账',
+] as const
+
+function fmtCsvMoney(n: number): string {
+  if (!Number.isFinite(n)) return ''
+  return (Math.round(n * 100) / 100).toFixed(2)
+}
+
+function isSimpleExportCsvHeaders(headers: string[]): boolean {
+  const norm = new Set(headers.map((h) => h.trim()))
+  return SIMPLE_CSV_HEADERS.every((h) => norm.has(h))
+}
+
+function parseSimpleLedgerImportCsv(
+  rows: string[][],
+  fields: FieldDef[],
+): { ok: true; records: LedgerRecord[] } | { ok: false; error: string } {
+  const headers = rows[0].map((h) => h.trim())
+  const col = (name: string) => headers.indexOf(name)
+  const iPlate = col('购买方')
+  const iDate = col('日期')
+  const iProduct = col('商品')
+  const iUnit = col('单价')
+  const iLineAmt = col('金额')
+  const iTotal = col('总金额')
+  const iOut = col('未核账')
+  const iRec = col('已核账')
+  if (
+    iPlate < 0 ||
+    iDate < 0 ||
+    iProduct < 0 ||
+    iLineAmt < 0 ||
+    iTotal < 0 ||
+    iOut < 0 ||
+    iRec < 0
+  ) {
+    return { ok: false, error: 'CSV 表头不完整，需包含：购买方、日期、商品、金额、总金额、未核账、已核账' }
+  }
+
+  const plateId = fields.find((f) => f.key === 'plate')?.id
+  const productId = fields.find((f) => f.key === 'product')?.id
+  const quantityId = fields.find((f) => f.key === 'quantity')?.id
+  const unitPriceId = getUnitPriceFieldId(fields)
+  const amountId = getAmountFieldId(fields)
+
+  type Group = {
+    date: string
+    plate: string
+    total: number
+    outstanding: number
+    received: number
+    lines: Array<{
+      product: string
+      unitPrice: string
+      lineAmount: string
+    }>
+  }
+
+  const groups = new Map<string, Group>()
+
+  for (let r = 1; r < rows.length; r++) {
+    const line = rows[r]
+    if (line.every((c) => String(c).trim() === '')) continue
+    const date = String(line[iDate] ?? '').trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return {
+        ok: false,
+        error: `第 ${r + 1} 行：日期格式应为 YYYY-MM-DD`,
+      }
+    }
+    const plate = String(line[iPlate] ?? '').trim()
+    if (
+      plate === '未核账合计' ||
+      plate === '已核账合计' ||
+      plate === '总计'
+    ) {
+      continue
+    }
+    const product = String(line[iProduct] ?? '').trim()
+    if (product === '总金额' || product === '总计') continue
+    const unitPrice = iUnit >= 0 ? String(line[iUnit] ?? '').trim() : ''
+    const lineAmt = String(line[iLineAmt] ?? '').trim()
+    const total = parseNumLoose(String(line[iTotal] ?? '')) ?? 0
+    const outstanding = parseNumLoose(String(line[iOut] ?? '')) ?? 0
+    const received = parseNumLoose(String(line[iRec] ?? '')) ?? 0
+    if (!product && !lineAmt) continue
+
+    const key = `${date}\t${plate}\t${total}\t${outstanding}\t${received}`
+    const g = groups.get(key) ?? {
+      date,
+      plate,
+      total,
+      outstanding,
+      received,
+      lines: [],
+    }
+    g.lines.push({ product, unitPrice, lineAmount: lineAmt })
+    groups.set(key, g)
+  }
+
+  if (groups.size === 0) {
+    return { ok: false, error: 'CSV 没有可导入的数据行' }
+  }
+
+  const records: LedgerRecord[] = []
+  for (const g of groups.values()) {
+    const createdAt = Date.parse(`${g.date}T12:00:00`)
+    const rec: LedgerRecord = {
+      id: newLineItemId(),
+      date: g.date,
+      createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
+      values: {},
+    }
+    if (plateId) rec.values[plateId] = g.plate
+    if (amountId && g.total > 0) {
+      rec.values[amountId] = fmtCsvMoney(g.total)
+    }
+    if (g.received > 0) rec.receivedAmount = g.received
+    if (g.total > 0 && g.received >= g.total - 0.005) rec.settled = true
+
+    const lineItems: NonNullable<LedgerRecord['lineItems']> = []
+    for (const ln of g.lines) {
+      const lineVals: Record<string, string> = {}
+      if (productId) lineVals[productId] = ln.product
+      if (quantityId) lineVals[quantityId] = ''
+      if (unitPriceId && ln.unitPrice) lineVals[unitPriceId] = ln.unitPrice
+      if (amountId && ln.lineAmount) lineVals[amountId] = ln.lineAmount
+      lineItems.push({ id: newLineItemId(), values: lineVals })
+    }
+    if (lineItems.length > 0) rec.lineItems = lineItems
+    else if (productId && g.lines[0]) {
+      rec.values[productId] = g.lines[0].product
+    }
+
+    records.push(rec)
+  }
+
+  records.sort((a, b) => b.createdAt - a.createdAt)
+  return { ok: true, records }
+}
+
 /**
  * 从本应用导出的 CSV 还原账单（字段定义以当前 settings 为准，表头需与导出一致）。
  */
@@ -226,6 +409,9 @@ export function parseLedgerImportCsv(
     return { ok: false, error: 'CSV 无有效数据（至少需表头与一行数据）' }
   }
   const headers = rows[0].map((h) => h.trim())
+  if (isSimpleExportCsvHeaders(headers)) {
+    return parseSimpleLedgerImportCsv(rows, fields)
+  }
   const meta = csvMetaHeaders(fields)
   const fixedSet = allFixedHeaderStrings(meta)
 
@@ -420,12 +606,14 @@ function orderedDateRange(
 }
 
 function defaultExportCsvFilename(options?: ExportCsvOptions): string {
-  if (options?.filename?.trim()) return options.filename.trim()
+  if (options?.filename?.trim()) {
+    return options.filename.trim().replace(/\.csv$/i, '.xlsx')
+  }
   const range = orderedDateRange(options?.dateFrom, options?.dateTo)
   if (range) {
-    return `${CSV_EXPORT_BRAND}_${range.lo.replace(/-/g, '')}_${range.hi.replace(/-/g, '')}.csv`
+    return `${CSV_EXPORT_BRAND}_${range.lo.replace(/-/g, '')}_${range.hi.replace(/-/g, '')}.xlsx`
   }
-  return `ledger-export-${formatTs()}.csv`
+  return `ledger-export-${formatTs()}.xlsx`
 }
 
 export async function exportCsv(
@@ -443,102 +631,17 @@ export async function exportCsv(
     }
   }
 
-  const plateId = fields.find((f) => f.key === 'plate')?.id
-  const amountId = getAmountFieldId(fields)
-  const meta = csvMetaHeaders(fields)
-  const headers = [
-    meta.recordId[0],
-    meta.date[0],
-    meta.createdAt[0],
-    meta.settled[0],
-    meta.receivedAmount[0],
-    meta.dealAmount[0],
-    meta.plate[0],
-    meta.product[0],
-    meta.quantity[0],
-    meta.lineAmount[0],
-    meta.recordTotalAmount[0],
-    ...fields
-      .filter(
-        (f) =>
-          !f.key ||
-          !['plate', 'product', 'quantity', 'amount'].includes(f.key),
-      )
-      .map((f) => f.name),
-  ]
-  const extraIds = fields
-    .filter(
-      (f) =>
-        !f.key || !['plate', 'product', 'quantity', 'amount'].includes(f.key),
-    )
-    .map((f) => f.id)
-
-  const rows: string[][] = [headers]
-
-  for (const r of list) {
-    const plate = plateId ? (r.values[plateId] ?? '') : ''
-    const recordTotal =
-      amountId && r.values[amountId] !== undefined
-        ? String(r.values[amountId] ?? '')
-        : ''
-    const lines = expandProductLines(r, fields)
-    const pid = fields.find((f) => f.key === 'product')?.id
-    const qid = fields.find((f) => f.key === 'quantity')?.id
-    const lineRows =
-      lines.length > 0
-        ? lines
-        : [
-            {
-              product: pid ? r.values[pid] ?? '' : '',
-              quantity: qid ? r.values[qid] ?? '' : '',
-              lineAmountStr: '',
-            },
-          ]
-
-    for (const line of lineRows) {
-      const cells = [
-        r.id,
-        r.date,
-        String(r.createdAt),
-        r.settled ? '1' : '0',
-        escapeCsv(
-          r.receivedAmount !== undefined && !Number.isNaN(r.receivedAmount)
-            ? String(r.receivedAmount)
-            : '',
-        ),
-        escapeCsv(
-          r.dealAmount !== undefined && !Number.isNaN(r.dealAmount)
-            ? String(r.dealAmount)
-            : '',
-        ),
-        escapeCsv(plate),
-        escapeCsv(line.product),
-        escapeCsv(line.quantity),
-        escapeCsv(line.lineAmountStr),
-        escapeCsv(recordTotal),
-        ...extraIds.map((id) => escapeCsv(r.values[id] ?? '')),
-      ]
-      rows.push(cells)
-    }
-  }
-
-  const csv = rows.map((row) => row.join(',')).join('\r\n')
-  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' })
+  const { buildLedgerExcelBlob } = await import('./ledgerExcelExport')
+  const blob = await buildLedgerExcelBlob(list, fields)
   const filename = defaultExportCsvFilename(options)
   try {
-    await saveCsvBlobWithMobileFallback(filename, blob)
+    await saveXlsxBlobWithMobileFallback(filename, blob)
     markBackupNow()
   } catch (e) {
     if (!isShareDismissedByUser(e)) {
       alert(e instanceof Error ? e.message : '导出失败')
     }
   }
-}
-
-function escapeCsv(s: string): string {
-  const t = String(s).replace(/"/g, '""')
-  if (/[",\r\n]/.test(t)) return `"${t}"`
-  return t
 }
 
 function formatTs() {

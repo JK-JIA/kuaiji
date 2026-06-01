@@ -110,6 +110,23 @@ export type MeResponse = {
   email: string
   phone: string | null
   membershipExpiresAt: string | null
+  welcomeMembershipClaimed: boolean
+}
+
+export type AuthUserPayload = {
+  email: string
+  phone?: string | null
+  membershipExpiresAt: string | null
+  welcomeMembershipClaimed?: boolean
+}
+
+function mapAuthUser(user: AuthUserPayload) {
+  return {
+    email: user.email,
+    membershipExpiresAt: user.membershipExpiresAt ?? null,
+    phone: user.phone ?? null,
+    welcomeMembershipClaimed: Boolean(user.welcomeMembershipClaimed),
+  }
 }
 
 export async function fetchMe(base: string, token: string): Promise<MeResponse> {
@@ -145,6 +162,22 @@ export async function cancelMembership(
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   })
+  if (!res.ok) throw new Error(await parseErr(res))
+  return (await res.json()) as MeResponse
+}
+
+/** 新用户优惠：免费领取 1 个月会员（每账号一次） */
+export async function claimWelcomeMembership(
+  base: string,
+  token: string,
+): Promise<MeResponse> {
+  const res = await fetch(
+    `${base.replace(/\/$/, '')}/api/membership/claim-welcome`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  )
   if (!res.ok) throw new Error(await parseErr(res))
   return (await res.json()) as MeResponse
 }
@@ -208,6 +241,7 @@ export async function apiOneClickLogin(
   email: string
   membershipExpiresAt: string | null
   phone: string | null
+  welcomeMembershipClaimed: boolean
 }> {
   const res = await fetch(`${base.replace(/\/$/, '')}/auth/oneclick/login`, {
     method: 'POST',
@@ -217,17 +251,11 @@ export async function apiOneClickLogin(
   if (!res.ok) throw new Error(await parseErr(res))
   const j = (await res.json()) as {
     token: string
-    user: {
-      email: string
-      phone: string | null
-      membershipExpiresAt: string | null
-    }
+    user: AuthUserPayload
   }
   return {
     token: j.token,
-    email: j.user.email,
-    membershipExpiresAt: j.user.membershipExpiresAt,
-    phone: j.user.phone,
+    ...mapAuthUser(j.user),
   }
 }
 
@@ -240,6 +268,7 @@ export async function apiSmsLogin(
   email: string
   membershipExpiresAt: string | null
   phone: string | null
+  welcomeMembershipClaimed: boolean
 }> {
   const res = await fetch(`${base.replace(/\/$/, '')}/auth/sms/login`, {
     method: 'POST',
@@ -249,17 +278,11 @@ export async function apiSmsLogin(
   if (!res.ok) throw new Error(await parseErr(res))
   const j = (await res.json()) as {
     token: string
-    user: {
-      email: string
-      phone: string | null
-      membershipExpiresAt: string | null
-    }
+    user: AuthUserPayload
   }
   return {
     token: j.token,
-    email: j.user.email,
-    membershipExpiresAt: j.user.membershipExpiresAt,
-    phone: j.user.phone,
+    ...mapAuthUser(j.user),
   }
 }
 
@@ -377,6 +400,7 @@ export async function apiLogin(
   email: string
   membershipExpiresAt: string | null
   phone: string | null
+  welcomeMembershipClaimed: boolean
 }> {
   const res = await fetch(`${base.replace(/\/$/, '')}/auth/login`, {
     method: 'POST',
@@ -386,17 +410,11 @@ export async function apiLogin(
   if (!res.ok) throw new Error(await parseErr(res))
   const j = (await res.json()) as {
     token: string
-    user: {
-      email: string
-      membershipExpiresAt: string | null
-      phone?: string | null
-    }
+    user: AuthUserPayload
   }
   return {
     token: j.token,
-    email: j.user.email,
-    membershipExpiresAt: j.user.membershipExpiresAt ?? null,
-    phone: j.user.phone ?? null,
+    ...mapAuthUser(j.user),
   }
 }
 
@@ -409,6 +427,7 @@ export async function apiRegister(
   email: string
   membershipExpiresAt: string | null
   phone: string | null
+  welcomeMembershipClaimed: boolean
 }> {
   const res = await fetch(`${base.replace(/\/$/, '')}/auth/register`, {
     method: 'POST',
@@ -418,17 +437,11 @@ export async function apiRegister(
   if (!res.ok) throw new Error(await parseErr(res))
   const j = (await res.json()) as {
     token: string
-    user: {
-      email: string
-      membershipExpiresAt: string | null
-      phone?: string | null
-    }
+    user: AuthUserPayload
   }
   return {
     token: j.token,
-    email: j.user.email,
-    membershipExpiresAt: j.user.membershipExpiresAt ?? null,
-    phone: j.user.phone ?? null,
+    ...mapAuthUser(j.user),
   }
 }
 

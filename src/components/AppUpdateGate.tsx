@@ -4,12 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ANDROID_UPDATE_CACHE_FILENAME,
   downloadApkIntoCapacitorCache,
-  fetchLatestFromReleasesManifest,
+  fetchAndroidUpdatePlan,
   getLocalWebBundleVersion,
   getReleasesManifestUrl,
   getSkippedTag,
-  isRemoteBundleNewerThanLocal,
-  isRemoteNewerThanInstalled,
+  loadReleasesManifest,
+  pickLatestApkEntry,
+  pickLatestBundleEntry,
+  positiveInt,
   setSkippedTag,
   type AndroidLatestEnabled,
 } from '../utils/appUpdate'
@@ -18,13 +20,8 @@ import { InstallApk } from '../plugins/installApk'
 /** 设置页「检查更新」触发：监听后执行与启动时相同的拉取逻辑 */
 export const TRIGGER_ANDROID_UPDATE_CHECK = 'kuaiji-trigger-android-update-check'
 
-type UpdateGateState = {
-  info: AndroidLatestEnabled
-  preferredUpdate: 'bundle' | 'apk'
-}
-
 export function AppUpdateGate() {
-  const [gate, setGate] = useState<UpdateGateState | null>(null)
+  const [info, setInfo] = useState<AndroidLatestEnabled | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [progress, setProgress] = useState<{ pct: number | null }>({
     pct: null,
@@ -33,8 +30,7 @@ export function AppUpdateGate() {
   /** 本次运行内点过「稍后」则不再在 resume 时弹窗，避免反复打断 */
   const sessionDismissedRef = useRef(false)
 
-  const info = gate?.info ?? null
-  const preferredUpdate = gate?.preferredUpdate ?? 'apk'
+  const preferredUpdate = info?.preferredUpdate ?? 'apk'
 
   const runCheck = useCallback(async (opts: { manual: boolean }) => {
     if (!opts.manual && sessionDismissedRef.current) return
@@ -51,19 +47,6 @@ export function AppUpdateGate() {
       }
       return
     }
-    let latest: Awaited<ReturnType<typeof fetchLatestFromReleasesManifest>>
-    try {
-      latest = await fetchLatestFromReleasesManifest(manifestUrl)
-    } catch (e) {
-      if (opts.manual) {
-        alert(e instanceof Error ? e.message : '检查更新失败')
-      }
-      return
-    }
-    if (!latest.enabled) {
-      if (opts.manual) alert('下载站暂无发布版本（releases.json 为空）')
-      return
-    }
 
     const appInfo = await App.getInfo()
     const localVc = parseInt(String(appInfo.build), 10)
@@ -73,54 +56,58 @@ export function AppUpdateGate() {
       return
     }
 
-    const skip = getSkippedTag()
-    if (!opts.manual && skip === latest.skipTag) return
-
-    const minN = latest.minNativeVersionCode
-    const shellTooOldForBundle = Boolean(
-      latest.bundleUrl &&
-        minN != null &&
-        minN > localVc,
-    )
     const capgoOk = Capacitor.isPluginAvailable('CapacitorUpdater')
+    const localBv = capgoOk ? await getLocalWebBundleVersion() : ''
 
-    let preferred: 'bundle' | 'apk' | null = null
-
-    if (latest.bundleUrl && !shellTooOldForBundle && capgoOk) {
-      const bvRemote = String(
-        latest.bundleVersion ?? latest.versionName ?? '',
-      ).trim()
-      const localBv = await getLocalWebBundleVersion()
-      if (isRemoteBundleNewerThanLocal(bvRemote, localBv)) {
-        preferred = 'bundle'
-      }
-    }
-
-    if (preferred == null && latest.apkUrl) {
-      if (isRemoteNewerThanInstalled(latest, localVc, localVn)) {
-        preferred = 'apk'
-      }
-    }
-
-    if (preferred == null) {
+    let plan: Awaited<ReturnType<typeof fetchAndroidUpdatePlan>>
+    try {
+      plan = await fetchAndroidUpdatePlan(
+        manifestUrl,
+        localVc,
+        localVn,
+        localBv,
+        capgoOk,
+      )
+    } catch (e) {
       if (opts.manual) {
-        if (latest.bundleUrl && shellTooOldForBundle) {
-          alert(
-            '服务器要求更高版本的原生安装包，请下载整包 APK 更新（更新后可继续用热更新）。',
+        alert(e instanceof Error ? e.message : '检查更新失败')
+      }
+      return
+    }
+
+    if (!plan.enabled) {
+      if (opts.manual) {
+        try {
+          const { items } = await loadReleasesManifest(manifestUrl)
+          const bundleEntry = pickLatestBundleEntry(items)
+          const apkEntry = pickLatestApkEntry(items)
+          const minN = positiveInt(bundleEntry?.minNativeVersionCode)
+          const shellTooOld = Boolean(
+            bundleEntry && minN != null && minN > localVc,
           )
-        } else if (latest.bundleUrl && !capgoOk) {
-          alert(
-            '当前安装的应用不含热更新能力，请从下载站安装一次完整 APK，之后即可在线更新网页部分。',
-          )
-        } else {
+          if (shellTooOld && !apkEntry) {
+            alert(
+              '当前安装包版本过低，且下载站未提供可安装的整包 APK。请在下载站历史版本中安装最新 APK 后再试。',
+            )
+          } else if (bundleEntry && !capgoOk) {
+            alert(
+              '当前安装的应用不含热更新能力，请从下载站安装一次完整 APK，之后即可在线更新网页部分。',
+            )
+          } else {
+            alert('当前已是最新版本')
+          }
+        } catch {
           alert('当前已是最新版本')
         }
       }
       return
     }
 
+    const skip = getSkippedTag()
+    if (!opts.manual && skip === plan.skipTag) return
+
     manualRef.current = opts.manual
-    setGate({ info: latest, preferredUpdate: preferred })
+    setInfo(plan)
   }, [])
 
   useEffect(() => {
@@ -149,7 +136,7 @@ export function AppUpdateGate() {
   }, [runCheck])
 
   const close = () => {
-    setGate(null)
+    setInfo(null)
     setProgress({ pct: null })
     manualRef.current = false
   }
@@ -218,6 +205,13 @@ export function AppUpdateGate() {
       await InstallApk.installFromCache({
         filename: ANDROID_UPDATE_CACHE_FILENAME,
       })
+      if (info.pendingBundleAfterApk) {
+        alert(
+          `整包安装程序已打开。安装 ${info.versionName || '新版本'} 后请重新打开应用，将自动提示下载网页热更新${
+            info.pendingBundleVersion ? `（${info.pendingBundleVersion}）` : ''
+          }。`,
+        )
+      }
       close()
     } catch (e) {
       alert(e instanceof Error ? e.message : '下载或安装失败')
@@ -227,11 +221,26 @@ export function AppUpdateGate() {
     }
   }
 
-  if (!gate || !info) return null
+  if (!info) return null
+
+  const displayVersion =
+    preferredUpdate === 'apk'
+      ? info.versionName
+        ? info.versionCode > 0
+          ? `整包 ${info.versionName}（versionCode ${info.versionCode}）`
+          : `整包 ${info.versionName}`
+        : info.versionCode > 0
+          ? `versionCode ${info.versionCode}`
+          : '新版本'
+      : info.versionName
+        ? `网页 ${info.versionName}`
+        : info.bundleVersion
+          ? `网页 ${info.bundleVersion}`
+          : '网页更新'
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-end justify-center bg-black/45 p-4 sm:items-center"
+      className="fixed inset-0 z-[100] flex items-end justify-center bg-black/45 p-4 backdrop-blur-[2px] sm:items-center"
       role="dialog"
       aria-modal="true"
       aria-labelledby="app-update-title"
@@ -241,20 +250,23 @@ export function AppUpdateGate() {
           id="app-update-title"
           className="text-lg font-semibold text-kj-primary"
         >
-          {preferredUpdate === 'bundle' ? '发现网页更新' : '发现新版本'}
+          {preferredUpdate === 'bundle' ? '发现网页更新' : '发现新版本（需整包安装）'}
         </h2>
-        <p className="mt-2 text-sm text-neutral-700">
-          {info.versionName
-            ? info.versionCode > 0
-              ? `版本 ${info.versionName}（versionCode ${info.versionCode}）`
-              : `版本 ${info.versionName}`
-            : info.versionCode > 0
-              ? `versionCode ${info.versionCode}`
-              : '新版本'}
-        </p>
+        <p className="mt-2 text-sm text-neutral-700">{displayVersion}</p>
         {preferredUpdate === 'bundle' ? (
           <p className="mt-2 text-xs leading-relaxed text-[#1a7f4c]">
             此为网页资源热更新，无需卸载重装，下载完成后重启即可生效。
+          </p>
+        ) : (
+          <p className="mt-2 text-xs leading-relaxed text-amber-800">
+            本次需先安装整包 APK，以更新原生功能（支付、登录等）。安装后重新打开应用，若还有网页热更包将自动提示。
+          </p>
+        )}
+        {info.pendingBundleAfterApk && preferredUpdate === 'apk' ? (
+          <p className="mt-2 text-xs leading-relaxed text-neutral-600">
+            安装完成后还将提示热更新
+            {info.pendingBundleVersion ? ` ${info.pendingBundleVersion}` : ''}
+            ，以保证功能完整。
           </p>
         ) : null}
         {info.releaseNotes ? (
@@ -294,7 +306,7 @@ export function AppUpdateGate() {
             onClick={() => void confirmUpdate()}
             className="min-h-[44px] rounded-xl bg-[#2ecc71] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#27ae60] disabled:opacity-50"
           >
-            {preferredUpdate === 'bundle' ? '立即热更新' : '立即更新'}
+            {preferredUpdate === 'bundle' ? '立即热更新' : '下载并安装整包'}
           </button>
         </div>
       </div>

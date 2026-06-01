@@ -29,8 +29,8 @@ import {
   type HomeFilterState,
   type ReconcileFilter,
 } from '../utils/homeFilters'
+import { buildHomeSearchSummary } from '../utils/homeSearchSummary'
 import {
-  buildStatsDrillDownHint,
   STATS_DRILL_DOWN_STATE_KEY,
   type StatsDrillDownLocationState,
 } from '../utils/statsDrillDown'
@@ -49,6 +49,8 @@ import { messageIfPremiumFeatureBlocked } from '../utils/premiumGate'
 import { findFieldIdByName, sumAmount } from '../utils/stats'
 import type { FieldDef, LedgerRecord, ReconcilePayload } from '../types'
 import { useLedger } from '../context/LedgerContext'
+import { exportCsv, sharePngBlobWithMobileFallback } from '../utils/exportData'
+import { renderSearchResultBillPngBlob } from '../utils/searchResultBillPng'
 
 export function HomePage() {
   const location = useLocation()
@@ -91,7 +93,7 @@ export function HomePage() {
     useState<ReconcileFilter>('all')
   const [appliedDrillPlate, setAppliedDrillPlate] = useState('')
   const [appliedDrillProduct, setAppliedDrillProduct] = useState('')
-  const [statsDrillBanner, setStatsDrillBanner] = useState<string | null>(null)
+  const [searchFromStats, setSearchFromStats] = useState(false)
   const [searchDateExpanded, setSearchDateExpanded] = useState(false)
   const [showTopBtn, setShowTopBtn] = useState(false)
   const [voiceParsing, setVoiceParsing] = useState(false)
@@ -119,6 +121,8 @@ export function HomePage() {
   const scrolledForHighlightRef = useRef<string | null>(null)
   const [customerAutoPrompt, setCustomerAutoPrompt] =
     useState<CustomerAutoPromptItem | null>(null)
+  const [exportSearchSheetOpen, setExportSearchSheetOpen] = useState(false)
+  const [exportingType, setExportingType] = useState<'png' | 'csv' | null>(null)
 
   const showCustomerAutoPromptIfAny = useCallback(
     (items: CustomerAutoPromptItem[]) => {
@@ -153,11 +157,18 @@ export function HomePage() {
     setAppliedSearchDateTo(drill.dateTo)
     setAppliedDrillPlate(drill.plate ?? '')
     setAppliedDrillProduct(drill.product ?? '')
-    setStatsDrillBanner(drill.hint ?? buildStatsDrillDownHint(drill))
+    setSearchFromStats(true)
     setSearchDraftReconcile('all')
     setAppliedSearchReconcile('all')
     setSearchDateExpanded(Boolean(drill.dateFrom || drill.dateTo))
+    setSavedHighlightId(null)
+    setReconcileHighlightId(null)
+    scrolledForHighlightRef.current = null
     navigate(location.pathname, { replace: true, state: null })
+    const scrollHomeTop = () => window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+    scrollHomeTop()
+    requestAnimationFrame(scrollHomeTop)
+    window.setTimeout(scrollHomeTop, 0)
   }, [location.state, location.pathname, navigate])
 
   const ledgerLayout = useMemo(() => getLedgerFormLayout(fields), [fields])
@@ -569,7 +580,7 @@ export function HomePage() {
     setAppliedSearchReconcile('all')
     setAppliedDrillPlate('')
     setAppliedDrillProduct('')
-    setStatsDrillBanner(null)
+    setSearchFromStats(false)
     setSearchDateExpanded(false)
   }, [])
 
@@ -703,6 +714,69 @@ export function HomePage() {
   const searchResultSum = amountId
     ? sumAmount(recordsForHomeTimeline, amountId)
     : 0
+  const activeSearchSummaryText = useMemo(
+    () =>
+      buildHomeSearchSummary({
+        fromStats: searchFromStats,
+        plate: appliedDrillPlate,
+        product: appliedDrillProduct,
+        keyword: appliedSearchLower ? appliedSearchQuery : undefined,
+        dateFrom: appliedDateFrom,
+        dateTo: appliedDateTo,
+        reconcile: appliedSearchReconcile,
+      }),
+    [
+      searchFromStats,
+      appliedDrillPlate,
+      appliedDrillProduct,
+      appliedSearchLower,
+      appliedSearchQuery,
+      appliedDateFrom,
+      appliedDateTo,
+      appliedSearchReconcile,
+    ],
+  )
+
+  const exportSearchCsv = useCallback(async () => {
+    if (recordsForHomeTimeline.length === 0) {
+      alert('当前没有可导出的搜索结果')
+      return
+    }
+    setExportingType('csv')
+    try {
+      const stamp = format(new Date(), 'yyyyMMdd_HHmm')
+      await exportCsv(recordsForHomeTimeline, fields, {
+        filename: `搜索结果账单_${stamp}.xlsx`,
+      })
+      setExportSearchSheetOpen(false)
+    } finally {
+      setExportingType(null)
+    }
+  }, [recordsForHomeTimeline, fields])
+
+  const exportSearchPng = useCallback(async () => {
+    if (recordsForHomeTimeline.length === 0) {
+      alert('当前没有可导出的搜索结果')
+      return
+    }
+    setExportingType('png')
+    try {
+      const blob = await renderSearchResultBillPngBlob({
+        records: recordsForHomeTimeline,
+        fields,
+        productCatalog,
+        drillPlate: appliedDrillPlate.trim() || undefined,
+      })
+      const stamp = format(new Date(), 'yyyyMMdd_HHmm')
+      await sharePngBlobWithMobileFallback(`账单明细_${stamp}.png`, blob)
+      setExportSearchSheetOpen(false)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '导出 PNG 失败'
+      alert(msg)
+    } finally {
+      setExportingType(null)
+    }
+  }, [recordsForHomeTimeline, fields, productCatalog, appliedDrillPlate])
 
   const ledgerDateBounds = useMemo(() => {
     if (records.length === 0) return { min: '', max: '' }
@@ -957,31 +1031,27 @@ export function HomePage() {
         {homeSearchModeActive ? (
           <div className="mt-2 flex flex-col gap-2.5 rounded-2xl border border-kj-border-strong/80 bg-kj-raised px-3 py-2.5 shadow-sm">
             <p className="min-w-0 text-xs leading-relaxed text-kj-secondary sm:text-sm">
-              {[
-                statsDrillBanner,
-                appliedSearchLower
-                  ? `关键词「${appliedSearchQuery.slice(0, 48)}${appliedSearchQuery.length > 48 ? '…' : ''}」`
-                  : null,
-                appliedDateFrom || appliedDateTo
-                  ? `记账日 ${appliedDateFrom || '不限'}～${appliedDateTo || '不限'}`
-                  : null,
-                appliedSearchReconcile === 'settled'
-                  ? '已结清'
-                  : appliedSearchReconcile === 'pending'
-                    ? '未结清'
-                    : null,
-              ]
-                .filter(Boolean)
-                .join(' · ')}
+              {activeSearchSummaryText}
             </p>
-            <button
-              type="button"
-              onClick={clearHomeSearch}
-              className="w-full rounded-xl border border-kj-border-strong bg-kj-surface px-4 py-2.5 text-sm font-semibold text-kj-primary shadow-sm transition-colors hover:bg-kj-hover active:bg-kj-hover sm:w-auto sm:self-end"
-              aria-label="清除筛选条件"
-            >
-              清除筛选
-            </button>
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setExportSearchSheetOpen(true)}
+                disabled={recordsForHomeTimeline.length === 0}
+                className="w-full rounded-xl bg-[#2ecc71] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#27ae60] active:bg-[#22a85a] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                aria-label="导出当前搜索结果"
+              >
+                导出账单
+              </button>
+              <button
+                type="button"
+                onClick={clearHomeSearch}
+                className="w-full rounded-xl border border-kj-border-strong bg-kj-surface px-4 py-2.5 text-sm font-semibold text-kj-primary shadow-sm transition-colors hover:bg-kj-hover active:bg-kj-hover sm:w-auto"
+                aria-label="清除筛选条件"
+              >
+                清除筛选
+              </button>
+            </div>
           </div>
         ) : null}
       </div>
@@ -1351,6 +1421,64 @@ export function HomePage() {
         onView={viewCustomerAutoPrompt}
         onDismiss={dismissCustomerAutoPrompt}
       />
+
+      {exportSearchSheetOpen ? (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/40"
+            aria-label="关闭导出选项"
+            onClick={() => {
+              if (exportingType) return
+              setExportSearchSheetOpen(false)
+            }}
+          />
+          <div
+            className="relative rounded-t-2xl border border-kj-border-strong bg-kj-surface px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 shadow-xl"
+            role="dialog"
+            aria-modal
+            aria-labelledby="home-export-search-title"
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2
+                id="home-export-search-title"
+                className="text-base font-bold text-kj-primary"
+              >
+                导出搜索结果
+              </h2>
+              <button
+                type="button"
+                onClick={() => setExportSearchSheetOpen(false)}
+                disabled={Boolean(exportingType)}
+                className="rounded-lg px-2 py-1 text-sm font-medium text-kj-secondary disabled:opacity-50"
+              >
+                关闭
+              </button>
+            </div>
+            <p className="mb-3 text-xs leading-relaxed text-kj-secondary">
+              选择格式后会直接调起系统分享，可一键发到微信。
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => void exportSearchPng()}
+                disabled={Boolean(exportingType)}
+                className="w-full rounded-xl bg-[#2ecc71] px-4 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#27ae60] active:bg-[#22a85a] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {exportingType === 'png' ? '正在生成 PNG…' : 'PNG 小票并分享'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void exportSearchCsv()}
+                disabled={Boolean(exportingType)}
+                className="w-full rounded-xl border border-kj-border-strong bg-kj-raised px-4 py-3 text-sm font-semibold text-kj-primary shadow-sm transition-colors hover:bg-kj-hover active:bg-kj-hover disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {exportingType === 'csv' ? '正在导出 Excel…' : 'Excel 并分享'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
     </div>
   )

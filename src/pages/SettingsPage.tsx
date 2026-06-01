@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import type { FieldDef, ProductCatalogEntry } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { useLedger } from '../context/LedgerContext'
@@ -439,7 +439,9 @@ export function SettingsPage() {
     membershipActive,
     email: cloudEmail,
     membershipExpiresAt,
+    welcomeMembershipClaimed,
     redeem,
+    claimWelcomeMembership,
     cancelMembership,
     refreshProfile,
   } = useAuth()
@@ -466,6 +468,7 @@ export function SettingsPage() {
   const { panel, openPanel, closeSubPanel } =
     useSettingsPanelNavigation<SettingsPanel>('main')
   const location = useLocation()
+  const navigate = useNavigate()
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readThemeMode())
   const [userProfile, setUserProfile] = useState(() => readUserProfile())
   const [proBenefitsOpen, setProBenefitsOpen] = useState(false)
@@ -566,6 +569,7 @@ export function SettingsPage() {
   useEffect(() => {
     const st = location.state as {
       openPanel?: SettingsPanel
+      openProRedeem?: boolean
     } | null
     if (st?.openPanel === 'customers') {
       openPanel('customers')
@@ -574,7 +578,14 @@ export function SettingsPage() {
         '',
       )
     }
-  }, [location.state, openPanel])
+    if (st?.openProRedeem) {
+      setProRedeemOpen(true)
+      navigate(`${location.pathname}${location.search}`, {
+        replace: true,
+        state: null,
+      })
+    }
+  }, [location.pathname, location.search, location.state, navigate, openPanel])
 
   const addField = async () => {
     const n = name.trim()
@@ -1029,6 +1040,14 @@ export function SettingsPage() {
     setProBenefitsOpen(true)
   }
 
+  const handleClaimWelcome = async () => {
+    if (!apiBase) {
+      throw new Error('当前为离线使用，无法领取优惠')
+    }
+    await claimWelcomeMembership()
+    await refreshProfile()
+  }
+
   const handleRedeem = async (code: string) => {
     if (!apiBase) {
       alert('当前为离线使用，无法兑换会员')
@@ -1092,8 +1111,10 @@ export function SettingsPage() {
           hasToken={Boolean(token)}
           membershipActive={membershipActive}
           membershipExpiresAt={membershipExpiresAt}
+          welcomeMembershipClaimed={welcomeMembershipClaimed}
           onNeedLogin={() => openPanel('account')}
           onRedeem={handleRedeem}
+          onClaimWelcome={handleClaimWelcome}
           onPurchaseSuccess={refreshProfile}
           onCancelMembership={cancelMembership}
         />
@@ -1186,7 +1207,7 @@ export function SettingsPage() {
             检查更新（Android）
           </button>
           <p className="mx-auto mt-3 max-w-sm text-[11px] leading-relaxed text-kj-muted">
-            若下载站配置了网页 zip，将优先热更新并保留登录；仅壳版本不足时才需整包 APK。
+            检查更新时会先安装下载站中最新的整包 APK，再提示最新的网页热更新，以保证原生与网页功能均完整。
           </p>
         </footer>
       </SettingsScrollBody>
