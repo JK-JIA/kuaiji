@@ -16,8 +16,30 @@ model User {
   membershipExpiresAt         DateTime?
   /** 新用户免费领取 1 个月会员（每位用户仅一次） */
   welcomeMembershipClaimedAt DateTime?
+  /** 本人邀请码，供他人填写或扫码 */
+  inviteCode                 String?   @unique
+  /** 邀请人用户 id（每位用户仅可被邀请一次） */
+  invitedByUserId            String?
+  invitedAt                  DateTime?
+  /** 通过邀请累计获得的会员月数（上限 12） */
+  referralRewardMonths       Int       @default(0)
   createdAt                   DateTime  @default(now())
   ledger              Ledger?
+  referralsGiven      Referral[] @relation("ReferralsGiven")
+  referralReceived    Referral?  @relation("ReferralReceived")
+}
+
+model Referral {
+  id          String   @id @default(cuid())
+  inviterId   String
+  inviteeId   String   @unique
+  inviteCode  String
+  grantedDays Int      @default(30)
+  createdAt   DateTime @default(now())
+  inviter     User     @relation("ReferralsGiven", fields: [inviterId], references: [id], onDelete: Cascade)
+  invitee     User     @relation("ReferralReceived", fields: [inviteeId], references: [id], onDelete: Cascade)
+
+  @@index([inviterId])
 }
 
 model Ledger {

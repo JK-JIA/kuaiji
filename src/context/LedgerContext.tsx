@@ -13,10 +13,7 @@ import {
   putLedger,
 } from '../api/ledgerClient'
 import { getDefaultFieldDefs } from '../constants/defaultLedgerFields'
-import {
-  mergeMissingDefaultFields,
-  normalizeBuiltinFieldLabels,
-} from '../constants/mergeBuiltinFields'
+import { normalizeBuiltinFieldLabels } from '../constants/mergeBuiltinFields'
 import type {
   CustomerEntry,
   FieldDef,
@@ -54,7 +51,12 @@ import {
   parseProductCatalogSuppressed,
 } from '../utils/productCatalogHelpers'
 import { catalogsEqual } from '../utils/productCatalogSync'
-import { getAmountFieldId, parseMoney } from '../utils/recordHelpers'
+import {
+  getAmountFieldId,
+  migrateRecordsToCurrentFieldIds,
+  parseMoney,
+  resolveBuiltinFieldId,
+} from '../utils/recordHelpers'
 import {
   learnFromProductLineEdits,
   parseVoiceProductCorrections,
@@ -169,23 +171,33 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   )
 
   const loadLocalSnapshot = useCallback(async () => {
-    const f = await ensureDefaultFields()
-    const mergedFields = mergeMissingDefaultFields(f)
-    const needsLocalPersist = mergedFields.some((nf) => {
+    let f = await ensureDefaultFields()
+    const normalized = normalizeBuiltinFieldLabels(f)
+    const needsLocalPersist = normalized.some((nf) => {
       const of = f.find((x) => x.id === nf.id)
       return of && of.name !== nf.name
     })
     if (needsLocalPersist) {
-      await updateFields(mergedFields)
+      await updateFields(normalized)
+      f = normalized
+    } else {
+      f = normalized
     }
-    setFields(mergedFields)
-    const r = await db.records.orderBy('createdAt').reverse().toArray()
+    setFields(f)
+    let r = await db.records.orderBy('createdAt').reverse().toArray()
+    const fieldMig = migrateRecordsToCurrentFieldIds(r, f)
+    if (fieldMig.changed) {
+      r = fieldMig.records
+      for (const rec of r) {
+        await db.records.put(rec)
+      }
+    }
     setRecords(r)
 
     let catalogLocal = await getProductCatalogFromDb()
     let suppressedLocal = await getProductCatalogSuppressedFromDb()
     const asrHotwordsLocal = await getAsrHotwordsSuppressedFromDb()
-    const prodIdLocal = mergedFields.find((x) => x.key === 'product')?.id
+    const prodIdLocal = resolveBuiltinFieldId(f, 'product')
     const mergedLocal = mergeAutoProductCatalog({
       records: r,
       prodId: prodIdLocal,
@@ -210,7 +222,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     let customersSuppressedLocal = await getCustomerCatalogSuppressedFromDb()
     const customerMerge = tryMergeCustomerCatalogFromRecords({
       records: r,
-      fields: mergedFields,
+      fields: f,
       existing: customersLocal,
       suppressedNormalizedKeys: customersSuppressedLocal,
     })
@@ -307,18 +319,6 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           customersNext,
           customersSuppressedNext,
         )
-      } else if (!fieldsNext.some((f) => f.key === 'unitPrice')) {
-        fieldsNext = mergeMissingDefaultFields(fieldsNext)
-        await persistRemote(
-          fieldsNext,
-          recordsNext,
-          catalogNext,
-          suppressedNext,
-          asrHotwordsNext,
-          correctionsNext,
-          customersNext,
-          customersSuppressedNext,
-        )
       }
       const normalized = normalizeBuiltinFieldLabels(fieldsNext)
       const needsPersist = normalized.some((nf) => {
@@ -341,7 +341,22 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         fieldsNext = normalized
       }
 
-      const prodId = fieldsNext.find((f) => f.key === 'product')?.id
+      const fieldMig = migrateRecordsToCurrentFieldIds(recordsNext, fieldsNext)
+      if (fieldMig.changed) {
+        recordsNext = fieldMig.records
+        await persistRemote(
+          fieldsNext,
+          recordsNext,
+          catalogNext,
+          suppressedNext,
+          asrHotwordsNext,
+          correctionsNext,
+          customersNext,
+          customersSuppressedNext,
+        )
+      }
+
+      const prodId = resolveBuiltinFieldId(fieldsNext, 'product')
       const mergedCatalog = mergeAutoProductCatalog({
         records: recordsNext,
         prodId,

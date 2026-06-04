@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import type { FieldDef, LedgerRecord } from '../types'
+import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
 import {
   StatsSharePieChart,
   getStatsSliceColor,
@@ -153,14 +153,17 @@ export type StatsCustomSectionProps = {
   fields: FieldDef[]
   records: LedgerRecord[]
   amountFieldId: string | undefined
+  productCatalog?: ProductCatalogEntry[]
 }
 
 function CustomStatBarChart({
   data,
   formatValue,
+  productCatalog = [],
 }: {
   data: { name: string; value: number }[]
   formatValue: (n: number) => string
+  productCatalog?: ProductCatalogEntry[]
 }) {
   const theme = useThemeColors()
   if (data.length === 0) {
@@ -206,7 +209,10 @@ function CustomStatBarChart({
             />
             <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={36}>
               {data.map((d, i) => (
-                <Cell key={i} fill={getStatsSliceColor(d.name, i)} />
+                <Cell
+                  key={i}
+                  fill={getStatsSliceColor(d.name, i, productCatalog)}
+                />
               ))}
             </Bar>
           </BarChart>
@@ -285,6 +291,7 @@ function CustomStatWidgetCard({
   fields,
   records,
   amountFieldId,
+  productCatalog = [],
   sortedFields,
   numberFields,
   onUpdate,
@@ -298,6 +305,7 @@ function CustomStatWidgetCard({
   fields: FieldDef[]
   records: LedgerRecord[]
   amountFieldId: string | undefined
+  productCatalog?: ProductCatalogEntry[]
   sortedFields: FieldDef[]
   numberFields: FieldDef[]
   onUpdate: (patch: Partial<CustomStatWidget>) => void
@@ -478,12 +486,17 @@ function CustomStatWidgetCard({
             {widget.viewType === 'pie' && (
               <StatsSharePieChart
                 data={chartRows}
+                productCatalog={productCatalog}
                 formatValue={formatValue}
                 emptyMessage="暂无数据"
               />
             )}
             {widget.viewType === 'bar' && (
-              <CustomStatBarChart data={chartRows} formatValue={formatValue} />
+              <CustomStatBarChart
+                data={chartRows}
+                productCatalog={productCatalog}
+                formatValue={formatValue}
+              />
             )}
             {widget.viewType === 'list' && (
               <CustomStatListTable
@@ -532,6 +545,7 @@ export function StatsCustomSection({
   fields,
   records,
   amountFieldId,
+  productCatalog = [],
 }: StatsCustomSectionProps) {
   const sortedFields = useMemo(
     () => [...fields].sort((a, b) => a.order - b.order),
@@ -619,6 +633,7 @@ export function StatsCustomSection({
               fields={fields}
               records={records}
               amountFieldId={amountFieldId}
+              productCatalog={productCatalog}
               sortedFields={sortedFields}
               numberFields={numberFields}
               onUpdate={(patch) => updateWidget(w.id, patch)}

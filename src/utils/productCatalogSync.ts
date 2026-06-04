@@ -1,5 +1,6 @@
 import type { LedgerRecord, ProductCatalogEntry } from '../types'
 import { normalizeCatalogEntry } from './productCatalogHelpers'
+import { defaultColorKeyForName } from './productColors'
 import { normalizeToken } from './voiceHistoryFuzzy'
 
 /** 出现次数 ≥ 此值且未在目录、未屏蔽时自动加入目录（默认单位 斤） */
@@ -90,6 +91,7 @@ export function mergeAutoProductCatalog(input: {
       unit: '斤',
       units: [{ name: '斤', factorToJin: 1, isDefault: true }],
       source: 'auto',
+      colorKey: defaultColorKeyForName(display),
     })
   }
 

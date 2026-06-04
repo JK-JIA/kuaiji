@@ -1,5 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { ensurePhotosPermission } from '../plugins/kuaijiPermissions'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import {
+  ensurePhotosPermission,
+  requestBillCameraPermissions,
+} from '../plugins/kuaijiPermissions'
+import {
+  applyCameraZoom,
+  defaultCameraZoomLevel,
+  getCameraZoomRange,
+  type CameraZoomRange,
+} from '../utils/cameraZoom'
 
 export type BillRecognizeResult =
   | { success: true }
@@ -38,6 +47,14 @@ export function BillCameraCaptureModal({
   const [torchOn, setTorchOn] = useState(false)
   const [torchSupported, setTorchSupported] = useState(false)
   const [focusPoint, setFocusPoint] = useState<FocusPoint | null>(null)
+  const [zoomLevel, setZoomLevel] = useState(1)
+  const [zoomRange, setZoomRange] = useState<CameraZoomRange | null>(null)
+
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>())
+  const pinchStartRef = useRef<{ dist: number; zoom: number } | null>(null)
+  const tapStartRef = useRef<{ x: number; y: number; pointerId: number } | null>(
+    null,
+  )
 
   const clearCapturedPreview = useCallback(() => {
     if (capturedUrlRef.current) {
@@ -57,6 +74,11 @@ export function BillCameraCaptureModal({
     setCameraStarting(false)
     setTorchOn(false)
     setTorchSupported(false)
+    setZoomLevel(1)
+    setZoomRange(null)
+    pointersRef.current.clear()
+    pinchStartRef.current = null
+    tapStartRef.current = null
   }, [])
 
   const cancelRecognize = useCallback(() => {
@@ -76,6 +98,11 @@ export function BillCameraCaptureModal({
     setRecognizeError(null)
     setCapturing(false)
     setFocusPoint(null)
+    setZoomLevel(1)
+    setZoomRange(null)
+    pointersRef.current.clear()
+    pinchStartRef.current = null
+    tapStartRef.current = null
     if (focusTimerRef.current) {
       clearTimeout(focusTimerRef.current)
       focusTimerRef.current = null
@@ -85,6 +112,17 @@ export function BillCameraCaptureModal({
   useEffect(() => {
     if (!open) resetAll()
   }, [open, resetAll])
+
+  const applyZoom = useCallback(
+    async (level: number) => {
+      const track = streamRef.current?.getVideoTracks()[0]
+      const range = zoomRange
+      if (!track || !range) return
+      const applied = await applyCameraZoom(track, level, range)
+      setZoomLevel(applied)
+    },
+    [zoomRange],
+  )
 
   const applyTorch = useCallback(async (on: boolean) => {
     const track = streamRef.current?.getVideoTracks()[0]
@@ -99,6 +137,28 @@ export function BillCameraCaptureModal({
     }
   }, [])
 
+  const attachStreamToVideo = useCallback(async (stream: MediaStream) => {
+    for (let i = 0; i < 8; i++) {
+      const video = videoRef.current
+      if (video) {
+        video.srcObject = stream
+        try {
+          await video.play()
+        } catch {
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve()),
+          )
+          await video.play().catch(() => undefined)
+        }
+        return true
+      }
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      )
+    }
+    return false
+  }, [])
+
   const startCamera = useCallback(async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraError('当前环境不支持相机')
@@ -107,14 +167,30 @@ export function BillCameraCaptureModal({
     setCameraStarting(true)
     setCameraError(null)
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const perms = await requestBillCameraPermissions()
+      if (!perms.camera) {
+        setCameraError('需要相机权限才能拍照，或使用相册选图')
+        return false
+      }
+
+      const constraints: MediaStreamConstraints = {
         video: {
           facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
+          ...({ zoom: { ideal: 1 } } as MediaTrackConstraints),
         },
         audio: false,
-      })
+      }
+
+      let stream: MediaStream | null = null
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints)
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false,
+        })
+      }
+
       streamRef.current?.getTracks().forEach((t) => t.stop())
       streamRef.current = stream
 
@@ -124,26 +200,36 @@ export function BillCameraCaptureModal({
       }
       setTorchSupported(Boolean(caps?.torch))
 
-      const video = videoRef.current
-      if (!video) {
+      const range = getCameraZoomRange(track)
+      if (range) {
+        setZoomRange(range)
+        const initial = defaultCameraZoomLevel(range)
+        const applied = await applyCameraZoom(track, initial, range)
+        setZoomLevel(applied)
+      } else {
+        setZoomRange(null)
+        setZoomLevel(1)
+      }
+
+      const attached = await attachStreamToVideo(stream)
+      if (!attached) {
         stream.getTracks().forEach((t) => t.stop())
         streamRef.current = null
+        setCameraError('无法打开相机，请重试或使用相册')
         return false
       }
-      video.srcObject = stream
-      await video.play()
       setCameraReady(true)
       return true
     } catch {
-      setCameraError('无法打开相机')
+      setCameraError('无法打开相机，请检查权限或使用相册')
       setCameraReady(false)
       return false
     } finally {
       setCameraStarting(false)
     }
-  }, [])
+  }, [attachStreamToVideo])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open || phase !== 'camera') return
     void startCamera()
   }, [open, phase, startCamera])
@@ -163,12 +249,18 @@ export function BillCameraCaptureModal({
     [clearCapturedPreview, stopCamera],
   )
 
-  const handlePreviewTap = useCallback(
-    async (e: React.PointerEvent<HTMLDivElement>) => {
-      if (phase !== 'camera' || !cameraReady || !previewRef.current) return
+  const pinchDistance = useCallback(() => {
+    const pts = [...pointersRef.current.values()]
+    if (pts.length < 2) return 0
+    return Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y)
+  }, [])
+
+  const focusAtClientPoint = useCallback(
+    async (clientX: number, clientY: number) => {
+      if (!previewRef.current) return
       const rect = previewRef.current.getBoundingClientRect()
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
+      const x = clientX - rect.left
+      const y = clientY - rect.top
       const normX = Math.min(1, Math.max(0, x / rect.width))
       const normY = Math.min(1, Math.max(0, y / rect.height))
 
@@ -190,7 +282,77 @@ export function BillCameraCaptureModal({
         /* 部分 WebView 不支持手动对焦，仅显示对焦框 */
       }
     },
-    [cameraReady, phase],
+    [],
+  )
+
+  const handlePreviewPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (phase !== 'camera' || !cameraReady) return
+      e.currentTarget.setPointerCapture(e.pointerId)
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      if (pointersRef.current.size === 2) {
+        pinchStartRef.current = { dist: pinchDistance(), zoom: zoomLevel }
+        tapStartRef.current = null
+      } else if (pointersRef.current.size === 1) {
+        tapStartRef.current = {
+          x: e.clientX,
+          y: e.clientY,
+          pointerId: e.pointerId,
+        }
+      }
+    },
+    [cameraReady, phase, pinchDistance, zoomLevel],
+  )
+
+  const handlePreviewPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (phase !== 'camera' || !cameraReady) return
+      if (!pointersRef.current.has(e.pointerId)) return
+      pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+      if (pointersRef.current.size >= 2 && pinchStartRef.current && zoomRange) {
+        const dist = pinchDistance()
+        if (dist > 8 && pinchStartRef.current.dist > 8) {
+          const ratio = dist / pinchStartRef.current.dist
+          void applyZoom(pinchStartRef.current.zoom * ratio)
+        }
+        return
+      }
+
+      if (tapStartRef.current?.pointerId === e.pointerId) {
+        const dx = e.clientX - tapStartRef.current.x
+        const dy = e.clientY - tapStartRef.current.y
+        if (Math.hypot(dx, dy) > 12) tapStartRef.current = null
+      }
+    },
+    [applyZoom, cameraReady, phase, pinchDistance, zoomRange],
+  )
+
+  const handlePreviewPointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      pointersRef.current.delete(e.pointerId)
+      if (pointersRef.current.size < 2) pinchStartRef.current = null
+
+      const tap = tapStartRef.current
+      if (
+        tap?.pointerId === e.pointerId &&
+        pointersRef.current.size === 0 &&
+        Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 12
+      ) {
+        void focusAtClientPoint(e.clientX, e.clientY)
+      }
+      if (pointersRef.current.size === 0) tapStartRef.current = null
+    },
+    [focusAtClientPoint],
+  )
+
+  const handlePreviewPointerCancel = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      pointersRef.current.delete(e.pointerId)
+      if (pointersRef.current.size < 2) pinchStartRef.current = null
+      if (pointersRef.current.size === 0) tapStartRef.current = null
+    },
+    [],
   )
 
   const handleCapture = useCallback(async () => {
@@ -295,7 +457,9 @@ export function BillCameraCaptureModal({
       {showLiveCamera ? (
         <video
           ref={videoRef}
-          className="absolute inset-0 h-full w-full object-cover"
+          className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-150 ${
+            cameraReady ? 'opacity-100' : 'opacity-0'
+          }`}
           playsInline
           muted
           autoPlay
@@ -314,8 +478,11 @@ export function BillCameraCaptureModal({
       {showLiveCamera ? (
         <div
           ref={previewRef}
-          className="absolute inset-0 z-[1]"
-          onPointerDown={(e) => void handlePreviewTap(e)}
+          className="absolute inset-0 z-[1] touch-none"
+          onPointerDown={handlePreviewPointerDown}
+          onPointerMove={handlePreviewPointerMove}
+          onPointerUp={handlePreviewPointerUp}
+          onPointerCancel={handlePreviewPointerCancel}
           aria-hidden
         />
       ) : null}
@@ -333,8 +500,8 @@ export function BillCameraCaptureModal({
       ) : null}
 
       {showLiveCamera && cameraStarting && !cameraReady ? (
-        <div className="absolute inset-0 z-[3] flex items-center justify-center bg-black/60">
-          <p className="text-sm text-white/80">正在打开相机…</p>
+        <div className="absolute inset-0 z-[3] flex items-center justify-center bg-black">
+          <SpinnerGlyph className="h-8 w-8 animate-spin text-white/50" />
         </div>
       ) : null}
 
@@ -346,7 +513,9 @@ export function BillCameraCaptureModal({
         </div>
       ) : null}
 
-      {(cameraError || recognizeError) && !showRecognizing ? (
+      {(cameraError || recognizeError) &&
+      !showRecognizing &&
+      !cameraStarting ? (
         <div className="absolute inset-x-0 top-[calc(env(safe-area-inset-top)+3.25rem)] z-[4] px-4">
           <p className="rounded-lg bg-black/70 px-3 py-2 text-center text-sm text-white/90">
             {recognizeError ?? cameraError}
@@ -400,7 +569,54 @@ export function BillCameraCaptureModal({
 
       {showLiveCamera ? (
         <div className="relative z-10 mt-auto flex flex-col items-center gap-2 px-4 pb-[max(1.75rem,env(safe-area-inset-bottom))]">
-          <p className="text-xs text-white/70">画面不清晰时，轻触要对焦的位置</p>
+          {zoomRange ? (
+            <div className="flex w-full max-w-[min(100%,20rem)] items-center gap-2 rounded-full bg-black/45 px-3 py-2">
+              <button
+                type="button"
+                onClick={() => void applyZoom(zoomLevel - zoomRange.step)}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-lg font-medium text-white/90"
+                aria-label="缩小"
+              >
+                −
+              </button>
+              <input
+                type="range"
+                min={zoomRange.min}
+                max={zoomRange.max}
+                step={zoomRange.step}
+                value={zoomLevel}
+                onChange={(e) => void applyZoom(Number(e.target.value))}
+                className="min-w-0 flex-1 accent-[#07c160]"
+                aria-label="镜头缩放"
+                aria-valuetext={`${zoomLevel.toFixed(1)} 倍`}
+              />
+              <button
+                type="button"
+                onClick={() => void applyZoom(zoomLevel + zoomRange.step)}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-lg font-medium text-white/90"
+                aria-label="放大"
+              >
+                +
+              </button>
+              <button
+                type="button"
+                onClick={() => void applyZoom(1)}
+                className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-medium tabular-nums ${
+                  Math.abs(zoomLevel - 1) < zoomRange.step * 0.51
+                    ? 'bg-white/25 text-white'
+                    : 'text-white/75'
+                }`}
+                aria-label="恢复 1 倍缩放"
+              >
+                {zoomLevel.toFixed(1)}x
+              </button>
+            </div>
+          ) : null}
+          <p className="text-center text-xs text-white/70">
+            {zoomRange
+              ? '双指捏合可缩放 · 轻触画面对焦'
+              : '画面不清晰时，轻触要对焦的位置'}
+          </p>
           <button
             type="button"
             onClick={() => void handleCapture()}

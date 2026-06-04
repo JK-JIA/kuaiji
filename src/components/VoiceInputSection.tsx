@@ -7,6 +7,10 @@ import type { LedgerLineForm } from '../utils/ledgerRecordDraft'
 import { messageIfPremiumFeatureBlocked } from '../utils/premiumGate'
 import { runVoiceParsePipeline } from '../utils/voiceParsePipeline'
 import { parseEmbeddedUnit } from '../utils/productUnits'
+import {
+  CATALOG_EMPTY_HINT,
+  hasProductCatalog,
+} from '../utils/productCatalogHelpers'
 import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
 import { useLedger } from '../context/LedgerContext'
 
@@ -42,6 +46,7 @@ type Props = {
   onApplyParsed: (
     data: Record<string, string>,
     productLines?: DoubaoProductLine[],
+    recordDate?: string,
   ) => void
   onFillFirstLine: (product: string, quantity: string) => void
 }
@@ -69,6 +74,7 @@ export function VoiceInputSection({
     [apiBase, token, membershipActive],
   )
   const canUseVoice = premiumBlocked === null
+  const catalogReady = hasProductCatalog(productCatalog)
 
   const [busy, setBusy] = useState(false)
 
@@ -108,6 +114,10 @@ export function VoiceInputSection({
       setHint(block)
       return
     }
+    if (!catalogReady) {
+      setHint(CATALOG_EMPTY_HINT)
+      return
+    }
     setBusy(true)
     setHint(null)
     try {
@@ -125,7 +135,11 @@ export function VoiceInputSection({
         setHint(pipeline.error ?? '解析失败')
         return
       }
-      onApplyParsed(pipeline.values, lineFormsToDoubaoLines(pipeline.lines))
+      onApplyParsed(
+        pipeline.values,
+        lineFormsToDoubaoLines(pipeline.lines),
+        pipeline.recordDate,
+      )
       if (pipeline.catalogWithAliases) {
         void mergeVoiceCatalogAliases(pipeline.catalogWithAliases)
       }
@@ -156,6 +170,11 @@ export function VoiceInputSection({
 
   return (
     <div className="rounded-2xl border border-kj-border-strong/80 bg-kj-surface p-4 text-left shadow-sm">
+      {!catalogReady && (
+        <p className="mb-3 text-sm leading-relaxed text-kj-secondary">
+          {CATALOG_EMPTY_HINT}
+        </p>
+      )}
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className="text-sm font-medium text-kj-secondary">语音</span>

@@ -2,6 +2,8 @@
  * 服务端豆包语音解析：模型与 Key 仅读 process.env，客户端无需重新打包即可随服务端升级。
  */
 
+import { resolveRecordDateFromParse } from './spokenRecordDate.js'
+
 function sanitizeUnsignedDecimalInput(raw: string): string {
   return raw.replace(/[^\d.]/g, '').replace(/^(\d*)\.(.*)\./, '$1.$2')
 }
@@ -37,6 +39,8 @@ export type VoiceParseResult = {
   success: boolean
   data?: Record<string, string>
   productLines?: VoiceProductLine[]
+  /** 记账日期 yyyy-MM-dd；未说日期时为今天 */
+  recordDate?: string
   error?: string
 }
 
@@ -110,19 +114,13 @@ function formatDoubaoHttpError(failure: ArkCallFailure, model: string): string {
   const suffix = detail ? `（${detail}）` : ''
 
   if (failure.status === 401) {
-    return `API Key 无效${suffix}，请检查服务端 DOUBAO_API_KEY`
+    return `智能解析服务认证失败${suffix}，请稍后再试`
   }
   if (failure.status === 403) {
-    return (
-      `无权调用模型「${model}」${suffix}。请在火山方舟开通该模型，或将 DOUBAO_MODEL 改为已开通的 ep-xxxx / 模型 ID。`
-    )
+    return `智能解析服务暂不可用${suffix}，请稍后再试`
   }
   if (failure.status === 404) {
-    const epHint =
-      model.startsWith('ep-') || model.length === 0
-        ? ''
-        : ' 推荐在火山方舟创建推理接入点（Doubao-lite 即可），将 DOUBAO_MODEL 设为接入点 ID（ep- 开头）。'
-    return `模型「${model || '(未配置)'}」不可用${suffix}。请核对服务端 DOUBAO_MODEL。${epHint}`
+    return `智能解析服务暂不可用${suffix}，请稍后再试`
   }
   if (failure.status === 429) {
     return '请求过于频繁，请稍后再试'
@@ -607,6 +605,11 @@ function buildVoiceParsePrompt(
 - 用户说「对方」「客户」「买家」时与「${buyerLabel}」同义，一律用 JSON 键「${buyerLabel}」输出。
 - **值只写标识本身**，不要把列名复述进值里：如用户说「${buyerLabel}4排三号」「对方4排三号」「买家 京A123」，值应分别为「4排三号」「4排三号」「京A123」，禁止写成「${buyerLabel}4排三号」。
 
+【记账日期】
+- 若用户说了日期，输出 JSON 键「记账日期」，值为 **yyyy-MM-dd**。
+- 支持：今天、昨天、前天、明天；**3月5日、三月五日**（用户**未说年份**时，一律用**当前公历年**的该月日，勿填往年）；**2025年3月5日**（说了四位数年份才用该年）；仅说「5号」为**今年**当月5日。
+- **未提日期则不要输出「记账日期」键**（系统默认记在今天）。
+
 【输出】只输出一个 JSON 对象，不要 markdown、不要解释。
 
 多商品示例：
@@ -636,6 +639,13 @@ function buildVoiceParsePrompt(
   ],
   "${buyerLabel}": "孙悟空"
 }
+
+带日期示例（用户：3月5日红薯30斤，未说年份）：
+{
+  "记账日期": "2026-03-05",
+  "商品明细": [ { "商品": "红薯", "数量": "30斤" } ]
+}
+说明：上例「记账日期」中年份须为**解析时的当前年**，仅「3月5日」不要写成去年或其它年份。
 
 单商品示例：
 {
@@ -764,10 +774,13 @@ export function mapModelContentToResult(
     productLines,
   )
 
+  const recordDate = resolveRecordDateFromParse(text, parsed)
+
   return {
     success: true,
     data: supplemented.mapped,
     productLines: supplemented.lines,
+    recordDate,
   }
 }
 
@@ -783,15 +796,13 @@ export async function parseVoiceOnServer(
   if (!doubaoEnvReady()) {
     return {
       success: false,
-      error:
-        '服务端未配置豆包：请在 ledger-api 环境变量设置 DOUBAO_API_KEY（及 DOUBAO_MODEL）。',
+      error: '智能解析服务暂未开通，请稍后再试。',
     }
   }
   if (!voiceParseModelReady()) {
     return {
       success: false,
-      error:
-        '服务端未配置 DOUBAO_MODEL。请在火山方舟「模型推理」创建接入点（建议 Doubao-lite），将接入点 ID（ep- 开头）写入环境变量后重启 ledger-api。',
+      error: '智能解析服务暂未开通，请稍后再试。',
     }
   }
 

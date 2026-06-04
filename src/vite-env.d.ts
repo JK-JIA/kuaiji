@@ -13,3 +13,9 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+/** 部分 Android WebView 支持扫码 */
+declare class BarcodeDetector {
+  constructor(options?: { formats?: string[] })
+  detect(source: ImageBitmapSource): Promise<Array<{ rawValue?: string }>>
+}

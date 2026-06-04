@@ -1,86 +1,87 @@
-import { format } from 'date-fns'
-import { zhCN } from 'date-fns/locale'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useModalBackClose } from '../hooks/useModalBackClose'
 import ReactDOM from 'react-dom'
 import { Capacitor } from '@capacitor/core'
 import { Directory, Filesystem } from '@capacitor/filesystem'
 import { Share } from '@capacitor/share'
-import type { FieldDef, LedgerRecord } from '../types'
-import { captureReceiptJpegBlob } from '../utils/receiptCapture'
-import {
-  getReceiptCaptureScale,
-  receiptImageExt,
-  receiptImageMime,
-} from '../utils/receiptExport'
-import {
-  expandProductLines,
-  getAmountFieldId,
-  getExpectedAmount,
-  getPlateValue,
-  getReceivedAmount,
-  getUnitPriceFieldId,
-  parseMoney,
-} from '../utils/recordHelpers'
+import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
+import { receiptImageExt, receiptImageMime } from '../utils/receiptExport'
+import { renderSingleReceiptBillBlob } from '../utils/searchResultBillPng'
 import { isShareDismissedByUser } from '../utils/shareDismissed'
-
-const PERMISSION_HINT_KEY = 'kuaiji_receipt_save_hint_seen'
 
 type Props = {
   open: boolean
   onClose: () => void
   record: LedgerRecord
   fields: FieldDef[]
+  productCatalog?: ProductCatalogEntry[]
 }
 
-function fmtMoney(n: number): string {
-  const x = Math.round(n * 100) / 100
-  return Number.isInteger(x) ? String(x) : x.toFixed(2)
-}
-
-export function ReceiptModal({ open, onClose, record, fields }: Props) {
-  const captureRef = useRef<HTMLDivElement>(null)
-  /** 打开预览后在空闲时预生成，保存时直出以接近 1s 内完成 */
-  const receiptBlobCacheRef = useRef<{ key: string; blob: Blob } | null>(null)
+export function ReceiptModal({
+  open,
+  onClose,
+  record,
+  fields,
+  productCatalog = [],
+}: Props) {
+  const blobCacheRef = useRef<{ key: string; blob: Blob } | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [explainOpen, setExplainOpen] = useState(false)
-  const [pendingSave, setPendingSave] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
 
-  const amountId = getAmountFieldId(fields)
-  const unitPriceId = getUnitPriceFieldId(fields)
-  const lines = expandProductLines(record, fields)
-  const plate = getPlateValue(record, fields) || '—'
-  const buyerLabel = fields.find((f) => f.key === 'plate')?.name ?? '购买方'
-  const exp = getExpectedAmount(record, amountId)
-  const rec = getReceivedAmount(record, exp)
-  const created = new Date(record.createdAt)
+  const cacheKey = `${record.id}:${record.createdAt}`
 
-  /** 打开预览时尽量先完成字体就绪，并在空闲时预生成 JPEG，减轻点击「保存」等待 */
+  const handleBackPress = useCallback(() => {
+    if (fullscreen) {
+      setFullscreen(false)
+      return true
+    }
+    return false
+  }, [fullscreen])
+
+  useModalBackClose(open, onClose, { onBackPress: handleBackPress })
+
   useEffect(() => {
     if (!open) {
-      receiptBlobCacheRef.current = null
+      setPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev)
+        return null
+      })
+      blobCacheRef.current = null
+      setFullscreen(false)
+      setGenerating(false)
       return
     }
 
     let cancelled = false
-    const cacheKey = `${record.id}:${record.createdAt}`
+    setGenerating(true)
 
     const runPrewarm = () => {
       void (async () => {
-        await new Promise<void>((r) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => r())),
-        )
-        if (cancelled) return
-        const el = captureRef.current
-        if (!el) return
         try {
-          await document.fonts?.ready?.catch(() => {})
+          const blob = await renderSingleReceiptBillBlob({
+            record,
+            fields,
+            productCatalog,
+          })
           if (cancelled) return
-          const scale = getReceiptCaptureScale()
-          const blob = await captureReceiptJpegBlob(el, scale)
-          if (cancelled || !blob) return
-          receiptBlobCacheRef.current = { key: cacheKey, blob }
+          blobCacheRef.current = { key: cacheKey, blob }
+          const url = URL.createObjectURL(blob)
+          setPreviewUrl((prev) => {
+            if (prev) URL.revokeObjectURL(prev)
+            return url
+          })
         } catch {
-          if (!cancelled) receiptBlobCacheRef.current = null
+          if (!cancelled) {
+            blobCacheRef.current = null
+            setPreviewUrl((prev) => {
+              if (prev) URL.revokeObjectURL(prev)
+              return null
+            })
+          }
+        } finally {
+          if (!cancelled) setGenerating(false)
         }
       })()
     }
@@ -90,10 +91,10 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
     if (typeof window.requestIdleCallback === 'function') {
       usedIdle = true
       idleOrTimerId = window.requestIdleCallback(runPrewarm, {
-        timeout: 2500,
+        timeout: 1200,
       })
     } else {
-      idleOrTimerId = window.setTimeout(runPrewarm, 400)
+      idleOrTimerId = window.setTimeout(runPrewarm, 0)
     }
 
     return () => {
@@ -101,20 +102,20 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
       if (usedIdle) window.cancelIdleCallback(idleOrTimerId)
       else window.clearTimeout(idleOrTimerId)
     }
-  }, [open, record.id, record.createdAt])
+  }, [open, record, fields, productCatalog, cacheKey])
 
   const doSave = async () => {
-    const el = captureRef.current
-    if (!el) return
     setBusy(true)
     try {
-      const cacheKey = `${record.id}:${record.createdAt}`
-      const hit = receiptBlobCacheRef.current
+      const hit = blobCacheRef.current
       let blob: Blob | null =
         hit && hit.key === cacheKey ? hit.blob : null
       if (!blob) {
-        const scale = getReceiptCaptureScale()
-        blob = await captureReceiptJpegBlob(el, scale)
+        blob = await renderSingleReceiptBillBlob({
+          record,
+          fields,
+          productCatalog,
+        })
       }
       if (!blob) throw new Error('生成图片失败')
 
@@ -158,9 +159,9 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
         try {
           await Share.share({
             title: '记账小票',
-            text: '保存图片：请在分享面板中选择相册或文件管理',
+            text: '分享图片：请在分享面板中选择相册或文件管理',
             url: uriResult.uri,
-            dialogTitle: '保存 / 分享小票',
+            dialogTitle: '分享小票',
           })
         } catch (shareErr) {
           if (!isShareDismissedByUser(shareErr)) throw shareErr
@@ -176,204 +177,121 @@ export function ReceiptModal({ open, onClose, record, fields }: Props) {
       URL.revokeObjectURL(url)
     } catch (e) {
       if (!isShareDismissedByUser(e)) {
-        alert(e instanceof Error ? e.message : '保存失败')
+        alert(e instanceof Error ? e.message : '分享失败')
       }
     } finally {
       setBusy(false)
     }
   }
 
-  const startSave = () => {
-    try {
-      if (!localStorage.getItem(PERMISSION_HINT_KEY)) {
-        setExplainOpen(true)
-        setPendingSave(true)
-        return
-      }
-    } catch {
-      /* ignore */
-    }
-    void doSave()
-  }
-
-  const onConfirmExplain = () => {
-    try {
-      localStorage.setItem(PERMISSION_HINT_KEY, '1')
-    } catch {
-      /* ignore */
-    }
-    setExplainOpen(false)
-    if (pendingSave) {
-      setPendingSave(false)
-      void doSave()
-    }
-  }
-
   if (!open) return null
 
   return ReactDOM.createPortal(
-    <div className="fixed inset-0 z-[100] flex flex-col bg-black/50 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-[max(0.5rem,env(safe-area-inset-top))]">
-      <button
-        type="button"
-        className="absolute inset-0"
-        aria-label="关闭"
-        onClick={onClose}
-      />
-      <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col overflow-hidden rounded-2xl bg-kj-surface shadow-xl">
-        <div className="flex shrink-0 items-center justify-between border-b border-kj-border/80 px-4 py-2.5">
-          <h2 className="text-base font-bold text-kj-primary">小票预览</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-sm font-medium text-kj-secondary"
-          >
-            关闭
-          </button>
-        </div>
-
-        <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-3 py-2">
-          {/* 截图区域仅用 hex/rgb 内联色：html2canvas 无法解析 Tailwind v4 的 oklch() */}
-          <div
-            ref={captureRef}
-            style={{
-              width: 'min(280px, 100%)',
-              margin: '0 auto',
-              boxSizing: 'border-box',
-              border: '1px dashed #d6d3d1',
-              backgroundColor: '#ffffff',
-              padding: '12px 14px',
-              fontFamily:
-                'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-              fontSize: 11,
-              lineHeight: 1.45,
-              color: '#171717',
-              boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.06)',
-            }}
-          >
-            <p
-              style={{
-                textAlign: 'center',
-                fontSize: 13,
-                fontWeight: 700,
-                letterSpacing: '0.16em',
-                margin: 0,
-              }}
+    <>
+      <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/50 px-3 py-[max(0.5rem,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <button
+          type="button"
+          className="absolute inset-0"
+          aria-label="关闭"
+          onClick={onClose}
+        />
+        <div className="relative z-10 mx-auto flex w-full max-w-md max-h-[min(92dvh,720px)] flex-col overflow-hidden rounded-2xl bg-kj-surface shadow-xl">
+          <div className="flex shrink-0 items-center justify-between border-b border-kj-border/80 px-4 py-2.5">
+            <h2 className="text-base font-bold text-kj-primary">小票预览</h2>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-sm font-medium text-kj-secondary"
             >
-              kuaiji
-            </p>
-            <p
-              style={{
-                marginTop: 2,
-                textAlign: 'center',
-                fontSize: 11,
-                color: '#666666',
-              }}
-            >
-              记账小票
-            </p>
-            <div
-              style={{
-                margin: '8px 0',
-                borderTop: '1px dashed #d6d3d1',
-              }}
-            />
-            <p style={{ margin: 0 }}>日期 {record.date}</p>
-            <p style={{ margin: 0 }}>
-              时间 {format(created, 'HH:mm', { locale: zhCN })}
-            </p>
-            <p style={{ margin: 0 }}>
-              {buyerLabel} {plate}
-            </p>
-            <div
-              style={{
-                margin: '6px 0',
-                borderTop: '1px dashed #e7e5e4',
-              }}
-            />
-            {lines.map((line, i) => {
-              const amt = parseMoney(line.lineAmountStr)
-              const up = parseMoney(line.unitPriceStr)
-              return (
-                <div key={`ln-${i}`} style={{ marginBottom: 4 }}>
-                  <p style={{ margin: 0, fontWeight: 600 }}>
-                    {line.product || '—'}
-                  </p>
-                  <p style={{ margin: 0, fontSize: 11, color: '#666666' }}>
-                    {unitPriceId && up > 0 ? `单价 ¥${fmtMoney(up)} · ` : ''}
-                    斤数 {line.quantity || '—'}
-                    {amt > 0 ? ` · 小计 ¥${fmtMoney(amt)}` : ''}
-                  </p>
-                </div>
-              )
-            })}
-            <div
-              style={{
-                margin: '6px 0',
-                borderTop: '1px dashed #e7e5e4',
-              }}
-            />
-            {amountId ? (
-              <>
-                <p style={{ margin: 0 }}>应收 ¥{fmtMoney(exp)}</p>
-                <p style={{ margin: 0 }}>已收 ¥{fmtMoney(rec)}</p>
-              </>
-            ) : null}
-            <p
-              style={{
-                marginTop: 6,
-                marginBottom: 0,
-                textAlign: 'center',
-                fontSize: 10,
-                color: '#999999',
-              }}
-            >
-              由 kuaiji 生成 · 仅供参考
-            </p>
+              关闭
+            </button>
           </div>
-        </div>
 
-        <div className="shrink-0 border-t border-kj-border/80 px-4 py-3">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => startSave()}
-            className="w-full rounded-xl bg-[#2ecc71] py-2.5 text-sm font-semibold text-white disabled:opacity-50"
-          >
-            {busy ? '处理中…' : '保存图片'}
-          </button>
+          <p className="shrink-0 px-4 pt-2 text-xs text-kj-secondary">
+            请核对内容，点击图片可全屏查看
+          </p>
+
+          <div className="max-h-[min(58dvh,28rem)] overflow-y-auto overscroll-contain px-3 py-2">
+            {generating && !previewUrl ? (
+              <div className="flex h-40 items-center justify-center text-sm text-kj-muted">
+                正在生成预览…
+              </div>
+            ) : previewUrl ? (
+              <button
+                type="button"
+                onClick={() => setFullscreen(true)}
+                className="mx-auto block w-full max-w-[min(100%,390px)] cursor-zoom-in overflow-hidden rounded-xl border border-kj-border/80 bg-[#f7f4ef] shadow-sm"
+                aria-label="全屏查看小票"
+              >
+                <img
+                  src={previewUrl}
+                  alt="记账小票预览"
+                  className="block w-full"
+                  draggable={false}
+                />
+              </button>
+            ) : (
+              <div className="flex h-40 items-center justify-center text-sm text-kj-muted">
+                预览生成失败，请重试
+              </div>
+            )}
+          </div>
+
+          <div className="shrink-0 border-t border-kj-border/80 px-4 py-3">
+            <button
+              type="button"
+              disabled={busy || generating || !previewUrl}
+              onClick={() => void doSave()}
+              className="w-full rounded-xl bg-[#2ecc71] py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {busy ? '处理中…' : '分享图片'}
+            </button>
+          </div>
         </div>
       </div>
 
-      {explainOpen && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 px-4">
-          <div className="max-w-sm rounded-2xl bg-kj-surface p-5 shadow-xl">
-            <p className="text-sm font-bold text-kj-primary">保存小票说明</p>
-            <p className="mt-2 text-xs leading-relaxed text-kj-secondary">
-              将生成 JPEG 图片（体积小、保存更快）。在安卓上会通过系统「分享」面板保存到相册或文件；首次使用请允许存储/分享相关权限。若未出现相册选项，可选择「保存到文件」或使用截图。需要更清晰可在设置中开启「高清导出」。
-            </p>
-            <div className="mt-4 flex gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setExplainOpen(false)
-                  setPendingSave(false)
-                }}
-                className="flex-1 rounded-xl border border-kj-border-strong py-2.5 text-sm font-semibold text-kj-secondary"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={onConfirmExplain}
-                className="flex-1 rounded-xl bg-[#2ecc71] py-2.5 text-sm font-semibold text-white"
-              >
-                继续
-              </button>
-            </div>
+      {fullscreen && previewUrl ? (
+        <div className="fixed inset-0 z-[110] flex flex-col bg-black">
+          <div className="flex shrink-0 items-center justify-between px-3 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
+            <button
+              type="button"
+              onClick={() => setFullscreen(false)}
+              className="flex h-11 w-11 items-center justify-center text-white"
+              aria-label="返回预览"
+            >
+              <BackGlyph className="h-6 w-6" />
+            </button>
+            <span className="text-sm font-medium text-white/90">全屏查看</span>
+            <span className="h-11 w-11" aria-hidden />
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            <img
+              src={previewUrl}
+              alt="记账小票全屏"
+              className="mx-auto block w-full max-w-lg"
+              draggable={false}
+            />
           </div>
         </div>
-      )}
-    </div>,
+      ) : null}
+
+    </>,
     document.body,
+  )
+}
+
+function BackGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={2}
+      stroke="currentColor"
+      className={className}
+      aria-hidden
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+    </svg>
   )
 }

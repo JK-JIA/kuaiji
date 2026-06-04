@@ -6,9 +6,11 @@ import { BrowserOnlyNotice } from './components/BrowserOnlyNotice'
 import './index.css'
 import { applyFontSizePercentToHtml, readFontSizePercent } from './utils/appFontSize'
 import { initTheme } from './utils/appTheme'
+import { captureInviteCodeFromLocation } from './utils/referralInvite'
 
 applyFontSizePercentToHtml(readFontSizePercent())
 initTheme()
+captureInviteCodeFromLocation()
 
 if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
   void import('@capgo/capacitor-updater').then(({ CapacitorUpdater }) => {

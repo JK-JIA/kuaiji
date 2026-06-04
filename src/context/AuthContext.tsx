@@ -12,6 +12,7 @@ import {
   apiOneClickLogin,
   apiRegister,
   apiSmsLogin,
+  bindReferralCode,
   cancelMembership,
   claimWelcomeMembership,
   clearSession,
@@ -34,6 +35,8 @@ type AuthContextValue = {
   membershipExpiresAt: string | null
   /** 是否已领取新用户 1 个月会员优惠 */
   welcomeMembershipClaimed: boolean
+  /** 是否已绑定他人邀请码（仅可绑定一次） */
+  invitedByBound: boolean
   /** 已登录时是否已完成至少一次 /api/me 同步（避免未同步前误弹新用户优惠） */
   profileLoaded: boolean
   /** 会员有效期内可使用云端账本 */
@@ -47,6 +50,7 @@ type AuthContextValue = {
   sendSms: (phone: string) => Promise<void>
   redeem: (code: string) => Promise<void>
   claimWelcomeMembership: () => Promise<void>
+  bindReferral: (code: string) => Promise<void>
   cancelMembership: () => Promise<void>
   refreshProfile: () => Promise<void>
   logout: () => void
@@ -63,6 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   >(() => getStoredMembershipExpires())
   const [welcomeMembershipClaimed, setWelcomeMembershipClaimed] =
     useState(false)
+  const [invitedByBound, setInvitedByBound] = useState(false)
   const [profileLoaded, setProfileLoaded] = useState(
     () => !getStoredToken() || !getApiBase(),
   )
@@ -77,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       mem: string | null | undefined,
       _phone?: string | null,
       welcomeClaimed?: boolean,
+      invitedBound?: boolean,
     ) => {
       persistSession(t, em, mem ?? null, _phone ?? null)
       setToken(t)
@@ -85,6 +91,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setStoredMembershipExpires(mem ?? null)
       if (welcomeClaimed !== undefined) {
         setWelcomeMembershipClaimed(welcomeClaimed)
+      }
+      if (invitedBound !== undefined) {
+        setInvitedByBound(invitedBound)
       }
     },
     [],
@@ -95,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStoredMembershipExpires(me.membershipExpiresAt)
     setEmail(me.email)
     setWelcomeMembershipClaimed(me.welcomeMembershipClaimed)
+    setInvitedByBound(Boolean(me.invitedByBound))
   }, [])
 
   const refreshProfile = useCallback(async () => {
@@ -126,6 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         r.membershipExpiresAt,
         r.phone,
         r.welcomeMembershipClaimed,
+        r.invitedByBound,
       )
     },
     [apiBase, applySession],
@@ -141,6 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         r.membershipExpiresAt,
         r.phone,
         r.welcomeMembershipClaimed,
+        r.invitedByBound,
       )
     },
     [apiBase, applySession],
@@ -156,6 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         r.membershipExpiresAt,
         r.phone,
         r.welcomeMembershipClaimed,
+        r.invitedByBound,
       )
     },
     [apiBase, applySession],
@@ -171,6 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         r.membershipExpiresAt,
         r.phone,
         r.welcomeMembershipClaimed,
+        r.invitedByBound,
       )
     },
     [apiBase, applySession],
@@ -199,6 +213,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     applyMe(me)
   }, [apiBase, token, applyMe])
 
+  const bindReferral = useCallback(
+    async (code: string) => {
+      if (!apiBase || !token) throw new Error('未登录')
+      const r = await bindReferralCode(apiBase, token, code)
+      applyMe(r.user)
+    },
+    [apiBase, token, applyMe],
+  )
+
   const cancelMembershipFn = useCallback(async () => {
     if (!apiBase || !token) throw new Error('未登录')
     const me = await cancelMembership(apiBase, token)
@@ -211,6 +234,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setEmail(null)
     setMembershipExpiresAt(null)
     setWelcomeMembershipClaimed(false)
+    setInvitedByBound(false)
     setProfileLoaded(true)
   }, [])
 
@@ -221,6 +245,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email,
       membershipExpiresAt,
       welcomeMembershipClaimed,
+      invitedByBound,
       profileLoaded,
       membershipActive,
       useRemoteLedger,
@@ -231,6 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       sendSms,
       redeem,
       claimWelcomeMembership: claimWelcomeMembershipFn,
+      bindReferral,
       cancelMembership: cancelMembershipFn,
       refreshProfile,
       logout,
@@ -241,6 +267,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email,
       membershipExpiresAt,
       welcomeMembershipClaimed,
+      invitedByBound,
       profileLoaded,
       membershipActive,
       useRemoteLedger,
@@ -251,6 +278,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       sendSms,
       redeem,
       claimWelcomeMembershipFn,
+      bindReferral,
       cancelMembershipFn,
       refreshProfile,
       logout,

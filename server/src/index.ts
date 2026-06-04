@@ -52,6 +52,14 @@ import {
   siteAdminAuthOk,
   siteAdminReady,
 } from './siteAdmin.js'
+import {
+  bindReferralInvite,
+  buildInviteUrl,
+  ensureUserInviteCode,
+  generateInviteCode,
+  REFERRAL_MAX_REWARD_MONTHS,
+  referralBindErrorMessage,
+} from './referral.js'
 
 const prisma = new PrismaClient()
 
@@ -193,6 +201,9 @@ function userJson(user: {
   phone: string | null
   membershipExpiresAt: Date | null
   welcomeMembershipClaimedAt?: Date | null
+  inviteCode?: string | null
+  invitedByUserId?: string | null
+  referralRewardMonths?: number
 }) {
   return {
     id: user.id,
@@ -200,6 +211,9 @@ function userJson(user: {
     phone: user.phone,
     membershipExpiresAt: user.membershipExpiresAt?.toISOString() ?? null,
     welcomeMembershipClaimed: Boolean(user.welcomeMembershipClaimedAt),
+    inviteCode: user.inviteCode ?? null,
+    invitedByBound: Boolean(user.invitedByUserId),
+    referralRewardMonths: user.referralRewardMonths ?? 0,
   }
 }
 
@@ -221,21 +235,36 @@ async function loginOrRegisterByPhone(phone: string) {
 
   if (!user) {
     const passwordHash = await bcrypt.hash(randomBytes(24).toString('hex'), 10)
-    user = await prisma.user.create({
-      data: {
-        email,
-        phone,
-        phoneVerifiedAt: new Date(),
-        passwordHash,
-        membershipExpiresAt: null,
-        ledger: {
-          create: {
-            fieldsJson: [],
-            recordsJson: [],
+    let created = false
+    for (let attempt = 0; attempt < 12 && !created; attempt++) {
+      try {
+        user = await prisma.user.create({
+          data: {
+            email,
+            phone,
+            phoneVerifiedAt: new Date(),
+            passwordHash,
+            membershipExpiresAt: null,
+            inviteCode: generateInviteCode(),
+            ledger: {
+              create: {
+                fieldsJson: [],
+                recordsJson: [],
+              },
+            },
           },
-        },
-      },
-    })
+        })
+        created = true
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : ''
+        if (!msg.includes('Unique constraint') || !msg.includes('inviteCode')) {
+          throw e
+        }
+      }
+    }
+    if (!created || !user) {
+      throw new Error('用户注册失败')
+    }
   } else {
     user = await prisma.user.update({
       where: { id: user.id },
@@ -364,15 +393,14 @@ app.post('/api/voice/parse', async (req, res) => {
   if (!doubaoEnvReady()) {
     res.status(503).json({
       success: false,
-      error: '服务端未配置豆包解析（DOUBAO_API_KEY）',
+      error: '智能解析服务暂未开通，请稍后再试。',
     })
     return
   }
   if (!voiceParseModelReady()) {
     res.status(503).json({
       success: false,
-      error:
-        '服务端未配置 DOUBAO_MODEL。请在火山方舟创建推理接入点，将 ep- 开头的接入点 ID 写入环境变量后重启 ledger-api。',
+      error: '智能解析服务暂未开通，请稍后再试。',
     })
     return
   }
@@ -424,15 +452,14 @@ app.post('/api/bill/parse', async (req, res) => {
   if (!doubaoEnvReady()) {
     res.status(503).json({
       success: false,
-      error: '服务端未配置豆包解析（DOUBAO_API_KEY）',
+      error: '图片识别服务暂未开通，请稍后再试。',
     })
     return
   }
   if (!billParseModelReady()) {
     res.status(503).json({
       success: false,
-      error:
-        '服务端未配置 DOUBAO_VISION_MODEL。请设置图片识别模型（如 doubao-seed-2-0-mini-260428）后重启 ledger-api。',
+      error: '图片识别服务暂未开通，请稍后再试。',
     })
     return
   }
@@ -479,6 +506,7 @@ app.post('/auth/register', async (req, res) => {
       email,
       passwordHash,
       membershipExpiresAt: null,
+      inviteCode: generateInviteCode(),
       ledger: {
         create: {
           fieldsJson: [],
@@ -638,6 +666,82 @@ app.get('/api/me', async (req, res) => {
     return
   }
   res.json(userJson(user))
+})
+
+const ReferralBindSchema = z.object({
+  code: z.string().min(1).max(32),
+})
+
+app.get('/api/referral/me', async (req, res) => {
+  const token = authHeader(req)
+  if (!token) {
+    res.status(401).json({ error: '未登录' })
+    return
+  }
+  const userId = userIdFromToken(token)
+  if (!userId) {
+    res.status(401).json({ error: '无效令牌' })
+    return
+  }
+  try {
+    const inviteCode = await ensureUserInviteCode(prisma, userId)
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } })
+    const inviteCount = await prisma.referral.count({
+      where: { inviterId: userId },
+    })
+    res.json({
+      inviteCode,
+      inviteUrl: buildInviteUrl(inviteCode),
+      referralRewardMonths: user.referralRewardMonths,
+      referralMaxRewardMonths: REFERRAL_MAX_REWARD_MONTHS,
+      inviteCount,
+      invitedByBound: Boolean(user.invitedByUserId),
+      canEarnMoreReferral:
+        user.referralRewardMonths < REFERRAL_MAX_REWARD_MONTHS,
+    })
+  } catch (e) {
+    console.error('[referral/me]', e)
+    res.status(500).json({ error: '获取邀请信息失败' })
+  }
+})
+
+app.post('/api/referral/bind', async (req, res) => {
+  const token = authHeader(req)
+  if (!token) {
+    res.status(401).json({ error: '未登录' })
+    return
+  }
+  const userId = userIdFromToken(token)
+  if (!userId) {
+    res.status(401).json({ error: '无效令牌' })
+    return
+  }
+  const parsed = ReferralBindSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: '邀请码格式无效' })
+    return
+  }
+  try {
+    const result = await bindReferralInvite(
+      prisma,
+      userId,
+      parsed.data.code,
+      extendMembershipExpires,
+    )
+    if (!result.ok) {
+      res.status(400).json({ error: referralBindErrorMessage(result.error) })
+      return
+    }
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } })
+    res.json({
+      ok: true,
+      inviterRewarded: result.inviterRewarded,
+      user: userJson(user),
+    })
+  } catch (e) {
+    console.error('[referral/bind]', e)
+    res.status(500).json({ error: '绑定邀请码失败' })
+  }
 })
 
 app.get('/api/membership/plans', (_req, res) => {

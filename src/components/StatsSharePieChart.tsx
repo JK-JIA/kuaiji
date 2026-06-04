@@ -1,4 +1,6 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
+import type { ProductCatalogEntry } from '../types'
+import { getProductChartColor } from '../utils/productColors'
 import { useThemeColors } from '../utils/themeColors'
 
 export const STATS_CHART_COLORS = [
@@ -15,21 +17,12 @@ export const STATS_CHART_COLORS = [
   '#95a5a6',
 ]
 
-/** 薯类商品饼图固定色；其余用默认色板按序号取色 */
-const SLICE_COLOR_BY_KEYWORD: { keyword: string; color: string }[] = [
-  { keyword: '圆紫薯', color: '#3498db' },
-  { keyword: '紫薯', color: '#9b59b6' },
-  { keyword: '烟薯', color: '#2ecc71' },
-  { keyword: '白薯', color: '#b0bec5' },
-  { keyword: '红薯', color: '#e74c3c' },
-]
-
-export function getStatsSliceColor(name: string, fallbackIndex: number): string {
-  const n = name.trim()
-  for (const { keyword, color } of SLICE_COLOR_BY_KEYWORD) {
-    if (n.includes(keyword)) return color
-  }
-  return STATS_CHART_COLORS[fallbackIndex % STATS_CHART_COLORS.length]
+export function getStatsSliceColor(
+  name: string,
+  fallbackIndex: number,
+  productCatalog: ProductCatalogEntry[] = [],
+): string {
+  return getProductChartColor(name, productCatalog, fallbackIndex)
 }
 
 export type StatsPieDatum = { name: string; value: number }
@@ -138,6 +131,7 @@ function renderSlicePercentLabel(
 type StatsSharePieChartProps = {
   data: StatsPieDatum[]
   formatValue: (n: number) => string
+  productCatalog?: ProductCatalogEntry[]
   emptyMessage?: string
   /** 点击扇区或图例项 */
   onItemClick?: (name: string) => void
@@ -148,6 +142,7 @@ type StatsSharePieChartProps = {
 export function StatsSharePieChart({
   data,
   formatValue,
+  productCatalog = [],
   emptyMessage = '暂无数据',
   onItemClick,
   nonClickableNames = [],
@@ -196,7 +191,7 @@ export function StatsSharePieChart({
               {data.map((d, i) => (
                 <Cell
                   key={i}
-                  fill={getStatsSliceColor(d.name, i)}
+                  fill={getStatsSliceColor(d.name, i, productCatalog)}
                   stroke={theme.surface}
                   strokeWidth={2}
                   style={canClick(d.name) ? { cursor: 'pointer' } : undefined}
@@ -237,7 +232,7 @@ export function StatsSharePieChart({
 
       <ul className="min-w-0 flex-1 space-y-2.5 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] sm:max-h-[220px] sm:py-1">
         {data.map((d, i) => {
-          const color = getStatsSliceColor(d.name, i)
+          const color = getStatsSliceColor(d.name, i, productCatalog)
           const clickable = canClick(d.name)
           return (
             <li key={`${d.name}-${i}`}>

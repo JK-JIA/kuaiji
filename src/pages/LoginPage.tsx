@@ -3,6 +3,13 @@ import ReactDOM from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { fetchApiHealth, getStoredPhone } from '../api/ledgerClient'
+import { InviteCodeScanModal } from '../components/InviteCodeScanModal'
+import { consumePendingInviteCode } from '../utils/consumePendingInvite'
+import {
+  normalizeInviteCode,
+  readPendingInviteCode,
+  writePendingInviteCode,
+} from '../utils/referralInvite'
 import { CtAccountLegalMenuModal } from '../components/CtAccountLegalMenuModal'
 import {
   CT_ACCOUNT_PRIVACY_POLICY,
@@ -222,8 +229,16 @@ function AdminLoginLink({ onClick }: { onClick: () => void }) {
 }
 
 export function LoginPage() {
-  const { token, apiBase, login, smsLogin, oneClickLogin, sendSms, refreshProfile } =
-    useAuth()
+  const {
+    token,
+    apiBase,
+    login,
+    smsLogin,
+    oneClickLogin,
+    sendSms,
+    refreshProfile,
+    bindReferral,
+  } = useAuth()
   const navigate = useNavigate()
 
   const nativeOneClick = isNumberAuthNative()
@@ -247,6 +262,8 @@ export function LoginPage() {
   const [carrierHint, setCarrierHint] = useState('')
   const [maskedPhone, setMaskedPhone] = useState('')
   const [serverOneClick, setServerOneClick] = useState(true)
+  const [inviteCode, setInviteCode] = useState(() => readPendingInviteCode() ?? '')
+  const [inviteScanOpen, setInviteScanOpen] = useState(false)
 
   const displayPhone =
     maskedPhone ||
@@ -351,6 +368,23 @@ export function LoginPage() {
     setErrorMsg('')
   }
 
+  async function finishLoginWithInviteBind() {
+    await refreshProfile()
+    const manual = normalizeInviteCode(inviteCode)
+    if (manual.length >= 4) {
+      try {
+        await bindReferral(manual)
+        writePendingInviteCode(null)
+      } catch (e) {
+        setErrorMsg(e instanceof Error ? e.message : '邀请码绑定失败')
+      }
+    } else {
+      const pending = await consumePendingInviteCode(bindReferral)
+      if (!pending.ok) setErrorMsg(pending.message)
+    }
+    navigate('/', { replace: true })
+  }
+
   async function handleOneClickLogin() {
     if (!nativeOneClick) {
       setErrorMsg('')
@@ -371,8 +405,7 @@ export function LoginPage() {
       // 预取号后走授权页取 token（静默 accelerate 无法稳定拿到掩码/ token）
       ;({ accessToken } = await NumberAuth.login())
       await oneClickLogin(accessToken)
-      await refreshProfile()
-      navigate('/', { replace: true })
+      await finishLoginWithInviteBind()
     } catch (e) {
       const msg = e instanceof Error ? e.message : '一键登录失败'
       if (msg.includes('USER_CANCEL')) {
@@ -405,8 +438,7 @@ export function LoginPage() {
     try {
       await smsLogin(phone, smsCode.trim())
       setSmsCode('')
-      await refreshProfile()
-      navigate('/', { replace: true })
+      await finishLoginWithInviteBind()
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : '登录失败')
     } finally {
@@ -420,8 +452,7 @@ export function LoginPage() {
     try {
       await login(authEmail.trim(), authPw)
       setAuthPw('')
-      await refreshProfile()
-      navigate('/', { replace: true })
+      await finishLoginWithInviteBind()
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : '登录失败')
     } finally {
@@ -532,6 +563,30 @@ export function LoginPage() {
                   serverOneClickReady={serverOneClick}
                   onOpenLegal={setLegalModal}
                 />
+                <div className="mt-3">
+                  <label className="mb-1 block text-center text-[12px] font-medium text-stone-500 dark:text-zinc-400">
+                    邀请码（选填）
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={inviteCode}
+                      onChange={(e) =>
+                        setInviteCode(normalizeInviteCode(e.target.value))
+                      }
+                      placeholder="好友邀请码"
+                      className={`${inputCls} flex-1`}
+                      autoCapitalize="characters"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setInviteScanOpen(true)}
+                      className="shrink-0 rounded-xl border border-stone-200/80 bg-white/80 px-3 py-3 text-[13px] font-semibold text-stone-700 dark:border-zinc-600 dark:bg-zinc-700/80 dark:text-zinc-200"
+                    >
+                      扫码
+                    </button>
+                  </div>
+                </div>
                 <AdminLoginLink
                   onClick={() => {
                     setAuthMode('admin')
@@ -584,6 +639,30 @@ export function LoginPage() {
                   >
                     {smsWaitSec > 0 ? `${smsWaitSec}s` : '获取验证码'}
                   </button>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[12px] font-medium text-stone-500 dark:text-zinc-400">
+                    邀请码（选填，仅可绑定一次）
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={inviteCode}
+                      onChange={(e) =>
+                        setInviteCode(normalizeInviteCode(e.target.value))
+                      }
+                      placeholder="好友邀请码"
+                      className={`${inputCls} flex-1`}
+                      autoCapitalize="characters"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setInviteScanOpen(true)}
+                      className="shrink-0 rounded-xl border border-stone-200/80 bg-white/80 px-3 py-3 text-[13px] font-semibold text-stone-700 dark:border-zinc-600 dark:bg-zinc-700/80 dark:text-zinc-200"
+                    >
+                      扫码
+                    </button>
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -699,6 +778,15 @@ export function LoginPage() {
           onClose={() => setLegalModal(null)}
         />
       )}
+
+      <InviteCodeScanModal
+        open={inviteScanOpen}
+        onClose={() => setInviteScanOpen(false)}
+        onCode={(code) => {
+          setInviteCode(code)
+          writePendingInviteCode(code)
+        }}
+      />
     </div>
   )
 }

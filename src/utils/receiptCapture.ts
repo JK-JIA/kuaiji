@@ -72,11 +72,45 @@ export async function captureReceiptJpegBlob(
     scale,
     backgroundColor: '#ffffff',
   })
+  return canvasToJpegBlob(canvas)
+}
+
+export function canvasToJpegBlob(
+  canvas: HTMLCanvasElement,
+  quality = receiptImageQuality,
+): Promise<Blob | null> {
   return new Promise((resolve) => {
     canvas.toBlob(
       (b) => resolve(b),
       receiptImageMime,
-      receiptImageQuality,
+      quality,
     )
   })
+}
+
+/**
+ * 在隔离 iframe 内对节点截图 → JPEG（用于筛选账单等纯内联样式 DOM，跳过 importNode）。
+ */
+export async function captureIsolatedElementJpegBlob(
+  el: HTMLElement,
+  options: {
+    scale?: number
+    backgroundColor?: string
+  } = {},
+): Promise<Blob> {
+  await new Promise<void>((resolve) =>
+    requestAnimationFrame(() => resolve()),
+  )
+
+  const canvas = await html2canvas(el, {
+    scale: options.scale ?? 1,
+    backgroundColor: options.backgroundColor ?? '#ffffff',
+    useCORS: true,
+    allowTaint: false,
+    imageTimeout: 0,
+    logging: false,
+  })
+  const blob = await canvasToJpegBlob(canvas)
+  if (!blob) throw new Error('生成图片失败')
+  return blob
 }

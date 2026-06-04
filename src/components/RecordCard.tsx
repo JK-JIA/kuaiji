@@ -576,6 +576,7 @@ export function RecordCard({
         onClose={() => setReceiptOpen(false)}
         record={record}
         fields={fields}
+        productCatalog={productCatalog}
       />
     </div>
   )

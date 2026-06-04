@@ -1,6 +1,9 @@
 import Dexie, { type Table } from 'dexie'
 import { getDefaultFieldDefs } from '../constants/defaultLedgerFields'
-import { mergeMissingDefaultFields } from '../constants/mergeBuiltinFields'
+import {
+  mergeMissingDefaultFields,
+  normalizeBuiltinFieldLabels,
+} from '../constants/mergeBuiltinFields'
 import type { FieldDef, LedgerRecord, ProductCatalogEntry, CustomerEntry } from '../types'
 import type { VoiceProductCorrection } from '../utils/voiceProductCorrections'
 import { parseVoiceProductCorrections } from '../utils/voiceProductCorrections'
@@ -87,25 +90,36 @@ export class LedgerDatabase extends Dexie {
       customerCatalog: '&id, buyerKey',
       customerCatalogSettings: '&id',
     })
+    this.version(7)
+      .stores({
+        fields: '&id, order',
+        records: '&id, date, createdAt',
+        productCatalog: '&id, name',
+        productCatalogSettings: '&id',
+        voiceCorrectionsSettings: '&id',
+        customerCatalog: '&id, buyerKey',
+        customerCatalogSettings: '&id',
+      })
+      .upgrade(async (tx) => {
+        const all = (await tx.table('fields').toArray()) as FieldDef[]
+        const merged = normalizeBuiltinFieldLabels(all)
+        const changed = merged.some((nf, i) => nf.name !== all[i]?.name)
+        if (changed) {
+          await tx.table('fields').clear()
+          await tx.table('fields').bulkPut(merged)
+        }
+      })
   }
 }
 
 export const db = new LedgerDatabase()
 
 export async function ensureDefaultFields(): Promise<FieldDef[]> {
+  const existing = await db.fields.orderBy('order').toArray()
+  if (existing.length > 0) return existing
   const defaults = getDefaultFieldDefs()
-  await db.transaction('rw', db.fields, async () => {
-    for (const row of defaults) {
-      try {
-        await db.fields.add(row)
-      } catch (e: unknown) {
-        const name = e instanceof Error ? e.name : ''
-        /** 已存在（并发 / StrictMode 重复初始化） */
-        if (name !== 'ConstraintError') throw e
-      }
-    }
-  })
-  return db.fields.orderBy('order').toArray()
+  await db.fields.bulkAdd(defaults)
+  return defaults
 }
 
 export async function addRecord(rec: LedgerRecord): Promise<void> {

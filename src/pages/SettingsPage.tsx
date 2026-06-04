@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router-dom'
 import type { FieldDef, ProductCatalogEntry } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { useLedger } from '../context/LedgerContext'
 import { TRIGGER_ANDROID_UPDATE_CHECK } from '../components/AppUpdateGate'
+import { InviteCodeBindSheet } from '../components/InviteCodeBindSheet'
+import { InviteCodeScanModal } from '../components/InviteCodeScanModal'
+import { ReferralInviteSheet } from '../components/ReferralInviteSheet'
 import { APP_VERSION } from '../version'
 import { getStoredPhone } from '../api/ledgerClient'
 import {
@@ -38,9 +42,16 @@ import {
 } from './settings/VoiceParseSettingsScreen'
 import { VoiceLexiconSettingsScreen } from './settings/VoiceLexiconSettingsScreen'
 import { CustomerCatalogSettingsScreen } from './settings/CustomerCatalogSettingsScreen'
+import { ProductCatalogColorPicker } from './settings/ProductCatalogColorPicker'
 import { ProductCatalogUnitEditor } from './settings/ProductCatalogUnitEditor'
 import { SwipeDeleteRow } from '../components/SwipeDeleteRow'
 import { catalogEntryWithUnits } from '../utils/productCatalogHelpers'
+import {
+  isBuiltinFieldsLayoutCustomized,
+  restoreAllBuiltinFields,
+} from '../constants/mergeBuiltinFields'
+import { IconLock, IconLockOpen } from './settings/settingsIcons'
+import { pickUnusedColorKey } from '../utils/productColors'
 import { BASE_STAT_UNIT } from '../utils/productUnits'
 import { asrProviderLabel, readAsrProvider } from '../utils/asrProvider'
 import { ProBenefitsSheet, ProRedeemSheet } from './settings/ProMembershipSheets'
@@ -442,6 +453,8 @@ export function SettingsPage() {
     welcomeMembershipClaimed,
     redeem,
     claimWelcomeMembership,
+    bindReferral,
+    invitedByBound,
     cancelMembership,
     refreshProfile,
   } = useAuth()
@@ -465,6 +478,13 @@ export function SettingsPage() {
   const [name, setName] = useState('')
   const [type, setType] = useState<'text' | 'number'>('text')
   const [busy, setBusy] = useState(false)
+  const [fieldToast, setFieldToast] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!fieldToast) return
+    const t = window.setTimeout(() => setFieldToast(null), 3200)
+    return () => clearTimeout(t)
+  }, [fieldToast])
   const { panel, openPanel, closeSubPanel } =
     useSettingsPanelNavigation<SettingsPanel>('main')
   const location = useLocation()
@@ -473,6 +493,9 @@ export function SettingsPage() {
   const [userProfile, setUserProfile] = useState(() => readUserProfile())
   const [proBenefitsOpen, setProBenefitsOpen] = useState(false)
   const [proRedeemOpen, setProRedeemOpen] = useState(false)
+  const [referralInviteOpen, setReferralInviteOpen] = useState(false)
+  const [inviteScanOpen, setInviteScanOpen] = useState(false)
+  const [inviteBindOpen, setInviteBindOpen] = useState(false)
   const [newProductName, setNewProductName] = useState('')
   const [newProductUnit, setNewProductUnit] = useState('斤')
   /** 正在编辑计量单位的商品 id（此时禁用左滑删除） */
@@ -578,6 +601,13 @@ export function SettingsPage() {
         '',
       )
     }
+    if (st?.openPanel === 'catalog') {
+      openPanel('catalog')
+      window.history.replaceState(
+        { ...(window.history.state as object), settingsPanel: 'catalog' },
+        '',
+      )
+    }
     if (st?.openProRedeem) {
       setProRedeemOpen(true)
       navigate(`${location.pathname}${location.search}`, {
@@ -590,6 +620,11 @@ export function SettingsPage() {
   const addField = async () => {
     const n = name.trim()
     if (!n) return
+    const nk = normalizeToken(n)
+    if (sorted.some((f) => normalizeToken(f.name) === nk)) {
+      setFieldToast('字段已经存在，请勿重复添加')
+      return
+    }
     setBusy(true)
     try {
       const maxOrder = sorted.reduce((m, f) => Math.max(m, f.order), 0)
@@ -612,10 +647,7 @@ export function SettingsPage() {
 
   const removeField = async (id: string) => {
     const target = sorted.find((f) => f.id === id)
-    if (target?.key) {
-      alert('默认字段（商品 / 单价 / 斤数 / 购买方 / 金额）不能删除，可改名。')
-      return
-    }
+    if (!target) return
     setBusy(true)
     try {
       await saveFields(sorted.filter((f) => f.id !== id))
@@ -624,9 +656,25 @@ export function SettingsPage() {
     }
   }
 
+  const restoreAllSystemDefaults = async () => {
+    setBusy(true)
+    try {
+      await saveFields(restoreAllBuiltinFields())
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const renameField = async (id: string, newName: string) => {
+    const n = newName.trim()
+    if (!n) return
+    const nk = normalizeToken(n)
+    if (sorted.some((f) => f.id !== id && normalizeToken(f.name) === nk)) {
+      setFieldToast('字段已经存在，请换一个名称')
+      return
+    }
     const next = sorted.map((f) =>
-      f.id === id ? { ...f, name: newName } : f,
+      f.id === id ? { ...f, name: n } : f,
     )
     await saveFields(next)
   }
@@ -653,7 +701,13 @@ export function SettingsPage() {
           productCatalog.map((e) =>
             e.id === dup.id
               ? catalogEntryWithUnits(
-                  { ...dup, name: n, source: 'manual' as const },
+                  {
+                    ...dup,
+                    name: n,
+                    source: 'manual' as const,
+                    colorKey:
+                      dup.colorKey ?? pickUnusedColorKey(productCatalog),
+                  },
                   [{ name: u, factorToJin: 1, isDefault: true }],
                 )
               : e,
@@ -683,6 +737,7 @@ export function SettingsPage() {
               name: n,
               unit: u,
               source: 'manual',
+              colorKey: pickUnusedColorKey(productCatalog),
             },
             [{ name: u, factorToJin: 1, isDefault: true }],
           ),
@@ -797,6 +852,8 @@ export function SettingsPage() {
         renameField={renameField}
         setFieldRequired={setFieldRequired}
         removeField={removeField}
+        restoreAllSystemDefaults={restoreAllSystemDefaults}
+        fieldToast={fieldToast}
       />
     )
   }
@@ -902,7 +959,7 @@ export function SettingsPage() {
         <SettingsSubHeader title="商品管理" onBack={closeSubPanel} />
         <SettingsPanelBody>
           <p className="px-1 text-sm leading-relaxed text-stone-500">
-            配置商品与单位换算，记账选单位，统计自动折合斤。
+            配置商品、颜色与单位换算；颜色用于小票、导出图片与统计图表。
           </p>
           <div className={SETTINGS_CARD_CLASS}>
             <div className="mb-5 flex flex-wrap items-end gap-3">
@@ -960,6 +1017,17 @@ export function SettingsPage() {
                           <span className="shrink-0 text-base font-semibold text-kj-primary">
                             {row.name}
                           </span>
+                          <ProductCatalogColorPicker
+                            productName={row.name}
+                            colorKey={row.colorKey}
+                            disabled={busy}
+                            onChange={(colorKey) =>
+                              void saveProductCatalogEntry({
+                                ...row,
+                                colorKey,
+                              })
+                            }
+                          />
                           <ProductCatalogUnitEditor
                             entry={row}
                             disabled={busy}
@@ -1077,7 +1145,17 @@ export function SettingsPage() {
             </SettingsHeaderIconButton>
             <SettingsHeaderIconButton
               label="扫码"
-              onClick={() => alert('扫码功能即将上线')}
+              onClick={() => {
+                if (!token) {
+                  openPanel('account')
+                  return
+                }
+                if (invitedByBound) {
+                  alert('您已绑定过邀请码，每位用户仅可被邀请一次')
+                  return
+                }
+                setInviteScanOpen(true)
+              }}
             >
               <IconScan className="h-5 w-5" />
             </SettingsHeaderIconButton>
@@ -1118,6 +1196,77 @@ export function SettingsPage() {
           onPurchaseSuccess={refreshProfile}
           onCancelMembership={cancelMembership}
         />
+
+        {token && apiBase ? (
+          <ReferralInviteSheet
+            open={referralInviteOpen}
+            onClose={() => setReferralInviteOpen(false)}
+            apiBase={apiBase}
+            token={token}
+          />
+        ) : null}
+
+        <InviteCodeScanModal
+          open={inviteScanOpen}
+          onClose={() => setInviteScanOpen(false)}
+          onCode={(code) => {
+            if (!token) {
+              openPanel('account')
+              return
+            }
+            void bindReferral(code)
+              .then(() => {
+                alert('邀请码绑定成功')
+                void refreshProfile()
+              })
+              .catch((e) => {
+                alert(e instanceof Error ? e.message : '绑定失败')
+              })
+          }}
+        />
+
+        <InviteCodeBindSheet
+          open={inviteBindOpen}
+          onClose={() => setInviteBindOpen(false)}
+          onScan={() => {
+            setInviteBindOpen(false)
+            setInviteScanOpen(true)
+          }}
+          onBind={bindReferral}
+        />
+
+        <section>
+          <SettingsGroupLabel>会员与邀请</SettingsGroupLabel>
+          <SettingsInsetList>
+            <SettingsNavRowButton
+              first
+              last={!token || invitedByBound}
+              icon={<IconSparkles className="h-[18px] w-[18px]" />}
+              title="邀请好友"
+              subtitle={
+                token
+                  ? '分享二维码，好友注册您得 1 个月会员（最多 12 个月）'
+                  : '登录后生成邀请码'
+              }
+              onClick={() => {
+                if (!token) {
+                  openPanel('account')
+                  return
+                }
+                setReferralInviteOpen(true)
+              }}
+            />
+            {token && !invitedByBound ? (
+              <SettingsNavRowButton
+                last
+                icon={<IconScan className="h-[18px] w-[18px]" />}
+                title="填写邀请码"
+                subtitle="被好友邀请下载后可绑定，仅一次机会"
+                onClick={() => setInviteBindOpen(true)}
+              />
+            ) : null}
+          </SettingsInsetList>
+        </section>
 
         <section>
           <SettingsGroupLabel>账本与数据</SettingsGroupLabel>
@@ -1227,6 +1376,8 @@ function LedgerFieldsSubScreen({
   renameField,
   setFieldRequired,
   removeField,
+  restoreAllSystemDefaults,
+  fieldToast,
 }: {
   onBack: () => void
   sorted: FieldDef[]
@@ -1239,13 +1390,42 @@ function LedgerFieldsSubScreen({
   renameField: (id: string, newName: string) => Promise<void>
   setFieldRequired: (id: string, required: boolean) => Promise<void>
   removeField: (id: string) => Promise<void>
+  restoreAllSystemDefaults: () => Promise<void>
+  fieldToast: string | null
 }) {
+  const [unlockedBuiltinIds, setUnlockedBuiltinIds] = useState<Set<string>>(
+    () => new Set(),
+  )
+  const [restoreConfirmStep, setRestoreConfirmStep] = useState<0 | 1 | 2>(0)
+
+  const customFieldCount = sorted.filter((f) => !f.key).length
+
+  const closeRestoreConfirm = () => setRestoreConfirmStep(0)
+
+  const confirmRestoreDefaults = () => {
+    void restoreAllSystemDefaults().then(() => {
+      setUnlockedBuiltinIds(new Set())
+      closeRestoreConfirm()
+    })
+  }
+
+  const toggleBuiltinUnlock = (id: string) => {
+    setUnlockedBuiltinIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const showRestoreAllHint = isBuiltinFieldsLayoutCustomized(sorted)
+
   return (
     <div className={SETTINGS_SHELL_BG}>
       <SettingsSubHeader title="自定义账本字段" onBack={onBack} />
       <SettingsPanelBody>
         <p className="px-1 text-[12px] leading-relaxed text-stone-500">
-          含商品、单价、斤数、购买方、金额等内置列；可加自定义列。「必填」在记账页标星并校验。
+          含商品、单价、数量、购买方、金额等系统列；数量单位随商品管理。系统列默认上锁不可删，点锁图标解锁后可左滑删除；自定义列可直接左滑删除。
         </p>
 
         <section>
@@ -1281,51 +1461,194 @@ function LedgerFieldsSubScreen({
         </section>
 
         <section>
-          <h2 className="mb-2 text-[13px] font-semibold text-stone-700">当前列</h2>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-[13px] font-semibold text-stone-700">当前列</h2>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setRestoreConfirmStep(1)}
+              className="shrink-0 rounded-lg border border-kj-border-strong bg-kj-surface px-3 py-1.5 text-xs font-semibold text-[#1a7f4c] shadow-sm transition-colors hover:bg-kj-hover disabled:opacity-50"
+            >
+              恢复为系统默认
+            </button>
+          </div>
+          {showRestoreAllHint ? (
+            <p className="mb-2 px-1 text-xs text-kj-secondary">
+              当前列与系统默认不一致，可点「恢复为系统默认」清空并仅保留 5 个系统列。
+            </p>
+          ) : null}
           <div className={SETTINGS_CARD_CLASS}>
             <ul className="space-y-3">
-              {sorted.map((f) => (
-                <li
-                  key={f.id}
-                  className="flex flex-wrap items-center gap-3 rounded-xl border border-kj-border bg-kj-raised px-3 py-3"
-                >
-                  <EditableName
-                    initial={f.name}
-                    onSave={(v) => void renameField(f.id, v)}
-                  />
-                  <span className="rounded-lg bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800">
-                    {f.type === 'number' ? '数字' : '文本'}
-                  </span>
-                  <label className="flex cursor-pointer items-center gap-1.5 text-xs text-kj-primary">
-                    <input
-                      type="checkbox"
-                      checked={f.required === true}
+              {sorted.map((f) => {
+                const isBuiltin = Boolean(f.key)
+                const locked = isBuiltin && !unlockedBuiltinIds.has(f.id)
+                const deleteTitle = isBuiltin ? '删除系统列？' : '删除自定义字段？'
+                const deleteMessage = isBuiltin
+                  ? `确定删除系统列「${f.name}」？\n\n已有账单里该列数据仍会保留，但记账页不再显示；语音、统计等功能可能受影响。`
+                  : `确定删除「${f.name}」？\n\n已有账单里该列数据仍会保留，但记账页不再显示此列。`
+                return (
+                  <li key={f.id}>
+                    <SwipeDeleteRow
                       disabled={busy}
-                      onChange={(e) =>
-                        void setFieldRequired(f.id, e.target.checked)
-                      }
-                      className="rounded border-kj-border-strong text-[#2ecc71] focus:ring-[#2ecc71]"
-                    />
-                    必填
-                  </label>
-                  {f.key && (
-                    <span className="text-xs text-kj-muted">系统默认</span>
-                  )}
-                  {!f.key && (
-                    <button
-                      type="button"
-                      onClick={() => void removeField(f.id)}
-                      className="ml-auto text-sm font-medium text-kj-muted transition-colors hover:text-rose-600"
+                      swipeDisabled={locked}
+                      confirmTitle={deleteTitle}
+                      confirmMessage={deleteMessage}
+                      onDelete={() => void removeField(f.id)}
+                      className="border border-kj-border"
                     >
-                      删除
-                    </button>
-                  )}
-                </li>
-              ))}
+                      <div className="flex flex-wrap items-center gap-3 bg-kj-raised px-3 py-3">
+                        <EditableName
+                          initial={f.name}
+                          onSave={(v) => void renameField(f.id, v)}
+                        />
+                        <span className="rounded-lg bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                          {f.type === 'number' ? '数字' : '文本'}
+                        </span>
+                        <label className="flex cursor-pointer items-center gap-1.5 text-xs text-kj-primary">
+                          <input
+                            type="checkbox"
+                            checked={f.required === true}
+                            disabled={busy}
+                            onChange={(e) =>
+                              void setFieldRequired(f.id, e.target.checked)
+                            }
+                            className="rounded border-kj-border-strong text-[#2ecc71] focus:ring-[#2ecc71]"
+                          />
+                          必填
+                        </label>
+                        {isBuiltin ? (
+                          <>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => toggleBuiltinUnlock(f.id)}
+                              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-colors ${
+                                locked
+                                  ? 'border-kj-border-strong bg-kj-surface text-kj-secondary hover:bg-kj-hover'
+                                  : 'border-amber-200/90 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                              }`}
+                              aria-label={
+                                locked
+                                  ? '已锁定，点击解锁后可删除'
+                                  : '已解锁，点击重新锁定'
+                              }
+                              title={
+                                locked ? '点击解锁后可删除' : '点击重新锁定'
+                              }
+                            >
+                              {locked ? (
+                                <IconLock className="h-4 w-4" />
+                              ) : (
+                                <IconLockOpen className="h-4 w-4" />
+                              )}
+                            </button>
+                            <span className="text-xs text-kj-muted">系统默认</span>
+                          </>
+                        ) : null}
+                      </div>
+                    </SwipeDeleteRow>
+                  </li>
+                )
+              })}
             </ul>
           </div>
         </section>
       </SettingsPanelBody>
+
+      {restoreConfirmStep > 0 &&
+        createPortal(
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 px-4">
+            <button
+              type="button"
+              className="absolute inset-0"
+              aria-label="关闭"
+              onClick={closeRestoreConfirm}
+            />
+            <div
+              className="relative w-full max-w-sm rounded-2xl bg-kj-surface p-5 shadow-xl"
+              role="dialog"
+              aria-modal
+              aria-labelledby="restore-fields-title"
+            >
+              {restoreConfirmStep === 1 ? (
+                <>
+                  <p
+                    id="restore-fields-title"
+                    className="text-base font-bold text-kj-primary"
+                  >
+                    恢复为系统默认
+                  </p>
+                  <p className="mt-2 text-sm leading-relaxed text-kj-secondary">
+                    {customFieldCount > 0
+                      ? `将清空 ${customFieldCount} 个自定义字段，`
+                      : '将清空当前全部列配置，'}
+                    仅保留系统默认的 5 列：商品、单价、数量、购买方、金额；系统列的名称与必填将恢复默认。
+                  </p>
+                  <p className="mt-2 text-sm leading-relaxed text-kj-muted">
+                    已有账单里的历史数据仍会保留。
+                  </p>
+                  <div className="mt-5 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={closeRestoreConfirm}
+                      className="flex-1 rounded-xl border border-kj-border-strong py-2.5 text-sm font-semibold text-kj-secondary"
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRestoreConfirmStep(2)}
+                      className="flex-1 rounded-xl border border-kj-border-strong bg-kj-raised py-2.5 text-sm font-semibold text-kj-primary"
+                    >
+                      继续
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p
+                    id="restore-fields-title"
+                    className="text-base font-bold text-kj-primary"
+                  >
+                    再次确认
+                  </p>
+                  <p className="mt-2 text-sm leading-relaxed text-kj-secondary">
+                    确定要恢复为系统默认吗？自定义字段与多余的列将被移除，此操作无法撤销。
+                  </p>
+                  <div className="mt-5 flex gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={closeRestoreConfirm}
+                      className="flex-1 rounded-xl border border-kj-border-strong py-2.5 text-sm font-semibold text-kj-secondary"
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={confirmRestoreDefaults}
+                      className="flex-1 rounded-xl bg-[#2ecc71] py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+                    >
+                      {busy ? '恢复中…' : '确认恢复'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {fieldToast ? (
+        <div
+          className="pointer-events-none fixed bottom-6 left-1/2 z-[65] w-max min-w-0 max-w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-amber-200/90 bg-amber-50 px-4 py-2.5 text-center text-sm font-medium leading-snug text-amber-950 shadow-lg"
+          role="status"
+          aria-live="polite"
+        >
+          {fieldToast}
+        </div>
+      ) : null}
     </div>
   )
 }

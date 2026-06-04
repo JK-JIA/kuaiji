@@ -15,7 +15,7 @@ export const KuaijiPermissions = registerPlugin<KuaijiPermissionsPlugin>(
   'KuaijiPermissions',
 )
 
-/** 首次点相机图标：申请相机 + 相册；已授权则不再弹窗 */
+/** 首次点相机图标：申请相机 + 相册；已授权则不再弹窗（不在此调用 getUserMedia，避免与拍照界面重复打开相机） */
 export async function requestBillCameraPermissions(): Promise<BillCameraPermissionResult> {
   if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
     try {
@@ -25,19 +25,7 @@ export async function requestBillCameraPermissions(): Promise<BillCameraPermissi
       return { camera: false, photos: false }
     }
   }
-  if (!navigator.mediaDevices?.getUserMedia) {
-    return { camera: false, photos: true }
-  }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: true,
-      audio: false,
-    })
-    stream.getTracks().forEach((t) => t.stop())
-    return { camera: true, photos: true }
-  } catch {
-    return { camera: false, photos: true }
-  }
+  return { camera: true, photos: true }
 }
 
 /** 相册选图前检查（权限应在首次进入时已申请） */

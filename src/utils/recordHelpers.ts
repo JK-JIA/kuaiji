@@ -4,12 +4,138 @@ import type {
   LineItemRow,
   ProductCatalogEntry,
 } from '../types'
+import { DEFAULT_FIELD_KEYS } from '../types'
 import {
   formatQuantityWithResolvedUnit,
   readLineQuantityUnit,
 } from './productUnits'
 
 const MONEY_RE = /(\d+(?:\.\d+)?)/
+
+type BuiltinFieldKey = NonNullable<FieldDef['key']>
+
+/** 内置列删除后手加同名列时，用名称 + 旧 field_* id 回退读取账单 */
+const BUILTIN_FIELD_FALLBACK_NAMES: Record<BuiltinFieldKey, string[]> = {
+  product: ['商品'],
+  unitPrice: ['单价'],
+  quantity: ['数量', '斤数'],
+  plate: ['购买方', '车牌号', '车牌'],
+  amount: ['金额'],
+}
+
+function trimFieldValue(raw: string | undefined): string {
+  return String(raw ?? '').trim()
+}
+
+/** 当前配置下的内置列 id（含同名自定义列、历史默认 id） */
+export function resolveBuiltinFieldId(
+  fields: FieldDef[],
+  key: BuiltinFieldKey,
+): string {
+  const byKey = fields.find((f) => f.key === key)?.id
+  if (byKey) return byKey
+  for (const name of BUILTIN_FIELD_FALLBACK_NAMES[key]) {
+    const byName = fields.find((f) => f.name.trim() === name)?.id
+    if (byName) return byName
+  }
+  return DEFAULT_FIELD_KEYS[key]
+}
+
+/** 从一行 values 读取内置列（优先当前 id，再兼容旧默认 id） */
+export function readBuiltinFieldValue(
+  values: Record<string, string> | undefined,
+  fields: FieldDef[],
+  key: BuiltinFieldKey,
+): string {
+  if (!values) return ''
+  const currentId = fields.find((f) => f.key === key)?.id
+  const legacyId = DEFAULT_FIELD_KEYS[key]
+  const tryId = (id: string | undefined) => {
+    if (!id) return ''
+    return trimFieldValue(values[id])
+  }
+  const fromCurrent = tryId(currentId)
+  if (fromCurrent) return fromCurrent
+  for (const name of BUILTIN_FIELD_FALLBACK_NAMES[key]) {
+    const fid = fields.find((f) => f.name.trim() === name)?.id
+    const v = tryId(fid)
+    if (v) return v
+  }
+  if (legacyId && legacyId !== currentId) {
+    const v = tryId(legacyId)
+    if (v) return v
+  }
+  return ''
+}
+
+function migrateValuesToCurrentFields(
+  values: Record<string, string>,
+  fields: FieldDef[],
+): { next: Record<string, string>; changed: boolean } {
+  let changed = false
+  const next = { ...values }
+  const keys: BuiltinFieldKey[] = [
+    'product',
+    'unitPrice',
+    'quantity',
+    'plate',
+    'amount',
+  ]
+  for (const key of keys) {
+    const targetId = resolveBuiltinFieldId(fields, key)
+    const legacyId = DEFAULT_FIELD_KEYS[key]
+    const existing = trimFieldValue(next[targetId])
+    if (existing) continue
+    const legacyVal = trimFieldValue(next[legacyId])
+    if (legacyVal) {
+      next[targetId] = legacyVal
+      changed = true
+      continue
+    }
+    for (const name of BUILTIN_FIELD_FALLBACK_NAMES[key]) {
+      const fid = fields.find((f) => f.name.trim() === name)?.id
+      if (!fid || fid === targetId) continue
+      const v = trimFieldValue(next[fid])
+      if (v) {
+        next[targetId] = v
+        changed = true
+        break
+      }
+    }
+  }
+  return { next, changed }
+}
+
+/** 列配置变更后，把旧 field_* 中的数据迁到当前列 id（避免删列再加回后账单空白） */
+export function migrateRecordsToCurrentFieldIds(
+  records: LedgerRecord[],
+  fields: FieldDef[],
+): { records: LedgerRecord[]; changed: boolean } {
+  let anyChanged = false
+  const nextRecords = records.map((rec) => {
+    let recChanged = false
+    const { next: values, changed: vCh } = migrateValuesToCurrentFields(
+      rec.values,
+      fields,
+    )
+    if (vCh) recChanged = true
+    let lineItems = rec.lineItems
+    if (rec.lineItems?.length) {
+      lineItems = rec.lineItems.map((li) => {
+        const { next: lv, changed: lCh } = migrateValuesToCurrentFields(
+          li.values,
+          fields,
+        )
+        if (lCh) recChanged = true
+        return lCh ? { ...li, values: lv } : li
+      })
+    }
+    if (!recChanged) return rec
+    anyChanged = true
+    return { ...rec, values, lineItems }
+  })
+  return { records: anyChanged ? nextRecords : records, changed: anyChanged }
+}
 
 /** 从「500」「500元」「1,200.5」中解析金额 */
 /** 列表展示：数量后带计量单位（目录优先，否则默认斤；已有斤/kg 等单位则不重复加） */
@@ -98,7 +224,11 @@ export function getAmountFieldId(fields: FieldDef[]): string | undefined {
 }
 
 export function getUnitPriceFieldId(fields: FieldDef[]): string | undefined {
-  return fields.find((f) => f.key === 'unitPrice')?.id
+  const byKey = fields.find((f) => f.key === 'unitPrice')?.id
+  if (byKey) return byKey
+  const byName = fields.find((f) => f.name.trim() === '单价')?.id
+  if (byName) return byName
+  return DEFAULT_FIELD_KEYS.unitPrice
 }
 
 /** 单价×斤数 → 行金额字符串（元，最多两位小数）；任一侧无效或≤0 则空串 */
@@ -421,8 +551,7 @@ export function isRecordFullyPaid(
 }
 
 export function getPlateValue(record: LedgerRecord, fields: FieldDef[]): string {
-  const pid = fields.find((f) => f.key === 'plate')?.id
-  return pid ? (record.values[pid] || '').trim() : ''
+  return readBuiltinFieldValue(record.values, fields, 'plate')
 }
 
 export type ExpandedProductLine = {
@@ -450,28 +579,33 @@ export function expandProductLineContexts(
   record: LedgerRecord,
   fields: FieldDef[],
 ): ProductLineContext[] {
-  const pid = fields.find((f) => f.key === 'product')?.id
-  const qid = fields.find((f) => f.key === 'quantity')?.id
   const uid = getUnitPriceFieldId(fields)
   const aid = getAmountFieldId(fields)
-  if (!pid || !qid) return []
 
   if (record.lineItems && record.lineItems.length > 0) {
     return record.lineItems.map((li, lineIndex) => ({
-      product: (li.values[pid] || '').trim(),
-      unitPriceStr: uid ? (li.values[uid] || '').trim() : '',
-      quantity: (li.values[qid] || '').trim(),
-      lineAmountStr: aid ? (li.values[aid] || '').trim() : '',
+      product: readBuiltinFieldValue(li.values, fields, 'product'),
+      unitPriceStr: uid
+        ? readBuiltinFieldValue(li.values, fields, 'unitPrice')
+        : '',
+      quantity: readBuiltinFieldValue(li.values, fields, 'quantity'),
+      lineAmountStr: aid
+        ? readBuiltinFieldValue(li.values, fields, 'amount')
+        : '',
       lineIndex,
       lineItem: li,
     }))
   }
   return [
     {
-      product: (record.values[pid] || '').trim(),
-      unitPriceStr: uid ? (record.values[uid] || '').trim() : '',
-      quantity: (record.values[qid] || '').trim(),
-      lineAmountStr: '',
+      product: readBuiltinFieldValue(record.values, fields, 'product'),
+      unitPriceStr: uid
+        ? readBuiltinFieldValue(record.values, fields, 'unitPrice')
+        : '',
+      quantity: readBuiltinFieldValue(record.values, fields, 'quantity'),
+      lineAmountStr: aid
+        ? readBuiltinFieldValue(record.values, fields, 'amount')
+        : '',
       lineIndex: 0,
       lineItem: null,
     },

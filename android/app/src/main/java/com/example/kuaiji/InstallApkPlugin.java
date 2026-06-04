@@ -21,6 +21,7 @@ public class InstallApkPlugin extends Plugin {
     @PluginMethod
     public void installFromCache(PluginCall call) {
         String filename = call.getString("filename", "kuaiji-update.apk");
+        Integer expectedVc = call.getInt("expectedVersionCode");
         if (getActivity() == null) {
             call.reject("NO_ACTIVITY");
             return;
@@ -53,12 +54,32 @@ public class InstallApkPlugin extends Plugin {
             return;
         }
 
+        if (expectedVc != null && expectedVc > 0 && incomingCode > 0 && incomingCode < expectedVc) {
+            call.reject(
+                    "APK_STALE_DOWNLOAD",
+                    "下载到的安装包实为 "
+                            + incomingName
+                            + "（versionCode "
+                            + incomingCode
+                            + "），低于更新列表中的 versionCode "
+                            + expectedVc
+                            + "。多为网络/CDN 返回了旧安装包缓存，请重试下载；若仍失败请检查下载站 APK 是否与 releases.json 一致。"
+            );
+            return;
+        }
+
         try {
             PackageInfo installed = pm.getPackageInfo(packageName, 0);
             long installedCode = archiveInfoVersionCode(installed);
             String installedName =
                     installed.versionName != null ? installed.versionName : "";
             if (incomingCode <= installedCode) {
+                String hint =
+                        expectedVc != null
+                                        && expectedVc > installedCode
+                                        && incomingCode <= installedCode
+                                ? " 若您刚在系统安装界面完成过安装，请完全退出应用（从多任务划掉）后再打开；否则请重试下载。"
+                                : " 请确认下载站 APK 内 versionCode 与 releases.json 一致，且上传的是新构建的安装包。";
                 call.reject(
                         "APK_NOT_NEWER",
                         "下载的安装包版本为 "
@@ -70,7 +91,7 @@ public class InstallApkPlugin extends Plugin {
                                 + "（versionCode "
                                 + installedCode
                                 + "）相同或更旧。"
-                                + " 请确认下载站 APK 与 releases.json 版本号一致，或重新上传正确的安装包。"
+                                + hint
                 );
                 return;
             }

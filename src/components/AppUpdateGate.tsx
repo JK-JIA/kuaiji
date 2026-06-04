@@ -2,17 +2,20 @@ import { App } from '@capacitor/app'
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ANDROID_UPDATE_CACHE_FILENAME,
+  apkCacheFilename,
   downloadApkIntoCapacitorCache,
   fetchAndroidUpdatePlan,
   getLocalWebBundleVersion,
   getReleasesManifestUrl,
   getSkippedTag,
   loadReleasesManifest,
+  parseNativeVersionCode,
   pickLatestApkEntry,
   pickLatestBundleEntry,
   positiveInt,
   setSkippedTag,
+  shouldRetryApkInstall,
+  withDownloadCacheBust,
   type AndroidLatestEnabled,
 } from '../utils/appUpdate'
 import { InstallApk } from '../plugins/installApk'
@@ -49,9 +52,9 @@ export function AppUpdateGate() {
     }
 
     const appInfo = await App.getInfo()
-    const localVc = parseInt(String(appInfo.build), 10)
+    const localVc = parseNativeVersionCode(appInfo.build)
     const localVn = String(appInfo.version ?? '').trim()
-    if (!Number.isFinite(localVc)) {
+    if (localVc <= 0) {
       if (opts.manual) alert('无法读取当前应用版本号')
       return
     }
@@ -187,24 +190,55 @@ export function AppUpdateGate() {
 
     setDownloading(true)
     setProgress({ pct: null })
+    const cacheFile = apkCacheFilename(info.versionCode)
+    const expectedVc = info.versionCode > 0 ? info.versionCode : undefined
     try {
-      await downloadApkIntoCapacitorCache(
-        info.apkUrl,
-        ANDROID_UPDATE_CACHE_FILENAME,
-        (loaded, total) => {
-          if (total != null && total > 0) {
-            setProgress({
-              pct: Math.min(99, Math.round((100 * loaded) / total)),
-            })
-          } else {
-            setProgress({ pct: null })
+      const maxAttempts = 2
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const apkUrl =
+          attempt === 0
+            ? info.apkUrl
+            : withDownloadCacheBust(info.apkUrl)
+        await downloadApkIntoCapacitorCache(
+          apkUrl,
+          cacheFile,
+          (loaded, total) => {
+            if (total != null && total > 0) {
+              setProgress({
+                pct: Math.min(99, Math.round((100 * loaded) / total)),
+              })
+            } else {
+              setProgress({ pct: null })
+            }
+          },
+        )
+        setProgress({ pct: 100 })
+        try {
+          await InstallApk.installFromCache({
+            filename: cacheFile,
+            expectedVersionCode: expectedVc,
+          })
+          break
+        } catch (installErr) {
+          const fresh = await App.getInfo()
+          const freshVc = parseNativeVersionCode(fresh.build)
+          if (
+            expectedVc != null &&
+            freshVc >= expectedVc
+          ) {
+            alert(
+              '检测到系统已安装新版本，请完全退出应用（从多任务划掉）后重新打开。',
+            )
+            close()
+            return
           }
-        },
-      )
-      setProgress({ pct: 100 })
-      await InstallApk.installFromCache({
-        filename: ANDROID_UPDATE_CACHE_FILENAME,
-      })
+          if (attempt + 1 < maxAttempts && shouldRetryApkInstall(installErr)) {
+            setProgress({ pct: null })
+            continue
+          }
+          throw installErr
+        }
+      }
       if (info.pendingBundleAfterApk) {
         alert(
           `整包安装程序已打开。安装 ${info.versionName || '新版本'} 后请重新打开应用，将自动提示下载网页热更新${

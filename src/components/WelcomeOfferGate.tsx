@@ -2,6 +2,7 @@ import { App } from '@capacitor/app'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { isAppTutorialSeen } from '../utils/appTutorial'
 
 const SESSION_DISMISS_KEY = 'kuaiji_welcome_offer_dismiss_session'
 
@@ -46,7 +47,8 @@ export function WelcomeOfferGate() {
       profileLoaded &&
       !welcomeMembershipClaimed &&
       !sessionDismissedRef.current &&
-      location.pathname !== '/login',
+      location.pathname !== '/login' &&
+      isAppTutorialSeen(),
   )
 
   const clearTimer = useCallback(() => {

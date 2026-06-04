@@ -33,8 +33,7 @@ export async function parseWithDoubao(
   if (!base) {
     return {
       success: false,
-      error:
-        '未配置云端 API（VITE_API_URL）。智能解析由服务端豆包完成，请在构建/环境变量中配置 API 地址。',
+      error: '请先登录并连接云端账本后再使用智能解析。',
     }
   }
   if (!token) {
@@ -58,8 +57,7 @@ export async function parseWithDoubao(
     if (!result.success && httpStatus === 404) {
       return {
         success: false,
-        error:
-          '服务端尚未支持语音解析（404）。请更新并重启 ledger-api，并配置 DOUBAO_API_KEY、DOUBAO_MODEL。',
+        error: '智能解析服务暂未开通，请稍后再试。',
       }
     }
     return result

@@ -138,6 +138,20 @@ export async function sharePngBlobWithMobileFallback(
   })
 }
 
+export async function shareBillImageBlobWithMobileFallback(
+  filename: string,
+  blob: Blob,
+) {
+  await shareBlobWithMobileFallback({
+    filename,
+    blob,
+    mimeType: 'image/jpeg',
+    title: '账单小票',
+    text: '在分享面板选择微信或保存到相册',
+    dialogTitle: '导出账单图片',
+  })
+}
+
 /** 解析含引号与逗号的 CSV 全文为二维数组 */
 export function parseCsvRows(content: string): string[][] {
   const t = content.replace(/^\ufeff/, '')
@@ -193,7 +207,7 @@ function csvMetaHeaders(fields: FieldDef[]) {
   const productName =
     fields.find((f) => f.key === 'product')?.name.trim() || '商品'
   const quantityName =
-    fields.find((f) => f.key === 'quantity')?.name.trim() || '斤数'
+    fields.find((f) => f.key === 'quantity')?.name.trim() || '数量'
   const amountId = getAmountFieldId(fields)
   const amountName = amountId
     ? fields.find((f) => f.id === amountId)?.name.trim() || '金额'

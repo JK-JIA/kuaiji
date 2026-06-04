@@ -18,7 +18,7 @@ import {
   type StatsShareViewMode,
 } from '../components/StatsSharePieChart'
 import { useLedger } from '../context/LedgerContext'
-import type { LedgerRecord } from '../types'
+import type { LedgerRecord, ProductCatalogEntry } from '../types'
 import {
   getAnchorDateForOffset,
   getCurrentReportRange,
@@ -27,6 +27,7 @@ import {
   toDateStr,
 } from '../utils/reportRange'
 import { getAmountFieldId, sumOutstanding } from '../utils/recordHelpers'
+import { getProductChartColor } from '../utils/productColors'
 import {
   aggregateBuyerOutstanding,
   aggregateBuyerProductRows,
@@ -79,7 +80,7 @@ function fmtNum(n: number): string {
   return n.toFixed(1)
 }
 
-/** 占比表：按斤数或金额排序 */
+/** 占比表:按斤数或金额排序 */
 type StatsJinAmtSortKey = 'jin' | 'amount'
 type StatsJinAmtSort = { key: StatsJinAmtSortKey; dir: 'asc' | 'desc' }
 
@@ -126,7 +127,7 @@ export function StatsPage() {
   const { ready, fields, records, productCatalog } = useLedger()
   const [statsQtyUnit, setStatsQtyUnit] = useState(BASE_STAT_UNIT)
   const [kind, setKind] = useState<ReportKind>('month')
-  /** 0=当前周期，-1=上一周期，不可大于 0（不向未来空周期） */
+  /** 0=当前周期,-1=上一周期,不可大于 0(不向未来空周期) */
   const [periodOffset, setPeriodOffset] = useState(0)
   const [rangeMode, setRangeMode] = useState<StatsRangeMode>('preset')
   const [customStartStr, setCustomStartStr] = useState('')
@@ -196,7 +197,7 @@ export function StatsPage() {
     return { startStr: customEndStr, endStr: customStartStr }
   }, [customStartStr, customEndStr])
 
-  /** 自定义但未选全日期时不用预设区间，避免界面与数据不一致 */
+  /** 自定义但未选全日期时不用预设区间,避免界面与数据不一致 */
   const emptyRangeAnchor = useMemo(
     () => parse('2099-01-01', 'yyyy-MM-dd', new Date()),
     [],
@@ -252,7 +253,7 @@ export function StatsPage() {
         'yyyy年M月d日',
         { locale: zhCN },
       )
-      return `${a} — ${b}（自定义）`
+      return `${a} — ${b}(自定义)`
     }
     const a = format(currentBounds.start, 'yyyy年M月d日', { locale: zhCN })
     const b = format(currentBounds.end, 'yyyy年M月d日', { locale: zhCN })
@@ -260,7 +261,7 @@ export function StatsPage() {
     if (periodOffset === 0) {
       tag =
         kind === 'week'
-          ? '本周，周一至周日'
+          ? '本周,周一至周日'
           : kind === 'month'
             ? '本月'
             : '本年'
@@ -275,7 +276,7 @@ export function StatsPage() {
             ? `${n} 个月前`
             : `${n} 年前`
     }
-    return `${a} — ${b}（${tag}）`
+    return `${a} — ${b}(${tag})`
   }, [rangeMode, customRangeSorted, kind, currentBounds, periodOffset])
 
   const compareLabel =
@@ -427,7 +428,7 @@ export function StatsPage() {
     return m
   }, [buyerOutstandingRows])
 
-  /** 按购买方汇总：总数量（按所选单位）、总金额、未核账 */
+  /** 按购买方汇总:总数量(按所选单位)、总金额、未核账 */
   const buyerSummaryRows = useMemo(() => {
     const m = new Map<string, { jin: number; amount: number }>()
     for (const r of buyerProductRows) {
@@ -562,7 +563,7 @@ export function StatsPage() {
           统计分析
         </h1>
         <p className="mt-0.5 text-xs leading-relaxed text-kj-secondary">
-          按周/月/年或自定义起止日期查看，可与上期对比。
+          按周/月/年或自定义起止日期查看,可与上期对比。
         </p>
       </header>
 
@@ -628,7 +629,7 @@ export function StatsPage() {
             />
           </label>
           <p className="text-[11px] leading-relaxed text-kj-muted sm:pb-2">
-            含起止两天；环比为紧邻上一段等长日历区间。
+            含起止两天;环比为紧邻上一段等长日历区间。
           </p>
         </div>
       )}
@@ -674,7 +675,7 @@ export function StatsPage() {
         </p>
         <div className="mt-4 grid gap-6 sm:grid-cols-2">
           <div>
-            <p className="text-xs text-kj-secondary">应收总金额（元）</p>
+            <p className="text-xs text-kj-secondary">应收总金额(元)</p>
             <p className="mt-1 text-3xl font-bold tabular-nums text-kj-primary">
               {amountId ? fmtMoney(totalAmount) : '—'}
             </p>
@@ -683,7 +684,7 @@ export function StatsPage() {
             )}
           </div>
           <div>
-            <p className="text-xs text-kj-secondary">未收款合计（元）</p>
+            <p className="text-xs text-kj-secondary">未收款合计(元)</p>
             <p className="mt-1 text-3xl font-bold tabular-nums text-kj-warning-text">
               {amountId ? fmtMoney(totalOutstanding) : '—'}
             </p>
@@ -695,7 +696,7 @@ export function StatsPage() {
 
         <div className="mt-6 grid gap-4 border-t border-kj-border pt-5 sm:grid-cols-2">
           <div>
-            <p className="text-xs text-kj-secondary">{compareLabel} · 金额（元）</p>
+            <p className="text-xs text-kj-secondary">{compareLabel} · 金额(元)</p>
             <p
               className={`mt-1 text-xl font-bold tabular-nums ${
                 !amountId
@@ -726,7 +727,7 @@ export function StatsPage() {
           </div>
         </div>
         <p className="mt-4 border-t border-kj-border pt-4 text-center text-[11px] leading-relaxed text-kj-muted">
-          上期：{format(prevBounds.start, 'M月d日', { locale: zhCN })} —{' '}
+          上期:{format(prevBounds.start, 'M月d日', { locale: zhCN })} —{' '}
           {format(prevBounds.end, 'M月d日', { locale: zhCN })}
         </p>
       </section>
@@ -766,7 +767,7 @@ export function StatsPage() {
               />
             </div>
             <p className="mb-3 text-[11px] leading-relaxed text-kj-secondary">
-              切换饼图或列表查看；数量按商品目录换算（默认斤）。可在下方选择其他统计单位。
+              切换饼图或列表查看;数量按商品目录换算(默认斤)。可在下方选择其他统计单位。
             </p>
             {statUnitOptions.length > 1 ? (
               <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
@@ -832,6 +833,7 @@ export function StatsPage() {
                 <div className="p-3 pt-2">
                   <StatsSharePieChart
                     data={productPieData}
+                    productCatalog={productCatalog}
                     formatValue={(n) =>
                       productPieMetricEffective === 'amount'
                         ? `¥${fmtMoney(n)}`
@@ -850,6 +852,7 @@ export function StatsPage() {
                 <div className="max-h-[min(52vh,22rem)] overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] px-2 pb-2 pt-1 sm:px-3">
                   <ProductSalesShareTable
                     products={sortedProductShareRows}
+                    productCatalog={productCatalog}
                     totalJin={totalDisplayQty}
                     qtyUnitLabel={qtyUnitLabel}
                     rowDisplayQty={productDisplayQty}
@@ -871,12 +874,12 @@ export function StatsPage() {
               {buyerFieldName}汇总与未核账
             </h2>
             <p className="mb-3 mt-1 text-[11px] leading-relaxed text-kj-secondary">
-              横轴为购买方，柱状图展示总数量（与上方所选单位一致）、总金额与未核账。
+              横轴为购买方,柱状图展示总数量(与上方所选单位一致)、总金额与未核账。
             </p>
             {!hasBuyerStatsSection ? (
               <div className="rounded-2xl border border-dashed border-kj-border bg-kj-surface py-8 text-center text-sm text-kj-secondary">
                 {!amountId
-                  ? '需多行商品明细；未核账需金额列'
+                  ? '需多行商品明细;未核账需金额列'
                   : buyerProductRows.length === 0
                     ? '需多行商品明细'
                     : rangeMode === 'custom'
@@ -955,6 +958,7 @@ export function StatsPage() {
               fields={fields}
               records={currentRecords}
               amountFieldId={amountId}
+              productCatalog={productCatalog}
             />
           )}
         </>
@@ -974,6 +978,7 @@ export function StatsPage() {
         {statsDetailModal === 'product' && (
           <ProductSalesShareTable
             products={sortedProductShareRows}
+            productCatalog={productCatalog}
             totalJin={totalDisplayQty}
             qtyUnitLabel={qtyUnitLabel}
             rowDisplayQty={productDisplayQty}
@@ -1067,6 +1072,15 @@ function SortableShareMetricTh({
   )
 }
 
+const PCT_INSIDE_BAR_MIN_WIDTH = 25
+
+const PCT_LABEL_BY_BAR: Record<string, string> = {
+  'bg-amber-500': 'text-amber-600',
+  'bg-[#1a7f4c]': 'text-[#1a7f4c]',
+  'bg-teal-500': 'text-teal-600',
+  'bg-[#2ecc71]': 'text-[#1a7f4c]',
+}
+
 function StatsShareMetricCell({
   valueLine,
   pct,
@@ -1074,6 +1088,7 @@ function StatsShareMetricCell({
   barClassName,
   valLineClass,
   pctTextClass,
+  relaxed,
 }: {
   valueLine: string
   pct: number
@@ -1081,22 +1096,36 @@ function StatsShareMetricCell({
   barClassName: string
   valLineClass: string
   pctTextClass: string
+  relaxed?: boolean
 }) {
+  const pctLabel = `${pct.toFixed(1)}%`
+  const w = Math.min(100, Math.max(0, barPct))
+  const pctInside = pct > PCT_INSIDE_BAR_MIN_WIDTH
+  const barH = relaxed ? 'h-5' : 'h-4'
+  const pctClass =
+    PCT_LABEL_BY_BAR[barClassName] ?? 'text-kj-secondary'
+
   return (
-    <div className="space-y-0.5">
+    <div className={relaxed ? 'space-y-1' : 'space-y-0.5'}>
       <div className={valLineClass}>{valueLine}</div>
-      <div className="flex items-center gap-1">
-        <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-kj-raised">
-          <div
-            className={`h-full rounded-full ${barClassName}`}
-            style={{ width: `${Math.min(100, Math.max(0, barPct))}%` }}
-          />
-        </div>
-        <span
-          className={`w-9 shrink-0 text-right tabular-nums text-kj-muted ${pctTextClass}`}
+      <div className="flex w-full min-w-0 items-center gap-1">
+        <div
+          className={`relative ${barH} shrink-0 rounded-full ${barClassName}`}
+          style={{ width: `${w}%`, minWidth: w > 0 ? '4px' : undefined }}
         >
-          {pct.toFixed(1)}%
-        </span>
+          {pctInside ? (
+            <span className="absolute inset-y-0 right-0 flex items-center justify-end whitespace-nowrap px-1 text-[10px] font-medium leading-none tabular-nums text-white">
+              {pctLabel}
+            </span>
+          ) : null}
+        </div>
+        {!pctInside ? (
+          <span
+            className={`shrink-0 whitespace-nowrap tabular-nums ${pctTextClass} ${pctClass}`}
+          >
+            {pctLabel}
+          </span>
+        ) : null}
       </div>
     </div>
   )
@@ -1192,14 +1221,14 @@ function BuyerSummaryTable({
 }) {
   const th = relaxed
     ? 'px-2 py-2.5 text-left text-xs font-medium text-kj-secondary sm:px-3 sm:py-3 sm:text-sm'
-    : 'px-1.5 py-2 text-left text-[11px] font-medium text-kj-secondary sm:px-2'
+    : 'px-1.5 py-2 text-left text-xs font-medium text-kj-secondary sm:px-2'
   const tdText = relaxed
-    ? 'break-words px-1.5 py-2 text-xs font-medium text-kj-primary sm:px-2 sm:py-2.5 sm:text-sm'
-    : 'break-words px-1 py-2 text-[11px] font-medium text-kj-primary sm:px-1.5'
+    ? 'break-words px-1.5 py-2 text-xs font-semibold text-kj-primary sm:px-2 sm:py-2.5 sm:text-sm'
+    : 'break-words px-1 py-2 text-xs font-semibold text-kj-primary sm:px-1.5'
   const valLine = relaxed
-    ? 'text-sm tabular-nums text-kj-secondary'
-    : 'text-[11px] tabular-nums text-kj-secondary'
-  const pctText = relaxed ? 'text-sm' : 'text-xs'
+    ? 'text-sm tabular-nums text-kj-primary'
+    : 'text-xs tabular-nums text-kj-primary sm:text-[13px]'
+  const pctText = relaxed ? 'text-xs' : 'text-[11px]'
   const metricTd = relaxed ? 'px-1 py-2 align-top sm:px-1.5' : 'px-0.5 py-2 align-top sm:px-1'
 
   const hasOutCol = Boolean(amountId)
@@ -1277,6 +1306,7 @@ function BuyerSummaryTable({
                       barClassName="bg-amber-500"
                       valLineClass={valLine}
                       pctTextClass={pctText}
+                      relaxed={relaxed}
                     />
                   ) : (
                     <span className="text-kj-muted">—</span>
@@ -1293,6 +1323,7 @@ function BuyerSummaryTable({
                       barClassName="bg-[#1a7f4c]"
                       valLineClass={valLine}
                       pctTextClass={pctText}
+                      relaxed={relaxed}
                     />
                   ) : (
                     <span className="text-kj-muted">—</span>
@@ -1310,6 +1341,7 @@ function BuyerSummaryTable({
                     barClassName="bg-teal-500"
                     valLineClass={valLine}
                     pctTextClass={pctText}
+                    relaxed={relaxed}
                   />
                 ) : (
                   <span className="text-kj-muted">—</span>
@@ -1325,6 +1357,7 @@ function BuyerSummaryTable({
 
 function ProductSalesShareTable({
   products,
+  productCatalog = [],
   totalJin,
   qtyUnitLabel = BASE_STAT_UNIT,
   rowDisplayQty,
@@ -1338,6 +1371,7 @@ function ProductSalesShareTable({
   relaxed,
 }: {
   products: ProductSalesRow[]
+  productCatalog?: ProductCatalogEntry[]
   totalJin: number
   qtyUnitLabel?: string
   rowDisplayQty?: (row: ProductSalesRow) => number
@@ -1387,7 +1421,7 @@ function ProductSalesShareTable({
         </tr>
       </thead>
       <tbody>
-        {products.map((row) => {
+        {products.map((row, rowIndex) => {
           const rowQty = qtyOf(row)
           const jinPct = totalJin > 0 ? (rowQty / totalJin) * 100 : 0
           const amtPct =
@@ -1396,6 +1430,11 @@ function ProductSalesShareTable({
               : 0
           const jinBar = Math.round((rowQty / maxJinBar) * 100)
           const amtBar = Math.round((row.amount / maxAmtBar) * 100)
+          const barColor = getProductChartColor(
+            row.name,
+            productCatalog,
+            rowIndex,
+          )
           const nameCell = onProductClick ? (
             <button
               type="button"
@@ -1423,8 +1462,11 @@ function ProductSalesShareTable({
                   <div className="flex items-center gap-2">
                     <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-kj-raised">
                       <div
-                        className="h-full rounded-full bg-[#2ecc71]"
-                        style={{ width: `${jinBar}%` }}
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${jinBar}%`,
+                          backgroundColor: barColor,
+                        }}
                       />
                     </div>
                     <span
@@ -1442,8 +1484,11 @@ function ProductSalesShareTable({
                     <div className="flex items-center gap-2">
                       <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-kj-raised">
                         <div
-                          className="h-full rounded-full bg-[#1a7f4c]"
-                          style={{ width: `${amtBar}%` }}
+                          className="h-full rounded-full opacity-85"
+                          style={{
+                            width: `${amtBar}%`,
+                            backgroundColor: barColor,
+                          }}
                         />
                       </div>
                       <span
@@ -1530,7 +1575,7 @@ function StatsChartsFilter({
           aria-label="筛选条件"
         >
           <p className="mb-3 text-[11px] leading-relaxed text-kj-secondary">
-            下方图表共用；两条件为「且」。筛{productFieldName}时，未核账仍按整单计。
+            下方图表共用;两条件为「且」。筛{productFieldName}时,未核账仍按整单计。
           </p>
           <div className="flex flex-col gap-3">
             <label className="flex flex-col gap-1.5">

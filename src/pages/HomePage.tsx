@@ -7,7 +7,6 @@ import {
   type VoiceFormPrefillPayload,
 } from '../components/AddRecordModal'
 import { BillCameraCaptureModal, type BillRecognizeResult } from '../components/BillCameraCaptureModal'
-import { requestBillCameraPermissions } from '../plugins/kuaijiPermissions'
 import { CalendarPickerModal } from '../components/CalendarPickerModal'
 import { HomeSearchDateRangeBlock } from '../components/HomeSearchDateRangeBlock'
 import { ReconcileModal } from '../components/ReconcileModal'
@@ -45,12 +44,22 @@ import {
   validateRecordForm,
 } from '../utils/ledgerRecordDraft'
 import { runVoiceParsePipeline, runBillParsePipeline } from '../utils/voiceParsePipeline'
+import {
+  CATALOG_EMPTY_HINT,
+  hasProductCatalog,
+} from '../utils/productCatalogHelpers'
 import { messageIfPremiumFeatureBlocked } from '../utils/premiumGate'
 import { findFieldIdByName, sumAmount } from '../utils/stats'
 import type { FieldDef, LedgerRecord, ReconcilePayload } from '../types'
 import { useLedger } from '../context/LedgerContext'
-import { exportCsv, sharePngBlobWithMobileFallback } from '../utils/exportData'
-import { renderSearchResultBillPngBlob } from '../utils/searchResultBillPng'
+import { exportCsv } from '../utils/exportData'
+import { SearchResultBillPreviewModal } from '../components/SearchResultBillPreviewModal'
+import {
+  clearSearchResultBillPrewarm,
+  prewarmSearchResultBillImage,
+  renderSearchResultBillPngBlob,
+} from '../utils/searchResultBillPng'
+import { openAppTutorial } from '../utils/appTutorial'
 
 export function HomePage() {
   const location = useLocation()
@@ -123,6 +132,10 @@ export function HomePage() {
     useState<CustomerAutoPromptItem | null>(null)
   const [exportSearchSheetOpen, setExportSearchSheetOpen] = useState(false)
   const [exportingType, setExportingType] = useState<'png' | 'csv' | null>(null)
+  const [exportBillPreview, setExportBillPreview] = useState<{
+    blob: Blob
+    filename: string
+  } | null>(null)
 
   const showCustomerAutoPromptIfAny = useCallback(
     (items: CustomerAutoPromptItem[]) => {
@@ -172,6 +185,7 @@ export function HomePage() {
   }, [location.state, location.pathname, navigate])
 
   const ledgerLayout = useMemo(() => getLedgerFormLayout(fields), [fields])
+  const catalogReady = hasProductCatalog(productCatalog)
 
   const voiceAsrHotwords = useMemo(
     () =>
@@ -183,11 +197,15 @@ export function HomePage() {
   )
 
   const openAddRecordModal = useCallback(() => {
+    if (!hasProductCatalog(productCatalog)) {
+      setVoiceBanner(CATALOG_EMPTY_HINT)
+      return
+    }
     setVoiceFormPrefill(null)
     setEditingRecord(null)
     setModalOpen(true)
     setReconcileHighlightId(null)
-  }, [])
+  }, [productCatalog])
 
   const handleModalSave = useCallback(
     async (rec: LedgerRecord) => {
@@ -223,6 +241,7 @@ export function HomePage() {
       }>,
       prefillMessages: string[],
       needConfirmHint?: string | null,
+      recordDate?: string,
     ) => {
       setVoiceFormPrefill({
         values,
@@ -233,7 +252,7 @@ export function HomePage() {
           unitPrice: l.unitPrice ?? '',
           lineAmount: l.lineAmount ?? '',
         })),
-        recordDate: todayStr,
+        recordDate: recordDate ?? todayStr,
         dealInput: '',
         formError:
           prefillMessages.length > 0
@@ -262,7 +281,7 @@ export function HomePage() {
         emptySpeechToastRef.current = window.setTimeout(() => {
           emptySpeechToastRef.current = null
           setVoiceBanner(null)
-        }, 2200)
+        }, 2200) as unknown as ReturnType<typeof setTimeout>
         return
       }
 
@@ -280,8 +299,14 @@ export function HomePage() {
       if (!isDoubaoConfigured({ apiBase })) {
         clearVoiceSlot()
         setVoiceBanner(
-          '未配置智能解析服务，无法在首页自动入账。请确认已登录且服务端已配置豆包，或使用「记一笔」手动录入。\n\n请重新语音录入',
+          '智能解析暂未开通，无法在首页自动入账。请使用「记一笔」手动录入，或稍后再试。\n\n请重新语音录入',
         )
+        return
+      }
+
+      if (!hasProductCatalog(productCatalog)) {
+        clearVoiceSlot()
+        setVoiceBanner(`${CATALOG_EMPTY_HINT}\n\n请重新语音录入`)
         return
       }
 
@@ -323,6 +348,7 @@ export function HomePage() {
           values,
           lines,
           dealInput: '',
+          productCatalog,
         })
 
         const prefillMessages = [err, fuzzy.confirmHint].filter(
@@ -337,6 +363,7 @@ export function HomePage() {
             fuzzy.needConfirm
               ? '请核对购买方与商品是否正确后再保存'
               : null,
+            pipeline.recordDate,
           )
         }
 
@@ -350,7 +377,7 @@ export function HomePage() {
             values,
             lines,
             dealInput: '',
-            recordDate: todayStr,
+            recordDate: pipeline.recordDate,
             recordToEdit: null,
           })
           const newAuto = await saveRecord(rec)
@@ -403,8 +430,12 @@ export function HomePage() {
         return {
           success: false,
           error:
-            '未配置图片识别服务。请确认已登录且服务端已配置豆包视觉模型。',
+            '图片识别暂未开通，请稍后再试或使用「记一笔」手动录入。',
         }
+      }
+
+      if (!hasProductCatalog(productCatalog)) {
+        return { success: false, error: CATALOG_EMPTY_HINT }
       }
 
       if (signal.aborted) {
@@ -446,6 +477,7 @@ export function HomePage() {
           values,
           lines,
           dealInput: '',
+          productCatalog,
         })
 
         if (err === '缺少商品或数量字段配置') {
@@ -460,7 +492,7 @@ export function HomePage() {
           values,
           lines,
           dealInput: '',
-          recordDate: todayStr,
+          recordDate: pipeline.recordDate,
           recordToEdit: null,
         })
         const newAuto = await saveRecord(rec)
@@ -530,16 +562,15 @@ export function HomePage() {
     },
   })
 
-  const onBillCameraClick = useCallback(async () => {
+  const onBillCameraClick = useCallback(() => {
     if (voiceParsing || voiceRecording) return
-    const perms = await requestBillCameraPermissions()
-    if (!perms.camera) {
-      setVoiceBanner('需要相机权限才能拍照识别')
+    if (!hasProductCatalog(productCatalog)) {
+      setVoiceBanner(CATALOG_EMPTY_HINT)
       return
     }
     setVoiceBanner(null)
     setBillCameraOpen(true)
-  }, [voiceParsing, voiceRecording])
+  }, [voiceParsing, voiceRecording, productCatalog])
 
   const onRecordBarClick = () => {
     if (ignoreNextRecordBarClickRef.current) {
@@ -768,15 +799,37 @@ export function HomePage() {
         drillPlate: appliedDrillPlate.trim() || undefined,
       })
       const stamp = format(new Date(), 'yyyyMMdd_HHmm')
-      await sharePngBlobWithMobileFallback(`账单明细_${stamp}.png`, blob)
       setExportSearchSheetOpen(false)
+      setExportBillPreview({
+        blob,
+        filename: `账单明细_${stamp}.jpg`,
+      })
     } catch (e) {
-      const msg = e instanceof Error ? e.message : '导出 PNG 失败'
+      const msg = e instanceof Error ? e.message : '导出图片失败'
       alert(msg)
     } finally {
       setExportingType(null)
     }
   }, [recordsForHomeTimeline, fields, productCatalog, appliedDrillPlate])
+
+  useEffect(() => {
+    if (!exportSearchSheetOpen || recordsForHomeTimeline.length === 0) {
+      clearSearchResultBillPrewarm()
+      return
+    }
+    prewarmSearchResultBillImage({
+      records: recordsForHomeTimeline,
+      fields,
+      productCatalog,
+      drillPlate: appliedDrillPlate.trim() || undefined,
+    })
+  }, [
+    exportSearchSheetOpen,
+    recordsForHomeTimeline,
+    fields,
+    productCatalog,
+    appliedDrillPlate,
+  ])
 
   const ledgerDateBounds = useMemo(() => {
     if (records.length === 0) return { min: '', max: '' }
@@ -911,23 +964,35 @@ export function HomePage() {
   return (
     <div className="kuaiji-page">
       <header className="mb-3 flex flex-wrap items-center justify-between gap-2 px-4">
-        <div className="min-w-0">
-          <h1
-            className="font-light italic tracking-[0.12em] text-transparent"
-            style={{
-              fontSize: '1.75rem',
-              lineHeight: 1.15,
-              background: 'linear-gradient(120deg, #1a7f4c 0%, #2ecc71 45%, #27ae60 100%)',
-              WebkitBackgroundClip: 'text',
-              backgroundClip: 'text',
-            }}
-            aria-label="kuaiji 记账"
+        <div className="flex min-w-0 flex-1 items-start gap-2">
+          <button
+            type="button"
+            onClick={() => openAppTutorial()}
+            className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-kj-border-strong bg-kj-surface text-[#1a7f4c] shadow-sm hover:bg-kj-hover"
+            aria-label="使用教程"
+            title="使用教程"
           >
-            kuaiji
-          </h1>
-          <p className="mt-1 text-xs leading-relaxed text-kj-secondary">
-            按日账单 · 购买方分组 · 核账与统计，批发场景随身记。
-          </p>
+            <TutorialHelpGlyph className="h-5 w-5" aria-hidden />
+          </button>
+          <div className="min-w-0">
+            <h1
+              className="font-light italic tracking-[0.12em] text-transparent"
+              style={{
+                fontSize: '1.75rem',
+                lineHeight: 1.15,
+                background:
+                  'linear-gradient(120deg, #1a7f4c 0%, #2ecc71 45%, #27ae60 100%)',
+                WebkitBackgroundClip: 'text',
+                backgroundClip: 'text',
+              }}
+              aria-label="kuaiji 记账"
+            >
+              kuaiji
+            </h1>
+            <p className="mt-1 text-xs leading-relaxed text-kj-secondary">
+              按日账单 · 购买方分组 · 核账与统计，批发场景随身记。
+            </p>
+          </div>
         </div>
         <button
           type="button"
@@ -1107,6 +1172,29 @@ export function HomePage() {
               {homeVoiceEnabled ? ' 长按「记一笔」可语音记账。' : ''}
             </span>
           </p>
+        </div>
+      )}
+
+      {!catalogReady && (
+        <div className="kuaiji-banner-warning mx-4 mb-3 flex items-start gap-2.5 px-3.5 py-3">
+          <HintBulbGlyph className="mt-0.5 h-[15px] w-[15px] shrink-0 opacity-90" />
+          <div className="min-w-0 flex-1 text-left">
+            <p className="text-xs leading-relaxed">
+              <span className="font-semibold">请先录入商品</span>
+              <span className="opacity-90">
+                {' '}
+                记账前需在商品管理中添加商品；记一笔、语音与拍账单均只能选择目录中的商品。请打开
+                设置 → 商品管理添加。
+              </span>
+            </p>
+            <Link
+              to="/settings"
+              state={{ openPanel: 'catalog' }}
+              className="mt-2.5 inline-flex items-center rounded-lg border border-kj-border-strong bg-kj-surface px-3 py-1.5 text-xs font-semibold text-kj-primary shadow-sm active:bg-kj-hover hover:bg-kj-hover"
+            >
+              去设置
+            </Link>
+          </div>
         </div>
       )}
 
@@ -1422,6 +1510,13 @@ export function HomePage() {
         onDismiss={dismissCustomerAutoPrompt}
       />
 
+      <SearchResultBillPreviewModal
+        open={exportBillPreview !== null}
+        blob={exportBillPreview?.blob ?? null}
+        filename={exportBillPreview?.filename ?? '账单明细.jpg'}
+        onClose={() => setExportBillPreview(null)}
+      />
+
       {exportSearchSheetOpen ? (
         <div className="fixed inset-0 z-50 flex flex-col justify-end">
           <button
@@ -1430,6 +1525,7 @@ export function HomePage() {
             aria-label="关闭导出选项"
             onClick={() => {
               if (exportingType) return
+              clearSearchResultBillPrewarm()
               setExportSearchSheetOpen(false)
             }}
           />
@@ -1448,7 +1544,10 @@ export function HomePage() {
               </h2>
               <button
                 type="button"
-                onClick={() => setExportSearchSheetOpen(false)}
+                onClick={() => {
+                  clearSearchResultBillPrewarm()
+                  setExportSearchSheetOpen(false)
+                }}
                 disabled={Boolean(exportingType)}
                 className="rounded-lg px-2 py-1 text-sm font-medium text-kj-secondary disabled:opacity-50"
               >
@@ -1456,7 +1555,7 @@ export function HomePage() {
               </button>
             </div>
             <p className="mb-3 text-xs leading-relaxed text-kj-secondary">
-              选择格式后会直接调起系统分享，可一键发到微信。
+              图片会先预览，确认无误后再分享；Excel 将直接调起系统分享。
             </p>
             <div className="flex flex-col gap-2">
               <button
@@ -1465,7 +1564,7 @@ export function HomePage() {
                 disabled={Boolean(exportingType)}
                 className="w-full rounded-xl bg-[#2ecc71] px-4 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#27ae60] active:bg-[#22a85a] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {exportingType === 'png' ? '正在生成 PNG…' : 'PNG 小票并分享'}
+                {exportingType === 'png' ? '正在生成图片…' : '生成图片小票'}
               </button>
               <button
                 type="button"
@@ -1481,6 +1580,25 @@ export function HomePage() {
       ) : null}
 
     </div>
+  )
+}
+
+function TutorialHelpGlyph({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M9.5 9.5a2.5 2.5 0 0 1 4.2 1.8c0 1.5-2.2 1.8-2.2 3.2" />
+      <circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="none" />
+    </svg>
   )
 }
 

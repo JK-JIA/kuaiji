@@ -1,7 +1,9 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppUpdateGate } from './components/AppUpdateGate'
+import { AppTutorialGate } from './components/AppTutorialGate'
 import { WelcomeOfferGate } from './components/WelcomeOfferGate'
 import { BottomNav } from './components/BottomNav'
+import { MainTabScrollToTop } from './components/MainTabScrollToTop'
 import { AuthProvider } from './context/AuthContext'
 import { LedgerProvider } from './context/LedgerContext'
 import { useAuth } from './context/AuthContext'
@@ -26,6 +28,7 @@ export default function App() {
       <LedgerProvider>
       <BrowserRouter>
         <AppUpdateGate />
+        <AppTutorialGate />
         <WelcomeOfferGate />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
@@ -34,6 +37,7 @@ export default function App() {
             element={
               <AuthGate>
                 <div className="mx-auto min-h-dvh max-w-lg">
+                  <MainTabScrollToTop />
                   <Routes>
                     <Route path="/" element={<HomePage />} />
                     <Route path="/stats" element={<StatsPage />} />

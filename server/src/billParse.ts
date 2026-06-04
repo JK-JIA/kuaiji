@@ -115,13 +115,13 @@ function formatVisionHttpError(
   const suffix = detail ? `（${detail}）` : ''
 
   if (status === 401) {
-    return `API Key 无效${suffix}，请检查服务端 DOUBAO_API_KEY`
+    return `图片识别服务认证失败${suffix}，请稍后再试`
   }
   if (status === 403) {
-    return `无权调用视觉模型「${model}」${suffix}。请在火山方舟开通该模型，或将 DOUBAO_VISION_MODEL 改为已开通的模型 ID。`
+    return `图片识别服务暂不可用${suffix}，请稍后再试`
   }
   if (status === 404) {
-    return `视觉模型「${model}」不可用${suffix}。请核对服务端 DOUBAO_VISION_MODEL。`
+    return `图片识别服务暂不可用${suffix}，请稍后再试`
   }
   if (status === 429) {
     return '请求过于频繁，请稍后再试'
@@ -220,15 +220,13 @@ export async function parseBillImageOnServer(
   if (!doubaoEnvReady()) {
     return {
       success: false,
-      error:
-        '服务端未配置豆包：请在 ledger-api 环境变量设置 DOUBAO_API_KEY。',
+      error: '图片识别服务暂未开通，请稍后再试。',
     }
   }
   if (!billParseModelReady()) {
     return {
       success: false,
-      error:
-        '服务端未配置 DOUBAO_VISION_MODEL。请设置图片识别模型（如 doubao-seed-2-0-mini-260428）后重启 ledger-api。',
+      error: '图片识别服务暂未开通，请稍后再试。',
     }
   }
 

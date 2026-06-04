@@ -20,7 +20,7 @@ export function getDefaultFieldDefs(): FieldDef[] {
     },
     {
       id: DEFAULT_FIELD_KEYS.quantity,
-      name: '斤数',
+      name: '数量',
       type: 'number',
       key: 'quantity',
       order: 2,

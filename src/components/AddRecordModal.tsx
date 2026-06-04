@@ -21,7 +21,12 @@ import {
   displayQuantityFieldName,
   type LineTripleLastEdited,
 } from '../utils/recordHelpers'
-import { defaultUnitForProduct } from '../utils/productCatalogHelpers'
+import {
+  CATALOG_EMPTY_HINT,
+  canonicalProductNameFromCatalog,
+  defaultUnitForProduct,
+  hasProductCatalog,
+} from '../utils/productCatalogHelpers'
 import { QuantityUnitSelect } from './QuantityUnitSelect'
 import {
   applyVoiceFillFirstLine,
@@ -34,6 +39,7 @@ import {
   mapDoubaoProductLinesToLineForms,
   mergeVoiceParsedIntoValues,
   rootValuesFromRecord,
+  legacyProductNamesFromRecord,
   validateRecordForm,
   type LedgerLineForm,
 } from '../utils/ledgerRecordDraft'
@@ -154,19 +160,24 @@ export function AddRecordModal({
     return d > 0.005 ? Math.round(d * 100) / 100 : 0
   }, [lineSubtotal, dealNum])
 
-  const recentProductNames = useMemo(() => {
-    return recentProductNamesFromRecords(records, prodId, 200)
-  }, [records, prodId])
+  const catalogReady = hasProductCatalog(productCatalog)
+
+  const legacyProductNames = useMemo(() => {
+    if (!recordToEdit || !prodId) return undefined
+    return legacyProductNamesFromRecord(recordToEdit, prodId)
+  }, [recordToEdit, prodId])
 
   const selectProductForLine = useCallback(
     (idx: number, name: string) => {
       const trimmed = name.trim()
       if (!trimmed) return
-      const unit = defaultUnitForProduct(trimmed, productCatalog)
+      const canonical =
+        canonicalProductNameFromCatalog(trimmed, productCatalog) ?? trimmed
+      const unit = defaultUnitForProduct(canonical, productCatalog)
       setLines((prev) =>
         prev.map((row, i) =>
           i === idx
-            ? { ...row, product: trimmed, quantityUnit: unit }
+            ? { ...row, product: canonical, quantityUnit: unit }
             : row,
         ),
       )
@@ -282,7 +293,7 @@ export function AddRecordModal({
         setLines([
           {
             id: crypto.randomUUID(),
-            product: recordToEdit.values[prodId] ?? '',
+            product: String(recordToEdit.values[prodId] ?? ''),
             unitPrice: '',
             quantity: recordToEdit.values[qtyId] ?? '',
             quantityUnit: lineFormQuantityUnitFromValues(
@@ -353,7 +364,13 @@ export function AddRecordModal({
   ])
 
   const validate = (): string | null =>
-    validateRecordForm(layout, { values, lines, dealInput })
+    validateRecordForm(layout, {
+      values,
+      lines,
+      dealInput,
+      productCatalog,
+      legacyProductNames,
+    })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -458,6 +475,11 @@ export function AddRecordModal({
         )}
 
         <div className="min-h-0 flex-1 overflow-y-auto bg-kj-bg px-4 py-4 sm:px-5">
+          {!catalogReady && (
+            <div className="mb-4 rounded-2xl border border-amber-200/90 bg-amber-50 px-3.5 py-3 text-sm leading-relaxed text-amber-950">
+              {CATALOG_EMPTY_HINT}
+            </div>
+          )}
           <div className="mb-4 flex justify-start">
             <button
               type="button"
@@ -487,12 +509,17 @@ export function AddRecordModal({
             </button>
             {voicePanelOpen ? (
               <div className="mt-3">
+                {!catalogReady ? (
+                  <p className="rounded-xl border border-dashed border-kj-border-strong bg-kj-surface px-3 py-3 text-sm text-kj-secondary">
+                    {CATALOG_EMPTY_HINT}
+                  </p>
+                ) : (
                 <VoiceInputSection
                   fields={sortedFields}
                   records={records}
                   productCatalog={productCatalog}
                   asrHotwords={modalAsrHotwords}
-                  onApplyParsed={(data, productLines) => {
+                  onApplyParsed={(data, productLines, recordDate) => {
                     setValues((v) =>
                       mergeVoiceParsedIntoValues(sortedFields, v, data),
                     )
@@ -504,14 +531,29 @@ export function AddRecordModal({
                         ),
                       )
                     }
+                    if (recordDate) setRecordDate(recordDate)
                     setFormError(null)
                   }}
                   onFillFirstLine={(product, quantity) => {
+                    const canonical =
+                      canonicalProductNameFromCatalog(
+                        product,
+                        productCatalog,
+                      )
+                    if (!canonical) {
+                      setFormError(
+                        product.trim()
+                          ? `「${product.trim()}」不在商品目录中，请从列表选择`
+                          : CATALOG_EMPTY_HINT,
+                      )
+                      return
+                    }
                     setLines((prev) =>
-                      applyVoiceFillFirstLine(prev, product, quantity),
+                      applyVoiceFillFirstLine(prev, canonical, quantity),
                     )
                   }}
                 />
+                )}
               </div>
             ) : null}
           </div>
@@ -617,7 +659,13 @@ export function AddRecordModal({
                           <div className="mt-1">
                             <ProductNamePickerField
                               value={line.product}
-                              onClick={() => setProductPickerLineIdx(idx)}
+                              onClick={() => {
+                                if (!catalogReady) {
+                                  setFormError(CATALOG_EMPTY_HINT)
+                                  return
+                                }
+                                setProductPickerLineIdx(idx)
+                              }}
                               aria-label={prodField.name}
                             />
                           </div>
@@ -737,7 +785,13 @@ export function AddRecordModal({
                             <div className={cell}>
                               <ProductNamePickerField
                                 value={line.product}
-                                onClick={() => setProductPickerLineIdx(idx)}
+                                onClick={() => {
+                                if (!catalogReady) {
+                                  setFormError(CATALOG_EMPTY_HINT)
+                                  return
+                                }
+                                setProductPickerLineIdx(idx)
+                              }}
                                 className={`${fieldBox} text-left`}
                                 aria-label={prodField.name}
                               />
@@ -980,7 +1034,6 @@ export function AddRecordModal({
       open={productPickerLineIdx !== null}
       onClose={() => setProductPickerLineIdx(null)}
       productCatalog={productCatalog}
-      extraNames={recentProductNames}
       title={prodField?.name ? `选择${prodField.name}` : '选择商品'}
       onSelect={(name) => {
         if (productPickerLineIdx === null) return
@@ -1062,29 +1115,3 @@ function CloseGlyph({ className }: { className?: string }) {
     </svg>
   )
 }
-
-function recentProductNamesFromRecords(
-  list: LedgerRecord[],
-  prodFieldId: string | undefined,
-  limit: number,
-): string[] {
-  if (!prodFieldId || limit <= 0) return []
-  const freq = new Map<string, number>()
-  const bump = (raw: string) => {
-    const t = raw.trim()
-    if (!t) return
-    freq.set(t, (freq.get(t) ?? 0) + 1)
-  }
-  for (const r of list) {
-    if (r.lineItems?.length) {
-      for (const li of r.lineItems) bump(li.values[prodFieldId] ?? '')
-    } else {
-      bump(r.values[prodFieldId] ?? '')
-    }
-  }
-  return [...freq.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-CN'))
-    .slice(0, limit)
-    .map(([name]) => name)
-}
-

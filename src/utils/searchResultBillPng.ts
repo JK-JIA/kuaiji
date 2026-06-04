@@ -1,7 +1,43 @@
-import { format } from 'date-fns'
 import type { FieldDef, LedgerRecord, ProductCatalogEntry } from '../types'
-import { html2canvasReceiptElement } from './receiptCapture'
-import { getReceiptCaptureScale } from './receiptExport'
+import { canvasToJpegBlob } from './receiptCapture'
+import {
+  RECEIPT_AMOUNT_GREEN,
+  RECEIPT_BANNER_H,
+  RECEIPT_FONT,
+  RECEIPT_FOOTER_H,
+  RECEIPT_FOOTER_TAIL_GAP,
+  RECEIPT_SUMMARY_TABLE_GAP,
+  RECEIPT_HEADER_H,
+  RECEIPT_INFO_ROW_H,
+  RECEIPT_MUTED,
+  RECEIPT_PAGE_BG,
+  RECEIPT_PX,
+  RECEIPT_SUMMARY_H,
+  RECEIPT_TABLE_HEAD_H,
+  RECEIPT_TABLE_ROW_H,
+  RECEIPT_TEXT,
+  RECEIPT_TITLE_H,
+  RECEIPT_TITLE_BODY_GAP,
+  RECEIPT_W,
+  type ReceiptProductColor,
+  type ReceiptSummaryItem,
+  type ReceiptTableLine,
+  receiptDrawBanner,
+  receiptDrawCenterTitle,
+  receiptDrawDottedLine,
+  receiptDrawFooter,
+  receiptDrawHeader,
+  receiptDrawInfoField,
+  receiptDrawSummaryBox,
+  receiptDrawTableHead,
+  receiptDrawTableRow,
+  receiptFmtMoney,
+} from './receiptCanvasShared'
+import {
+  buildProductReceiptColorMap,
+  getProductReceiptColor,
+} from './productColors'
+import { billImageQuality, getBillExportCaptureScale } from './receiptExport'
 import {
   expandProductLines,
   formatQuantityWithUnit,
@@ -13,159 +49,64 @@ import {
 import { aggregateProductSales } from './stats'
 
 const MAX_RECORDS = 50
-const MAX_CHART_PRODUCTS = 8
-
-/** html2canvas 安全色：仅 hex/rgb */
-const PAGE_BG = '#f7f4ef'
-const CARD_BG = '#ffffff'
-const SUMMARY_BG = '#f0ebe3'
-const TEXT = '#1c1917'
-const MUTED = '#78716c'
-const BRAND = '#1a7f4c'
-const AMOUNT_GREEN = '#16a34a'
-
-const PRODUCT_PALETTE = [
-  { tagBg: '#ffedd5', tagText: '#c2410c', bar: '#f97316' },
-  { tagBg: '#ede9fe', tagText: '#6d28d9', bar: '#8b5cf6' },
-  { tagBg: '#f3f4f6', tagText: '#374151', bar: '#9ca3af' },
-  { tagBg: '#fce7f3', tagText: '#be185d', bar: '#ec4899' },
-  { tagBg: '#dcfce7', tagText: '#15803d', bar: '#22c55e' },
-  { tagBg: '#dbeafe', tagText: '#1d4ed8', bar: '#3b82f6' },
-]
+const RECORD_SECTION_GAP = 10
+const RECORD_HEAD_H = 28
 
 export type SearchResultBillPngOptions = {
   records: LedgerRecord[]
   fields: FieldDef[]
   productCatalog?: ProductCatalogEntry[]
-  /** 统计下钻购买方（用于副标题） */
   drillPlate?: string
 }
 
-function assignStyle(el: HTMLElement, styles: Record<string, string>) {
-  for (const [k, v] of Object.entries(styles)) {
-    ;(el.style as unknown as Record<string, string>)[k] = v
-  }
+type PreparedRecord = {
+  dateLabel: string
+  recordTotal: string
+  lines: ReceiptTableLine[]
 }
 
-function createEl(
-  tag: keyof HTMLElementTagNameMap,
-  styles: Record<string, string> = {},
-  text?: string,
-): HTMLElement {
-  const el = document.createElement(tag)
-  assignStyle(el, styles)
-  if (text !== undefined) el.textContent = text
-  return el
-}
-
-function fmtMoney(n: number): string {
-  return (Math.round(n * 100) / 100).toFixed(2)
-}
-
-const TAG_HEIGHT = 28
-const TAG_FONT_SIZE = 13
-const TAG_PAD_X = 10
-
-function estimateProductTagWidth(text: string): number {
-  if (typeof document !== 'undefined') {
-    const canvas = document.createElement('canvas')
-    const ctx = canvas.getContext('2d')
-    if (ctx) {
-      ctx.font = `600 ${TAG_FONT_SIZE}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
-      return Math.ceil(ctx.measureText(text).width) + TAG_PAD_X * 2
-    }
-  }
-  let w = 0
-  for (const ch of text) {
-    w += ch.charCodeAt(0) > 127 ? TAG_FONT_SIZE : 8
-  }
-  return w + TAG_PAD_X * 2
-}
-
-/** SVG 标签：html2canvas 对 HTML 行高垂直居中不可靠 */
-function createProductTagSvg(
-  productName: string,
-  colors: { tagBg: string; tagText: string },
-): SVGSVGElement {
-  const width = Math.max(40, estimateProductTagWidth(productName))
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-  svg.setAttribute('width', String(width))
-  svg.setAttribute('height', String(TAG_HEIGHT))
-  svg.style.display = 'block'
-  svg.style.flexShrink = '0'
-
-  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
-  rect.setAttribute('width', String(width))
-  rect.setAttribute('height', String(TAG_HEIGHT))
-  rect.setAttribute('rx', '8')
-  rect.setAttribute('fill', colors.tagBg)
-
-  const label = document.createElementNS('http://www.w3.org/2000/svg', 'text')
-  label.setAttribute('x', String(width / 2))
-  label.setAttribute('y', String(TAG_HEIGHT / 2))
-  label.setAttribute('dominant-baseline', 'central')
-  label.setAttribute('text-anchor', 'middle')
-  label.setAttribute('fill', colors.tagText)
-  label.setAttribute('font-size', String(TAG_FONT_SIZE))
-  label.setAttribute('font-weight', '600')
-  label.setAttribute(
-    'font-family',
-    '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
-  )
-  label.textContent = productName
-
-  svg.appendChild(rect)
-  svg.appendChild(label)
-  return svg
-}
-
-function buildSubtitle(
-  records: LedgerRecord[],
-  fields: FieldDef[],
-  drillPlate?: string,
-): string {
-  const parts: string[] = []
-  const plateTrim = drillPlate?.trim()
-  if (plateTrim) {
-    parts.push(`购买方 ${plateTrim}`)
-  } else {
-    const plates = new Set<string>()
-    for (const r of records) {
-      const p = getPlateValue(r, fields).trim()
-      if (p) plates.add(p)
-    }
-    if (plates.size === 1) {
-      parts.push(`购买方 ${[...plates][0]}`)
-    } else if (plates.size > 1) {
-      parts.push(`购买方 ${plates.size} 个`)
-    }
-  }
-  if (records.length > 0) {
-    const dates = records.map((r) => r.date).sort()
-    parts.push(`${dates[0]} — ${dates[dates.length - 1]}`)
-  }
-  parts.push(`共${records.length}笔`)
-  return parts.join(' · ')
-}
-
-function productColorMap(productRows: { name: string }[]): Map<string, (typeof PRODUCT_PALETTE)[0]> {
-  const map = new Map<string, (typeof PRODUCT_PALETTE)[0]>()
-  productRows.forEach((row, i) => {
-    map.set(row.name, PRODUCT_PALETTE[i % PRODUCT_PALETTE.length])
-  })
-  return map
+type PreparedBill = {
+  buyerLine: string
+  dateRangeLine: string
+  totalAmount: number
+  listLen: number
+  productCount: number
+  records: PreparedRecord[]
+  truncatedNote: string | null
 }
 
 const CIRCLED = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩']
 
 function orderLabelOnDate(indexOnDate: number): string {
   if (indexOnDate <= 0) return ''
-  return `单号${CIRCLED[indexOnDate - 1] ?? String(indexOnDate)}`
+  return ` ${CIRCLED[indexOnDate - 1] ?? String(indexOnDate)}`
 }
 
-export async function renderSearchResultBillPngBlob(
-  options: SearchResultBillPngOptions,
-): Promise<Blob> {
+function buildBuyerLine(
+  records: LedgerRecord[],
+  fields: FieldDef[],
+  drillPlate?: string,
+): string {
+  const plateTrim = drillPlate?.trim()
+  if (plateTrim) return plateTrim
+  const plates = new Set<string>()
+  for (const r of records) {
+    const p = getPlateValue(r, fields).trim()
+    if (p) plates.add(p)
+  }
+  if (plates.size === 1) return [...plates][0]!
+  if (plates.size > 1) return `${plates.size} 个购买方`
+  return '—'
+}
+
+function buildDateRangeLine(records: LedgerRecord[]): string {
+  if (records.length === 0) return '—'
+  const dates = records.map((r) => r.date).sort()
+  if (dates[0] === dates[dates.length - 1]) return dates[0]!
+  return `${dates[0]} — ${dates[dates.length - 1]}`
+}
+
+function prepareBill(options: SearchResultBillPngOptions): PreparedBill {
   const { records, fields, productCatalog = [], drillPlate } = options
   const amountId = getAmountFieldId(fields)
   const sorted = [...records].sort((a, b) => {
@@ -187,156 +128,18 @@ export async function renderSearchResultBillPngBlob(
     amountId,
     null,
     productCatalog,
-  ).slice(0, MAX_CHART_PRODUCTS)
-  const colorByProduct = productColorMap(productRows)
-  const maxProductAmount = Math.max(...productRows.map((p) => p.amount), 1)
+  )
 
-  const host = createEl('div', {
-    position: 'fixed',
-    left: '-9999px',
-    top: '0',
-    width: '390px',
-    boxSizing: 'border-box',
-    backgroundColor: PAGE_BG,
-    padding: '20px 16px 24px',
-    fontFamily:
-      '-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif',
-    color: TEXT,
-    lineHeight: '1.4',
-  })
-
-  const brand = createEl('div', {
-    fontSize: '22px',
-    fontWeight: '600',
-    letterSpacing: '0.2em',
-    color: BRAND,
-    marginBottom: '8px',
-  }, 'kuaiji')
-
-  const title = createEl('div', {
-    fontSize: '26px',
-    fontWeight: '700',
-    marginBottom: '6px',
-  }, '账单明细')
-
-  const subtitle = createEl('div', {
-    fontSize: '13px',
-    color: MUTED,
-    marginBottom: '14px',
-    lineHeight: '1.5',
-  }, buildSubtitle(list, fields, drillPlate))
-
-  host.appendChild(brand)
-  host.appendChild(title)
-  host.appendChild(subtitle)
-
-  const summaryRow = createEl('div', {
-    display: 'flex',
-    gap: '8px',
-    marginBottom: '16px',
-  })
-
-  const summaryItems = [
-    { label: '合计金额', value: `¥${fmtMoney(totalAmount)}`, green: true },
-    { label: '订单数', value: String(list.length), green: false },
-    {
-      label: '品类数',
-      value: String(productRows.length),
-      green: false,
-    },
-  ]
-
-  for (const item of summaryItems) {
-    const card = createEl('div', {
-      flex: '1',
-      minWidth: '0',
-      backgroundColor: SUMMARY_BG,
-      borderRadius: '14px',
-      padding: '12px 10px',
-      textAlign: 'center',
-    })
-    card.appendChild(
-      createEl('div', {
-        fontSize: '11px',
-        color: MUTED,
-        marginBottom: '4px',
-      }, item.label),
-    )
-    card.appendChild(
-      createEl('div', {
-        fontSize: item.green ? '18px' : '20px',
-        fontWeight: '700',
-        color: item.green ? AMOUNT_GREEN : TEXT,
-        fontVariantNumeric: 'tabular-nums',
-      }, item.value),
-    )
-    summaryRow.appendChild(card)
-  }
-  host.appendChild(summaryRow)
-
-  if (productRows.length > 0) {
-    host.appendChild(
-      createEl('div', {
-        fontSize: '15px',
-        fontWeight: '700',
-        marginBottom: '10px',
-      }, '品类采购金额分布'),
-    )
-
-    const chart = createEl('div', {
-      backgroundColor: CARD_BG,
-      borderRadius: '16px',
-      padding: '14px 14px 10px',
-      marginBottom: '16px',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-    })
-
-    for (const row of productRows) {
-      const colors = colorByProduct.get(row.name) ?? PRODUCT_PALETTE[0]
-      const rowEl = createEl('div', {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '10px',
-        marginBottom: '10px',
-      })
-      rowEl.appendChild(
-        createEl('div', {
-          width: '52px',
-          flexShrink: '0',
-          fontSize: '13px',
-          fontWeight: '600',
-          color: TEXT,
-        }, row.name),
-      )
-      const barTrack = createEl('div', {
-        flex: '1',
-        height: '10px',
-        backgroundColor: '#f5f5f4',
-        borderRadius: '999px',
-        overflow: 'hidden',
-      })
-      const barFill = createEl('div', {
-        height: '100%',
-        width: `${Math.max(4, (row.amount / maxProductAmount) * 100)}%`,
-        backgroundColor: colors.bar,
-        borderRadius: '999px',
-      })
-      barTrack.appendChild(barFill)
-      rowEl.appendChild(barTrack)
-      rowEl.appendChild(
-        createEl('div', {
-          width: '64px',
-          flexShrink: '0',
-          textAlign: 'right',
-          fontSize: '13px',
-          fontWeight: '600',
-          fontVariantNumeric: 'tabular-nums',
-        }, `¥${fmtMoney(row.amount)}`),
-      )
-      chart.appendChild(rowEl)
+  const allProductNames = new Set<string>()
+  for (const rec of list) {
+    for (const line of expandProductLines(rec, fields)) {
+      allProductNames.add(line.product.trim() || '未填写商品')
     }
-    host.appendChild(chart)
   }
+  const colorByProduct = buildProductReceiptColorMap(
+    [...allProductNames],
+    productCatalog,
+  )
 
   const countByDate = new Map<string, number>()
   for (const r of list) {
@@ -344,67 +147,33 @@ export async function renderSearchResultBillPngBlob(
   }
   const dateOrderSeen = new Map<string, number>()
 
+  const preparedRecords: PreparedRecord[] = []
   for (const rec of list) {
     const seen = (dateOrderSeen.get(rec.date) ?? 0) + 1
     dateOrderSeen.set(rec.date, seen)
     const showOrder = (countByDate.get(rec.date) ?? 1) > 1
+    const dateLabel = `${rec.date}${showOrder ? orderLabelOnDate(seen) : ''}`
+    const recordTotal = receiptFmtMoney(getExpectedAmount(rec, amountId))
 
-    const card = createEl('div', {
-      backgroundColor: CARD_BG,
-      borderRadius: '16px',
-      padding: '14px',
-      marginBottom: '12px',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-    })
-
-    const recordTotal = getExpectedAmount(rec, amountId)
-    const head = createEl('div', {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: '10px',
-      gap: '8px',
-    })
-
-    const headLeft = createEl('div', {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '6px',
-      minWidth: '0',
-      flex: '1',
-    })
-    headLeft.appendChild(
-      createEl('span', { fontSize: '14px', flexShrink: '0' }, '📅'),
-    )
-    const dateLabel = rec.date
-    const orderSuffix = showOrder ? ` ${orderLabelOnDate(seen)}` : ''
-    headLeft.appendChild(
-      createEl('span', {
-        fontSize: '14px',
-        fontWeight: '600',
-        color: TEXT,
-      }, `${dateLabel}${orderSuffix}`),
-    )
-    head.appendChild(headLeft)
-    head.appendChild(
-      createEl('span', {
-        fontSize: '16px',
-        fontWeight: '700',
-        fontVariantNumeric: 'tabular-nums',
-        flexShrink: '0',
-      }, `¥${fmtMoney(recordTotal)}`),
-    )
-    card.appendChild(head)
-
-    const lines = expandProductLines(rec, fields)
+    const rawLines = expandProductLines(rec, fields)
     const renderLines =
-      lines.length > 0
-        ? lines
-        : [{ product: '未填写商品', unitPriceStr: '', quantity: '', lineAmountStr: '' }]
+      rawLines.length > 0
+        ? rawLines
+        : [
+            {
+              product: '未填写商品',
+              unitPriceStr: '',
+              quantity: '',
+              lineAmountStr: '',
+              lineValues: {},
+            },
+          ]
 
-    for (const line of renderLines) {
+    const lines: ReceiptTableLine[] = renderLines.map((line) => {
       const productName = line.product.trim() || '未填写商品'
-      const colors = colorByProduct.get(productName) ?? PRODUCT_PALETTE[0]
+      const colors: ReceiptProductColor =
+        colorByProduct.get(productName) ??
+        getProductReceiptColor(productName, productCatalog, 0)
       const unitRaw = line.unitPriceStr.trim()
       const qtyRaw = line.quantity.trim()
       const lineAmtRaw = line.lineAmountStr.trim()
@@ -418,84 +187,251 @@ export async function renderSearchResultBillPngBlob(
             line.lineValues,
           )
         : '—'
+      return {
+        productName,
+        colors,
+        unitPrice: unitVal > 0 ? receiptFmtMoney(unitVal) : '—',
+        quantity: qtyDisplay,
+        lineAmt: lineAmt > 0 ? receiptFmtMoney(lineAmt) : '—',
+      }
+    })
 
-      const lineRow = createEl('div', {
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '10px',
-        marginBottom: '8px',
-      })
-
-      const left = createEl('div', {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        flex: '1',
-        flexWrap: 'wrap',
-      })
-
-      left.appendChild(createProductTagSvg(productName, colors))
-
-      const detailParts: string[] = []
-      if (unitVal > 0) detailParts.push(`¥${fmtMoney(unitVal)}`)
-      if (qtyRaw) detailParts.push(`× ${qtyDisplay}`)
-      left.appendChild(
-        createEl('span', {
-          fontSize: '12px',
-          color: MUTED,
-          fontVariantNumeric: 'tabular-nums',
-          whiteSpace: 'nowrap',
-        }, detailParts.join(' ') || '—'),
-      )
-
-      lineRow.appendChild(left)
-      lineRow.appendChild(
-        createEl('span', {
-          fontSize: '14px',
-          fontWeight: '700',
-          fontVariantNumeric: 'tabular-nums',
-          flexShrink: '0',
-        }, lineAmt > 0 ? `¥${fmtMoney(lineAmt)}` : '—'),
-      )
-      card.appendChild(lineRow)
-    }
-
-    host.appendChild(card)
+    preparedRecords.push({ dateLabel, recordTotal, lines })
   }
 
-  if (sorted.length > list.length) {
-    host.appendChild(
-      createEl('div', {
-        textAlign: 'center',
-        fontSize: '12px',
-        color: MUTED,
-        marginTop: '4px',
-      }, `其余 ${sorted.length - list.length} 笔未展示`),
-    )
-  }
-
-  host.appendChild(
-    createEl('div', {
-      textAlign: 'center',
-      fontSize: '11px',
-      color: MUTED,
-      marginTop: '12px',
-    }, `由 kuaiji 生成 · ${format(new Date(), 'yyyy-MM-dd HH:mm')}`),
-  )
-
-  document.body.appendChild(host)
-  try {
-    const canvas = await html2canvasReceiptElement(host, {
-      scale: getReceiptCaptureScale(),
-      backgroundColor: PAGE_BG,
-    })
-    const blob = await new Promise<Blob | null>((resolve) => {
-      canvas.toBlob((result) => resolve(result), 'image/png')
-    })
-    if (!blob) throw new Error('生成 PNG 账单失败')
-    return blob
-  } finally {
-    host.remove()
+  return {
+    buyerLine: buildBuyerLine(list, fields, drillPlate),
+    dateRangeLine: buildDateRangeLine(list),
+    totalAmount,
+    listLen: list.length,
+    productCount: productRows.length,
+    records: preparedRecords,
+    truncatedNote:
+      sorted.length > list.length
+        ? `其余 ${sorted.length - list.length} 笔未展示`
+        : null,
   }
 }
+
+function measureRecordSectionHeight(rec: PreparedRecord): number {
+  /** 与 drawRecordSection 逐步一致 */
+  return (
+    RECORD_SECTION_GAP +
+    12 +
+    RECORD_HEAD_H +
+    RECEIPT_TABLE_HEAD_H +
+    rec.lines.length * RECEIPT_TABLE_ROW_H +
+    RECEIPT_TABLE_ROW_H +
+    14
+  )
+}
+
+function measureBillHeight(bill: PreparedBill): number {
+  /** 与 drawBillToCanvas 逐步一致 */
+  let y = RECEIPT_PX
+  y +=
+    RECEIPT_HEADER_H +
+    RECEIPT_TITLE_H +
+    RECEIPT_TITLE_BODY_GAP +
+    RECEIPT_INFO_ROW_H * 2 +
+    10 +
+    RECEIPT_SUMMARY_H +
+    RECEIPT_SUMMARY_TABLE_GAP
+  for (const rec of bill.records) {
+    y += measureRecordSectionHeight(rec)
+  }
+  if (bill.truncatedNote) y += 22
+  y += RECEIPT_FOOTER_H + RECEIPT_FOOTER_TAIL_GAP + RECEIPT_BANNER_H
+  return y + RECEIPT_PX
+}
+
+function drawRecordSection(
+  ctx: CanvasRenderingContext2D,
+  y: number,
+  rec: PreparedRecord,
+): number {
+  y += RECORD_SECTION_GAP
+  receiptDrawDottedLine(ctx, RECEIPT_PX, y, RECEIPT_W - RECEIPT_PX, y)
+  y += 12
+
+  ctx.fillStyle = RECEIPT_TEXT
+  ctx.font = `600 14px ${RECEIPT_FONT}`
+  ctx.fillText(rec.dateLabel, RECEIPT_PX + 4, y + 16)
+  y += RECORD_HEAD_H
+
+  y = receiptDrawTableHead(ctx, y)
+  for (const line of rec.lines) {
+    y = receiptDrawTableRow(ctx, y, line)
+  }
+
+  receiptDrawDottedLine(ctx, RECEIPT_PX, y, RECEIPT_W - RECEIPT_PX, y)
+  ctx.fillStyle = RECEIPT_TEXT
+  ctx.font = `600 13px ${RECEIPT_FONT}`
+  ctx.fillText('小计', RECEIPT_PX + 8, y + 22)
+  ctx.fillStyle = RECEIPT_AMOUNT_GREEN
+  ctx.font = `700 16px ${RECEIPT_FONT}`
+  ctx.textAlign = 'right'
+  ctx.fillText(`¥${rec.recordTotal}`, RECEIPT_W - RECEIPT_PX - 8, y + 22)
+  ctx.textAlign = 'left'
+  y += RECEIPT_TABLE_ROW_H + 14
+  return y
+}
+
+async function drawBillToCanvas(bill: PreparedBill): Promise<HTMLCanvasElement> {
+  const H = measureBillHeight(bill)
+  const scale = getBillExportCaptureScale()
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(RECEIPT_W * scale)
+  canvas.height = Math.round(H * scale)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas 不可用')
+
+  ctx.scale(scale, scale)
+  ctx.fillStyle = RECEIPT_PAGE_BG
+  ctx.fillRect(0, 0, RECEIPT_W, H)
+
+  let y = RECEIPT_PX
+  y = await receiptDrawHeader(ctx, y)
+  y = receiptDrawCenterTitle(ctx, y, '账单明细')
+  y += RECEIPT_TITLE_BODY_GAP
+
+  const midX = RECEIPT_W / 2 + 4
+  receiptDrawInfoField(
+    ctx,
+    RECEIPT_PX,
+    y,
+    'person',
+    '购买方',
+    bill.buyerLine,
+    midX - RECEIPT_PX - 8,
+  )
+  receiptDrawInfoField(
+    ctx,
+    midX,
+    y,
+    'doc',
+    '笔数',
+    `${bill.listLen} 笔`,
+    RECEIPT_W - RECEIPT_PX - midX,
+  )
+  y += 26
+  receiptDrawInfoField(
+    ctx,
+    RECEIPT_PX,
+    y,
+    'clock',
+    '日期',
+    bill.dateRangeLine,
+    RECEIPT_W - RECEIPT_PX * 2,
+  )
+  y += 26 + 10
+
+  const summaryItems: ReceiptSummaryItem[] = [
+    {
+      label: '合计金额',
+      value: `¥${receiptFmtMoney(bill.totalAmount)}`,
+      color: RECEIPT_AMOUNT_GREEN,
+    },
+    {
+      label: '订单数',
+      value: String(bill.listLen),
+      color: RECEIPT_TEXT,
+    },
+    {
+      label: '品类数',
+      value: String(bill.productCount),
+      color: RECEIPT_TEXT,
+    },
+  ]
+  y = receiptDrawSummaryBox(ctx, y, summaryItems)
+  y += RECEIPT_SUMMARY_TABLE_GAP
+
+  for (const rec of bill.records) {
+    y = drawRecordSection(ctx, y, rec)
+  }
+
+  if (bill.truncatedNote) {
+    ctx.fillStyle = RECEIPT_MUTED
+    ctx.font = `12px ${RECEIPT_FONT}`
+    ctx.textAlign = 'center'
+    ctx.fillText(bill.truncatedNote, RECEIPT_W / 2, y + 10)
+    ctx.textAlign = 'left'
+    y += 22
+  }
+
+  y = await receiptDrawFooter(ctx, y)
+  receiptDrawBanner(ctx, y)
+
+  return canvas
+}
+
+let billPrewarmCache: {
+  key: string
+  blob: Blob
+} | null = null
+let billPrewarmTask: Promise<Blob | null> | null = null
+
+function billCacheKey(options: SearchResultBillPngOptions): string {
+  const ids = options.records
+    .map((r) => `${r.id}:${r.createdAt}`)
+    .sort()
+    .join('|')
+  return `${ids}|${options.drillPlate ?? ''}|${options.fields.length}`
+}
+
+/** 导出面板打开时可预生成，点击分享时接近秒出 */
+export function prewarmSearchResultBillImage(
+  options: SearchResultBillPngOptions,
+): void {
+  const key = billCacheKey(options)
+  if (billPrewarmCache?.key === key) return
+  if (billPrewarmTask) return
+
+  billPrewarmTask = new Promise<Blob | null>((resolve) => {
+    const run = () => {
+      void (async () => {
+        try {
+          const blob = await renderSearchResultBillPngBlob(options)
+          billPrewarmCache = { key, blob }
+          resolve(blob)
+        } catch {
+          resolve(null)
+        } finally {
+          billPrewarmTask = null
+        }
+      })()
+    }
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(run, { timeout: 800 })
+    } else {
+      window.setTimeout(run, 0)
+    }
+  })
+}
+
+export function clearSearchResultBillPrewarm(): void {
+  billPrewarmCache = null
+  billPrewarmTask = null
+}
+
+export async function renderSearchResultBillPngBlob(
+  options: SearchResultBillPngOptions,
+): Promise<Blob> {
+  const key = billCacheKey(options)
+  const hit = billPrewarmCache
+  if (hit?.key === key) {
+    billPrewarmCache = null
+    return hit.blob
+  }
+
+  const bill = prepareBill(options)
+  const canvas = await drawBillToCanvas(bill)
+  const blob = await canvasToJpegBlob(canvas, billImageQuality)
+  if (!blob) throw new Error('生成图片失败')
+  return blob
+}
+
+export {
+  renderSingleReceiptBillBlob,
+  type SingleReceiptBillOptions,
+} from './singleReceiptCanvas'

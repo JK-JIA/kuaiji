@@ -7,8 +7,6 @@ type Props = {
   onClose: () => void
   onSelect: (name: string) => void
   productCatalog: ProductCatalogEntry[]
-  /** 账单历史里出现、但不在目录中的商品名 */
-  extraNames?: string[]
   title?: string
 }
 
@@ -17,7 +15,6 @@ export function ProductPickerModal({
   onClose,
   onSelect,
   productCatalog,
-  extraNames = [],
   title = '选择商品',
 }: Props) {
   const [query, setQuery] = useState('')
@@ -35,14 +32,8 @@ export function ProductPickerModal({
       seen.add(t)
       out.push(t)
     }
-    for (const raw of extraNames) {
-      const t = raw.trim()
-      if (!t || seen.has(t)) continue
-      seen.add(t)
-      out.push(t)
-    }
     return out.sort((a, b) => a.localeCompare(b, 'zh-CN'))
-  }, [productCatalog, extraNames])
+  }, [productCatalog])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

@@ -4,7 +4,35 @@ import { KuaijiHttp } from '../plugins/kuaijiHttp'
 
 /** 与下载站 `releases.json` 首条对齐，用于「跳过此版本」 */
 export const ANDROID_UPDATE_SKIP_TAG_KEY = 'kuaiji_android_update_skip_tag'
+/** @deprecated 固定文件名易被旧包占用；请用 apkCacheFilename */
 export const ANDROID_UPDATE_CACHE_FILENAME = 'kuaiji-latest.apk'
+
+/** 按目标 versionCode 分文件，避免复用旧缓存安装包 */
+export function apkCacheFilename(versionCode: number): string {
+  const vc = positiveInt(versionCode)
+  if (vc) return `kuaiji-vc-${vc}.apk`
+  return ANDROID_UPDATE_CACHE_FILENAME
+}
+
+/** 从 Capacitor App.getInfo().build 读取原生 versionCode */
+export function parseNativeVersionCode(build: string | number | undefined): number {
+  if (typeof build === 'number' && Number.isFinite(build) && build > 0) {
+    return Math.floor(build)
+  }
+  const s = String(build ?? '').trim()
+  if (!s) return 0
+  const n = parseInt(s, 10)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+export function shouldRetryApkInstall(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? '')
+  return (
+    msg.includes('APK_STALE_DOWNLOAD') ||
+    msg.includes('APK_NOT_NEWER') ||
+    msg.includes('相同或更旧')
+  )
+}
 
 /** 下载 APK / manifest 时追加时间戳，避免运营商或中间层返回旧缓存 */
 export function withDownloadCacheBust(url: string): string {

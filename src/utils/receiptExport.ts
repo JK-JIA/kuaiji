@@ -31,6 +31,22 @@ export function getReceiptCaptureScale(): number {
   return Math.min(1.5, Math.max(1, dpr * 0.75))
 }
 
+/** 筛选账单长图：1.5× 清晰度与速度均衡 */
+export function getBillExportCaptureScale(): number {
+  return 1.5
+}
+
+/** 单张记账小票：默认 1.5×，设置里开高清则 2× */
+export function getSingleReceiptCaptureScale(): number {
+  if (readReceiptExportHd()) {
+    return 2
+  }
+  return getBillExportCaptureScale()
+}
+
 export const receiptImageMime = 'image/jpeg' as const
 export const receiptImageExt = '.jpg' as const
 export const receiptImageQuality = JPEG_QUALITY
+
+/** 筛选账单长图 JPEG 质量 */
+export const billImageQuality = 0.88

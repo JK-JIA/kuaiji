@@ -35,8 +35,7 @@ export async function parseBillImageWithDoubao(
   if (!base) {
     return {
       success: false,
-      error:
-        '未配置云端 API（VITE_API_URL）。图片识别由服务端豆包视觉模型完成，请在构建/环境变量中配置 API 地址。',
+      error: '请先登录并连接云端账本后再使用图片识别。',
     }
   }
   if (!token) {
@@ -62,8 +61,7 @@ export async function parseBillImageWithDoubao(
     if (!result.success && httpStatus === 404) {
       return {
         success: false,
-        error:
-          '服务端 API 版本过旧，尚无图片识别接口（404）。请在服务器执行 git pull 与 docker compose up -d --build 重新部署 ledger-api，并配置 DOUBAO_API_KEY、DOUBAO_VISION_MODEL。',
+        error: '图片识别服务暂未开通，请稍后再试。',
       }
     }
     return result

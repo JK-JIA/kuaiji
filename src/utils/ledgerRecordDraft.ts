@@ -9,12 +9,17 @@ import {
   LINE_QUANTITY_UNIT_KEY,
   splitVoiceQuantityString,
 } from './productUnits'
-import { defaultUnitForProduct } from './productCatalogHelpers'
+import {
+  canonicalProductNameFromCatalog,
+  defaultUnitForProduct,
+  validateLineProductsInCatalog,
+} from './productCatalogHelpers'
 import {
   computedLineAmountFromUnitAndQty,
   emptyLineTripleTouched,
   getAmountFieldId,
   parseMoney,
+  resolveBuiltinFieldId,
   parseNonNegativeMoney,
   reconcileLineTripleByLastEdited,
   sanitizeUnsignedDecimalInput,
@@ -48,11 +53,18 @@ export type LedgerFormLayout = {
   unitPriceId: string | undefined
 }
 
+function builtinFieldDef(
+  fields: FieldDef[],
+  key: 'product' | 'quantity' | 'unitPrice',
+): FieldDef | undefined {
+  return fields.find((f) => f.id === resolveBuiltinFieldId(fields, key))
+}
+
 export function getLedgerFormLayout(fields: FieldDef[]): LedgerFormLayout {
   const sortedFields = [...fields].sort((a, b) => a.order - b.order)
-  const prodField = sortedFields.find((f) => f.key === 'product')
-  const qtyField = sortedFields.find((f) => f.key === 'quantity')
-  const unitPriceField = sortedFields.find((f) => f.key === 'unitPrice')
+  const prodField = builtinFieldDef(sortedFields, 'product')
+  const qtyField = builtinFieldDef(sortedFields, 'quantity')
+  const unitPriceField = builtinFieldDef(sortedFields, 'unitPrice')
   const prodId = prodField?.id
   const qtyId = qtyField?.id
   const unitPriceId = unitPriceField?.id
@@ -179,6 +191,9 @@ export function validateRecordForm(
     values: Record<string, string>
     lines: LedgerLineForm[]
     dealInput: string
+    productCatalog?: ProductCatalogEntry[]
+    /** 编辑旧账单：原记录中的商品名可不收录于目录 */
+    legacyProductNames?: ReadonlySet<string>
   },
 ): string | null {
   const {
@@ -192,7 +207,7 @@ export function validateRecordForm(
     prodId,
     qtyId,
   } = layout
-  const { values, lines, dealInput } = input
+  const { values, lines, dealInput, productCatalog, legacyProductNames } = input
 
   const merged = buildMergedValues(values, lines, prodId, qtyId)
   if (!prodId || !qtyId) return '缺少商品或数量字段配置'
@@ -295,7 +310,37 @@ export function validateRecordForm(
     return spaceIssues.join('\n')
   }
 
+  if (productCatalog) {
+    const catalogErr = validateLineProductsInCatalog(
+      lines,
+      productCatalog,
+      prodField?.name ?? '商品',
+      legacyProductNames,
+    )
+    if (catalogErr) return catalogErr
+  }
+
   return null
+}
+
+/** 编辑账单时，原记录里已保存的商品名（即使已从商品管理删除也允许保留） */
+export function legacyProductNamesFromRecord(
+  record: LedgerRecord,
+  prodId: string,
+): Set<string> {
+  const names = new Set<string>()
+  const add = (raw: string) => {
+    const t = raw.trim()
+    if (t) names.add(t)
+  }
+  if (record.lineItems?.length) {
+    for (const li of record.lineItems) {
+      add(String(li.values[prodId] ?? ''))
+    }
+  } else {
+    add(String(record.values[prodId] ?? ''))
+  }
+  return names
 }
 
 export function buildLedgerRecordForSave(
@@ -417,9 +462,11 @@ export function mapDoubaoProductLinesToLineForms(
       lastEdited,
       touched: emptyLineTripleTouched(),
     })
+    const canonical =
+      canonicalProductNameFromCatalog(l.product, catalog) ?? l.product.trim()
     return {
       id: crypto.randomUUID(),
-      product: l.product,
+      product: canonical,
       quantityUnit,
       ...r,
       lastEdited: null,

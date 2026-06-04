@@ -5,6 +5,7 @@ import {
   sanitizeAllCatalogAliases,
 } from './productAliasHelpers'
 import { defaultUnitDef, normalizeProductUnits } from './productUnits'
+import { normalizeProductColorKey } from './productColors'
 import { normalizeToken } from './voiceHistoryFuzzy'
 
 /**
@@ -29,6 +30,9 @@ export function normalizeCatalogEntry(
     name,
     normalizeAliasList((raw as ProductCatalogEntry).aliases, name),
   )
+  const colorKey = normalizeProductColorKey(
+    (raw as ProductCatalogEntry).colorKey,
+  )
   return {
     id,
     name,
@@ -36,6 +40,7 @@ export function normalizeCatalogEntry(
     units,
     source,
     ...(aliases.length > 0 ? { aliases } : {}),
+    ...(colorKey != null ? { colorKey } : {}),
   }
 }
 
@@ -101,7 +106,83 @@ export function lookupCatalogEntryForProduct(
 ): ProductCatalogEntry | undefined {
   const k = normalizeToken(productName)
   if (!k) return undefined
-  return catalogByNormalizedName(catalog).get(k)
+  const byName = catalogByNormalizedName(catalog).get(k)
+  if (byName) return byName
+  for (const e of catalog) {
+    for (const a of e.aliases ?? []) {
+      if (normalizeToken(a) === k) return e
+    }
+  }
+  return undefined
+}
+
+/** 首页 / 记一笔：商品目录为空时的提示 */
+export const CATALOG_EMPTY_HINT =
+  '请先在「设置 → 商品管理」中录入商品，再填写账单。'
+
+export function hasProductCatalog(
+  catalog: ProductCatalogEntry[] | undefined | null,
+): boolean {
+  return (catalog?.length ?? 0) > 0
+}
+
+/** 命中目录（含别名）时返回规范商品名，否则 null */
+export function canonicalProductNameFromCatalog(
+  productName: string,
+  catalog: ProductCatalogEntry[],
+): string | null {
+  const entry = lookupCatalogEntryForProduct(productName, catalog)
+  const name = entry?.name.trim()
+  return name || null
+}
+
+/** 表单保存：校验各行商品均在目录中（编辑旧账单时可保留原商品名） */
+export function validateLineProductsInCatalog(
+  lines: Array<{ product: string }>,
+  catalog: ProductCatalogEntry[],
+  prodLabel = '商品',
+  legacyProductNames?: ReadonlySet<string>,
+): string | null {
+  const legacy = legacyProductNames ?? new Set<string>()
+  if (!hasProductCatalog(catalog)) {
+    const needsCatalog = lines.some((l) => {
+      const p = l.product.trim()
+      return p && !legacy.has(p)
+    })
+    if (needsCatalog) return CATALOG_EMPTY_HINT
+    return null
+  }
+  const issues: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const p = lines[i].product.trim()
+    if (!p) continue
+    if (legacy.has(p)) continue
+    if (!lookupCatalogEntryForProduct(p, catalog)) {
+      issues.push(
+        `第 ${i + 1} 行：「${p}」不在商品目录中，请从${prodLabel}列表中选择`,
+      )
+    }
+  }
+  return issues.length > 0 ? issues.join('\n') : null
+}
+
+/** 语音 / 识图：目录为空或存在未收录商品名 */
+export function validateVoiceLinesInCatalog(
+  lines: Array<{ product: string }>,
+  catalog: ProductCatalogEntry[],
+): string | null {
+  if (!hasProductCatalog(catalog)) {
+    return '商品目录为空，请先在「设置 → 商品管理」中添加商品后再识别记账。'
+  }
+  const bad = [
+    ...new Set(
+      lines
+        .map((l) => l.product.trim())
+        .filter((p) => p && !lookupCatalogEntryForProduct(p, catalog)),
+    ),
+  ]
+  if (bad.length === 0) return null
+  return `以下商品不在目录中：${bad.join('、')}。请先在商品管理中添加，或重新说明商品名称。`
 }
 
 export function defaultUnitForProduct(

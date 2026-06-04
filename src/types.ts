@@ -72,6 +72,8 @@ export interface ProductCatalogEntry {
    * 用于 ASR 热词、AI 解析与 fuzzy 对齐
    */
   aliases?: string[]
+  /** 展示色索引 0–23，对应预设 24 色；未设则按商品名稳定取色 */
+  colorKey?: number
 }
 
 /** 客户目录：购买方标识 + 可选联系信息（与账单 field_plate 值对应） */

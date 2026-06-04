@@ -156,6 +156,7 @@ public class KuaijiHttpPlugin extends Plugin {
         conn.setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate");
         conn.setRequestProperty("Pragma", "no-cache");
         conn.setRequestProperty("Expires", "0");
+        conn.setRequestProperty("Connection", "close");
         return conn;
     }
 }

@@ -19,10 +19,15 @@ import {
   type AliasAttachCandidate,
 } from './productAliasHelpers'
 import {
+  canonicalProductNameFromCatalog,
+  validateVoiceLinesInCatalog,
+} from './productCatalogHelpers'
+import {
   applyCorrectionToProductName,
   type VoiceProductCorrection,
 } from './voiceProductCorrections'
 import { applySpokenHintsToProductLines } from './voiceParseHints'
+import { resolveVoiceRecordDate } from './spokenRecordDate'
 import {
   setLastVoicePipelineProducts,
   type VoiceParseDebugTrace,
@@ -47,6 +52,8 @@ export type VoiceParsePipelineInput = {
 export type VoiceParsePipelineResult = VoiceHistoryFuzzyResult & {
   success: boolean
   error?: string
+  /** 记账日期 yyyy-MM-dd（未说日期则为今天） */
+  recordDate: string
   /** 若别名表有静默更新，返回新目录供调用方持久化 */
   catalogWithAliases?: ProductCatalogEntry[]
   debug: VoiceParseDebugTrace
@@ -131,9 +138,12 @@ async function processDoubaoParseResult(
       values: emptyLedgerFieldValues(layout.sortedFields),
       lines: [createEmptyLineForm()],
       needConfirm: false,
+      recordDate: resolveVoiceRecordDate(text, aiRaw.recordDate),
       debug,
     }
   }
+
+  const recordDate = resolveVoiceRecordDate(text, aiRaw.recordDate)
 
   const emptyVals = emptyLedgerFieldValues(layout.sortedFields)
   const emptyLines = [createEmptyLineForm()]
@@ -225,16 +235,35 @@ async function processDoubaoParseResult(
     }
   }
 
+  const catalogErr = validateVoiceLinesInCatalog(fuzzy.lines, productCatalog)
+  if (catalogErr) {
+    return {
+      success: false,
+      error: catalogErr,
+      values: fuzzy.values,
+      lines: fuzzy.lines,
+      needConfirm: false,
+      recordDate,
+      debug,
+    }
+  }
+
+  const linesCanonical = fuzzy.lines.map((l) => {
+    const name = canonicalProductNameFromCatalog(l.product, productCatalog)
+    return name ? { ...l, product: name } : l
+  })
+
   const preFuzzyProducts =
     debug.afterDraft?.lines.map((l) => l.product.trim()).filter(Boolean) ??
-    fuzzy.lines.map((l) => l.product).filter(Boolean)
+    linesCanonical.map((l) => l.product).filter(Boolean)
   setLastVoicePipelineProducts(preFuzzyProducts)
   return {
     success: true,
     values: fuzzy.values,
-    lines: fuzzy.lines,
+    lines: linesCanonical,
     needConfirm: fuzzy.needConfirm,
     confirmHint: fuzzy.confirmHint,
+    recordDate,
     catalogWithAliases,
     debug,
   }
@@ -336,6 +365,7 @@ export async function runVoiceParsePipeline(
       values: emptyLedgerFieldValues(layout.sortedFields),
       lines: [createEmptyLineForm()],
       needConfirm: false,
+      recordDate: resolveVoiceRecordDate(''),
       debug,
     }
   }

@@ -111,6 +111,25 @@ export type MeResponse = {
   phone: string | null
   membershipExpiresAt: string | null
   welcomeMembershipClaimed: boolean
+  inviteCode?: string | null
+  invitedByBound?: boolean
+  referralRewardMonths?: number
+}
+
+export type ReferralMeResponse = {
+  inviteCode: string
+  inviteUrl: string
+  referralRewardMonths: number
+  referralMaxRewardMonths: number
+  inviteCount: number
+  invitedByBound: boolean
+  canEarnMoreReferral: boolean
+}
+
+export type ReferralBindResponse = {
+  ok: true
+  inviterRewarded: boolean
+  user: MeResponse
 }
 
 export type AuthUserPayload = {
@@ -118,6 +137,9 @@ export type AuthUserPayload = {
   phone?: string | null
   membershipExpiresAt: string | null
   welcomeMembershipClaimed?: boolean
+  invitedByBound?: boolean
+  inviteCode?: string | null
+  referralRewardMonths?: number
 }
 
 function mapAuthUser(user: AuthUserPayload) {
@@ -126,6 +148,7 @@ function mapAuthUser(user: AuthUserPayload) {
     membershipExpiresAt: user.membershipExpiresAt ?? null,
     phone: user.phone ?? null,
     welcomeMembershipClaimed: Boolean(user.welcomeMembershipClaimed),
+    invitedByBound: Boolean(user.invitedByBound),
   }
 }
 
@@ -164,6 +187,34 @@ export async function cancelMembership(
   })
   if (!res.ok) throw new Error(await parseErr(res))
   return (await res.json()) as MeResponse
+}
+
+export async function fetchReferralMe(
+  base: string,
+  token: string,
+): Promise<ReferralMeResponse> {
+  const res = await fetch(`${base.replace(/\/$/, '')}/api/referral/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(await parseErr(res))
+  return (await res.json()) as ReferralMeResponse
+}
+
+export async function bindReferralCode(
+  base: string,
+  token: string,
+  code: string,
+): Promise<ReferralBindResponse> {
+  const res = await fetch(`${base.replace(/\/$/, '')}/api/referral/bind`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ code: code.trim() }),
+  })
+  if (!res.ok) throw new Error(await parseErr(res))
+  return (await res.json()) as ReferralBindResponse
 }
 
 /** 新用户优惠：免费领取 1 个月会员（每账号一次） */
@@ -242,6 +293,7 @@ export async function apiOneClickLogin(
   membershipExpiresAt: string | null
   phone: string | null
   welcomeMembershipClaimed: boolean
+  invitedByBound: boolean
 }> {
   const res = await fetch(`${base.replace(/\/$/, '')}/auth/oneclick/login`, {
     method: 'POST',
@@ -269,6 +321,7 @@ export async function apiSmsLogin(
   membershipExpiresAt: string | null
   phone: string | null
   welcomeMembershipClaimed: boolean
+  invitedByBound: boolean
 }> {
   const res = await fetch(`${base.replace(/\/$/, '')}/auth/sms/login`, {
     method: 'POST',
@@ -401,6 +454,7 @@ export async function apiLogin(
   membershipExpiresAt: string | null
   phone: string | null
   welcomeMembershipClaimed: boolean
+  invitedByBound: boolean
 }> {
   const res = await fetch(`${base.replace(/\/$/, '')}/auth/login`, {
     method: 'POST',
@@ -428,6 +482,7 @@ export async function apiRegister(
   membershipExpiresAt: string | null
   phone: string | null
   welcomeMembershipClaimed: boolean
+  invitedByBound: boolean
 }> {
   const res = await fetch(`${base.replace(/\/$/, '')}/auth/register`, {
     method: 'POST',
