@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>快记的个人网站 · 违法和不良信息举报</title>
+    <link rel="stylesheet" href="/assets/site.css" />
+  </head>
+  <body>
+    <div class="wrap wrap--legal">
+      <header class="hero">
+        <p class="eyebrow">快记的个人网站 · kuaiji</p>
+        <h1>违法和不良信息举报</h1>
+        <p class="lede">
+          如您发现本网站存在违法和不良信息，请通过下方表单举报。我们将依法及时处理，并反馈至网站管理员邮箱。
+        </p>
+      </header>
+
+      <article class="panel legal-doc">
+        <section class="legal-section" style="margin-top:0;padding-top:0;border-top:none">
+          <h2>举报须知</h2>
+          <ul>
+            <li>请如实填写举报内容，便于我们核查处理。</li>
+            <li>举报信息将发送至网站管理员邮箱：<strong>jia_jk@163.com</strong>。</li>
+            <li>我们将在收到举报后依法、及时进行处理。</li>
+            <li>恶意举报、虚假举报可能承担相应法律责任。</li>
+          </ul>
+        </section>
+
+        <form id="report-form" class="stack-form report-form" novalidate>
+          <label class="field">
+            <span class="label">举报类型 <span class="req">*</span></span>
+            <select name="category" required>
+              <option value="">请选择</option>
+              <option value="porn">色情低俗</option>
+              <option value="gambling">赌博诈骗</option>
+              <option value="violence">暴力恐怖</option>
+              <option value="fraud">虚假不实信息</option>
+              <option value="illegal">违法违规</option>
+              <option value="other">其他</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span class="label">相关网址或页面</span>
+            <input
+              type="text"
+              name="url"
+              placeholder="例如 https://kuaijipf.com/..."
+              maxlength="500"
+            />
+          </label>
+
+          <label class="field">
+            <span class="label">举报内容说明 <span class="req">*</span></span>
+            <textarea
+              name="content"
+              rows="6"
+              required
+              minlength="10"
+              maxlength="5000"
+              placeholder="请详细描述涉嫌违法和不良信息的内容、位置及情况（不少于 10 字）"
+            ></textarea>
+          </label>
+
+          <label class="field">
+            <span class="label">举报人姓名</span>
+            <input type="text" name="reporterName" maxlength="60" placeholder="选填" />
+          </label>
+
+          <label class="field">
+            <span class="label">联系方式</span>
+            <input
+              type="text"
+              name="contact"
+              maxlength="120"
+              placeholder="手机号或邮箱，便于反馈处理结果（选填）"
+            />
+          </label>
+
+          <label class="field hp-field" aria-hidden="true">
+            <span class="label">请勿填写</span>
+            <input type="text" name="website" tabindex="-1" autocomplete="off" />
+          </label>
+
+          <button type="submit" class="btn-submit" id="report-submit">提交举报</button>
+          <p id="report-msg" class="form-msg" role="status" aria-live="polite"></p>
+        </form>
+      </article>
+
+      <footer class="foot">
+        <p>
+          <a class="foot-link" href="/">返回首页</a>
+          ·
+          <a class="foot-link" href="/privacy.html">隐私政策</a>
+          ·
+          <a class="foot-link" href="/terms.html">用户协议</a>
+        </p>
+        <p class="footer-beian-inline">
+          <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer"
+            >沪ICP备2026024182号-1</a
+          >
+        </p>
+      </footer>
+    </div>
+
+    <script src="/assets/report.js" defer></script>
+  </body>
+</html>

@@ -2,6 +2,7 @@ import express from 'express'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import multer from 'multer'
+import nodemailer from 'nodemailer'
 
 const PORT = Number(process.env.PORT) || 3005
 const UPLOAD_TOKEN = (process.env.UPLOAD_TOKEN || '').trim()
@@ -10,6 +11,24 @@ const LEDGER_ADMIN_TOKEN = (process.env.LEDGER_ADMIN_TOKEN || '').trim()
 const DOWNLOADS_DIR = process.env.DOWNLOADS_DIR || '/data/downloads'
 const RELEASES_PATH =
   process.env.RELEASES_PATH || path.join('/data/public', 'releases.json')
+const REPORT_TO_EMAIL = (process.env.REPORT_TO_EMAIL || 'jia_jk@163.com').trim()
+const REPORT_SMTP_HOST = (process.env.REPORT_SMTP_HOST || 'smtp.163.com').trim()
+const REPORT_SMTP_PORT = Number(process.env.REPORT_SMTP_PORT) || 465
+const REPORT_SMTP_USER = (process.env.REPORT_SMTP_USER || '').trim()
+const REPORT_SMTP_PASS = (process.env.REPORT_SMTP_PASS || '').trim()
+const REPORTS_DIR = process.env.REPORTS_DIR || '/data/reports'
+
+const REPORT_CATEGORIES = {
+  porn: '色情低俗',
+  gambling: '赌博诈骗',
+  violence: '暴力恐怖',
+  fraud: '虚假不实信息',
+  illegal: '违法违规',
+  other: '其他',
+}
+
+/** @type {Map<string, number[]>} */
+const reportRateByIp = new Map()
 
 const app = express()
 app.use(express.json({ limit: '1mb' }))
@@ -64,6 +83,73 @@ const upload = multer({
   },
 })
 
+function reportClientIp(req) {
+  const xf = String(req.headers['x-forwarded-for'] || '')
+    .split(',')[0]
+    .trim()
+  return xf || req.socket.remoteAddress || 'unknown'
+}
+
+function reportRateLimited(ip) {
+  const now = Date.now()
+  const windowMs = 60 * 60 * 1000
+  const maxPerHour = 8
+  const prev = (reportRateByIp.get(ip) || []).filter((t) => now - t < windowMs)
+  if (prev.length >= maxPerHour) return true
+  prev.push(now)
+  reportRateByIp.set(ip, prev)
+  return false
+}
+
+function reportSmtpReady() {
+  return Boolean(REPORT_SMTP_USER && REPORT_SMTP_PASS)
+}
+
+async function ensureReportsDir() {
+  await fs.mkdir(REPORTS_DIR, { recursive: true })
+}
+
+async function saveReportFile(payload) {
+  await ensureReportsDir()
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const file = path.join(REPORTS_DIR, `report-${stamp}.json`)
+  await fs.writeFile(file, JSON.stringify(payload, null, 2), 'utf8')
+  return file
+}
+
+async function sendReportEmail(payload) {
+  if (!reportSmtpReady()) return { sent: false, reason: 'smtp_not_configured' }
+  const transporter = nodemailer.createTransport({
+    host: REPORT_SMTP_HOST,
+    port: REPORT_SMTP_PORT,
+    secure: REPORT_SMTP_PORT === 465,
+    auth: {
+      user: REPORT_SMTP_USER,
+      pass: REPORT_SMTP_PASS,
+    },
+  })
+  const categoryLabel =
+    REPORT_CATEGORIES[payload.category] || payload.category || '未分类'
+  const lines = [
+    `举报类型：${categoryLabel}`,
+    `相关网址：${payload.url || '（未填写）'}`,
+    `举报内容：`,
+    payload.content,
+    '',
+    `举报人：${payload.reporterName || '（未填写）'}`,
+    `联系方式：${payload.contact || '（未填写）'}`,
+    `提交时间：${payload.submittedAt}`,
+    `来源 IP：${payload.ip}`,
+  ]
+  await transporter.sendMail({
+    from: `"快记的个人网站" <${REPORT_SMTP_USER}>`,
+    to: REPORT_TO_EMAIL,
+    subject: `【违法举报】${categoryLabel} - 快记的个人网站`,
+    text: lines.join('\n'),
+  })
+  return { sent: true }
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
@@ -71,7 +157,84 @@ app.get('/api/health', (_req, res) => {
     statsEnabled: Boolean(LEDGER_API_URL && LEDGER_ADMIN_TOKEN),
     ledgerApiConfigured: Boolean(LEDGER_API_URL),
     ledgerTokenConfigured: Boolean(LEDGER_ADMIN_TOKEN),
+    reportEnabled: true,
+    reportEmailConfigured: reportSmtpReady(),
+    reportToEmail: REPORT_TO_EMAIL,
   })
+})
+
+app.post('/api/report', async (req, res) => {
+  const ip = reportClientIp(req)
+  if (reportRateLimited(ip)) {
+    res.status(429).json({ error: '提交过于频繁，请稍后再试' })
+    return
+  }
+
+  const honeypot = String(req.body?.website ?? '').trim()
+  if (honeypot) {
+    res.json({ ok: true })
+    return
+  }
+
+  const category = String(req.body?.category ?? '').trim()
+  if (!Object.hasOwn(REPORT_CATEGORIES, category)) {
+    res.status(400).json({ error: '请选择举报类型' })
+    return
+  }
+
+  const content = String(req.body?.content ?? '').trim()
+  if (content.length < 10) {
+    res.status(400).json({ error: '请填写不少于 10 字的举报说明' })
+    return
+  }
+  if (content.length > 5000) {
+    res.status(400).json({ error: '举报说明过长，请控制在 5000 字以内' })
+    return
+  }
+
+  const url = String(req.body?.url ?? '').trim().slice(0, 500)
+  const contact = String(req.body?.contact ?? '').trim().slice(0, 120)
+  const reporterName = String(req.body?.reporterName ?? '').trim().slice(0, 60)
+
+  const payload = {
+    category,
+    categoryLabel: REPORT_CATEGORIES[category],
+    url,
+    content,
+    contact,
+    reporterName,
+    ip,
+    userAgent: String(req.headers['user-agent'] || '').slice(0, 300),
+    submittedAt: new Date().toISOString(),
+  }
+
+  try {
+    const savedPath = await saveReportFile(payload)
+    let emailResult = { sent: false, reason: 'unknown' }
+    try {
+      emailResult = await sendReportEmail(payload)
+    } catch (e) {
+      console.error('[report/email]', e)
+      emailResult = {
+        sent: false,
+        reason: e instanceof Error ? e.message : 'email_failed',
+      }
+    }
+
+    res.json({
+      ok: true,
+      emailSent: emailResult.sent,
+      message: emailResult.sent
+        ? '举报已提交，我们将依法及时处理。'
+        : '举报已记录，管理员将尽快处理。',
+      saved: path.basename(savedPath),
+    })
+  } catch (e) {
+    console.error('[report]', e)
+    res.status(500).json({
+      error: e instanceof Error ? e.message : '提交失败，请稍后重试',
+    })
+  }
 })
 
 app.get('/api/admin/overview', async (req, res) => {

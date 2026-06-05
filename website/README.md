@@ -36,6 +36,7 @@ LEDGER_API_URL=http://api:3001
 | `/` | 官网首页（基于 landing 设计），`#download` 仅链接 **releases.json 第一条带 `file` 的 APK** |
 | `/admin.html` | 管理后台：登录 → 发布 APK / 数据概览 / 购买记录 / 会员列表 |
 | `/privacy.html` `/terms.html` | 协议页 |
+| `/report.html` | 违法和不良信息举报（ICP 安全评估），提交后邮件通知管理员 |
 
 ## 管理后台
 
@@ -47,9 +48,19 @@ LEDGER_API_URL=http://api:3001
 - **发布 APK**：写入 `downloads/` 并插入 `releases.json` 首位（官网只展示最新 APK）。
 - **数据概览 / 购买记录 / 会员有效期**：来自业务 API（需上述环境变量）。
 
+## 违法举报（ICP）
+
+首页页脚及各协议页提供 **违法举报** 入口（`/report.html`）。用户提交后：
+
+1. 写入 `website/reports/` 备份 JSON；
+2. 若配置了 `REPORT_SMTP_*`，同步发邮件至 `REPORT_TO_EMAIL`（默认 `jia_jk@163.com`）。
+
+163 邮箱：登录网页版 → 设置 → POP3/SMTP → 开启服务并生成**授权码**，填入 `website/.env` 的 `REPORT_SMTP_PASS`。改 env 后执行 `docker compose up -d --build uploader`。
+
 ## API
 
-- `GET /api/health` — `uploadEnabled`、`statsEnabled`
+- `GET /api/health` — `uploadEnabled`、`statsEnabled`、`reportEmailConfigured`
+- `POST /api/report` — 违法举报 `{ category, content, url?, contact?, reporterName? }`
 - `POST /api/auth/login` — `{ "token": "…" }`
 - `POST /api/upload` — multipart，`file`（.apk）、`version`、可选 `versionCode`、`notes`；`Authorization: Bearer <UPLOAD_TOKEN>`
 - `GET /api/admin/overview` — 需 Bearer，返回用户数、账本数、会员与订单列表（代理 ledger-api）

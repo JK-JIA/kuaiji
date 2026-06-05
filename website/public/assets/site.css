@@ -363,7 +363,9 @@ a.btn.btn-secondary:hover {
 .field input[type='password'],
 .field input[type='date'],
 .field input[type='number'],
-.field input[type='file'] {
+.field input[type='file'],
+.field select,
+.field textarea {
   font: inherit;
   padding: 0.5rem 0.65rem;
   border: 1px solid var(--border);
@@ -372,9 +374,46 @@ a.btn.btn-secondary:hover {
   color: var(--text);
 }
 
-.field input:focus-visible {
+.field input:focus-visible,
+.field select:focus-visible,
+.field textarea:focus-visible {
   outline: 2px solid #1c1917;
   outline-offset: 1px;
+}
+
+.field textarea {
+  resize: vertical;
+  min-height: 7rem;
+}
+
+.report-form {
+  margin-top: 1rem;
+}
+
+.req {
+  color: #b91c1c;
+}
+
+.hp-field {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.footer-beian-inline {
+  margin-top: 0.65rem !important;
+}
+
+.footer-beian-inline a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.footer-beian-inline a:hover {
+  color: var(--text);
+  text-decoration: underline;
 }
 
 .btn-submit {

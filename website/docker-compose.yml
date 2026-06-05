@@ -19,9 +19,16 @@ services:
       LEDGER_ADMIN_TOKEN: ${LEDGER_ADMIN_TOKEN:-}
       DOWNLOADS_DIR: /data/downloads
       RELEASES_PATH: /data/public/releases.json
+      REPORT_TO_EMAIL: ${REPORT_TO_EMAIL:-jia_jk@163.com}
+      REPORT_SMTP_HOST: ${REPORT_SMTP_HOST:-smtp.163.com}
+      REPORT_SMTP_PORT: ${REPORT_SMTP_PORT:-465}
+      REPORT_SMTP_USER: ${REPORT_SMTP_USER:-}
+      REPORT_SMTP_PASS: ${REPORT_SMTP_PASS:-}
+      REPORTS_DIR: /data/reports
     volumes:
       - ./downloads:/data/downloads
       - ./public:/data/public
+      - ./reports:/data/reports
     networks:
       - default
       - ledger
