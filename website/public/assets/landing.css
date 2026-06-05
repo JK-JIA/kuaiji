@@ -126,6 +126,7 @@ footer{background:var(--gray900);color:rgba(255,255,255,.5);padding:36px 5vw;tex
 footer a{color:rgba(255,255,255,.65);text-decoration:none;margin:0 10px}
 footer a:hover{color:white}
 footer strong{color:rgba(255,255,255,.8)}
+.footer-tagline{margin-top:4px}
 .footer-links{margin-top:12px}
 .footer-copy{margin-top:8px}
 .footer-beian{margin-top:8px}
