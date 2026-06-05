@@ -46,7 +46,7 @@ docker compose up -d --build
 
 打 APK 前复制 `.env.example` 为 `.env`，确认 `VITE_API_URL` 指向你的 API（示例已填公网地址），再执行 `npm run build` 与 `npx cap sync`。新用户可在设置页使用「注册」并填写有效邮箱。
 
-本地仅跑后端时，复制 `server/.env.example` 为 `server/.env`，将 `DATABASE_URL` 指向本机或容器内的 MySQL，在 `server` 目录执行 `npx prisma migrate deploy` 后 `npm run dev`。
+本地仅跑后端时，复制 `server/.env.example` 为 `server/.env`，将 `DATABASE_URL` 指向本机或容器内的 MySQL。在 `server` 目录先 `npm install`，再执行 **`npm run prisma:migrate`**（勿用裸 `npx prisma`，否则会拉到 Prisma 7 与项目 6.x 不兼容），然后 `npm run dev`。
 
 ## 豆包（可选）
 

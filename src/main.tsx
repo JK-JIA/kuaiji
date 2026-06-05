@@ -7,10 +7,12 @@ import './index.css'
 import { applyFontSizePercentToHtml, readFontSizePercent } from './utils/appFontSize'
 import { initTheme } from './utils/appTheme'
 import { captureInviteCodeFromLocation } from './utils/referralInvite'
+import { captureReferralFromDownloadPage } from './utils/captureReferralFromDownload'
 
 applyFontSizePercentToHtml(readFontSizePercent())
 initTheme()
 captureInviteCodeFromLocation()
+void captureReferralFromDownloadPage()
 
 if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
   void import('@capgo/capacitor-updater').then(({ CapacitorUpdater }) => {

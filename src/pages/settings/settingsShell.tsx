@@ -25,19 +25,27 @@ export function SettingsHeaderIconButton({
   label,
   onClick,
   children,
+  badgeCount = 0,
 }: {
   label: string
   onClick?: () => void
   children: ReactNode
+  badgeCount?: number
 }) {
+  const showBadge = badgeCount > 0
   return (
     <button
       type="button"
-      aria-label={label}
+      aria-label={showBadge ? `${label}，${badgeCount} 条未读` : label}
       onClick={onClick}
-      className="flex h-10 w-10 items-center justify-center rounded-full text-kj-secondary transition-colors hover:bg-kj-hover active:bg-kj-surface"
+      className="relative flex h-10 w-10 items-center justify-center rounded-full text-kj-secondary transition-colors hover:bg-kj-hover active:bg-kj-surface"
     >
       {children}
+      {showBadge ? (
+        <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white">
+          {badgeCount > 9 ? '9+' : badgeCount}
+        </span>
+      ) : null}
     </button>
   )
 }

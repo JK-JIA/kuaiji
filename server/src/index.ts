@@ -53,11 +53,16 @@ import {
   siteAdminReady,
 } from './siteAdmin.js'
 import {
+  ackInviterNotices,
+  attachReferralOnRegister,
   bindReferralInvite,
-  buildInviteUrl,
+  buildInviteDownloadUrl,
+  completeReferralOnFirstRecord,
   ensureUserInviteCode,
   generateInviteCode,
+  listInviterNotices,
   REFERRAL_MAX_REWARD_MONTHS,
+  referralAttachErrorMessage,
   referralBindErrorMessage,
 } from './referral.js'
 
@@ -109,10 +114,14 @@ const SmsSendSchema = z.object({
 const SmsLoginSchema = z.object({
   phone: z.string().min(10).max(20),
   code: z.string().min(4).max(12),
+  inviteCode: z.string().max(32).optional(),
+  deviceFingerprint: z.string().max(128).optional(),
 })
 
 const OneClickLoginSchema = z.object({
   accessToken: z.string().min(8).max(4096),
+  inviteCode: z.string().max(32).optional(),
+  deviceFingerprint: z.string().max(128).optional(),
 })
 
 const RedeemSchema = z.object({
@@ -227,13 +236,18 @@ function extendMembershipExpires(
   return new Date(base.getTime() + grantedDays * 24 * 60 * 60 * 1000)
 }
 
-async function loginOrRegisterByPhone(phone: string) {
+async function loginOrRegisterByPhone(
+  phone: string,
+  opts?: { inviteCode?: string; deviceFingerprint?: string },
+) {
   const email = smsEmailForPhone(phone)
   let user = await prisma.user.findFirst({
     where: { OR: [{ phone }, { email }] },
   })
+  let isNewUser = false
 
   if (!user) {
+    isNewUser = true
     const passwordHash = await bcrypt.hash(randomBytes(24).toString('hex'), 10)
     let created = false
     for (let attempt = 0; attempt < 12 && !created; attempt++) {
@@ -265,6 +279,29 @@ async function loginOrRegisterByPhone(phone: string) {
     if (!created || !user) {
       throw new Error('用户注册失败')
     }
+    if (opts?.deviceFingerprint?.trim()) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { deviceFingerprint: opts.deviceFingerprint.trim() },
+      })
+    }
+    if (opts?.inviteCode?.trim()) {
+      const attach = await attachReferralOnRegister(
+        prisma,
+        user.id,
+        opts.inviteCode,
+        opts.deviceFingerprint,
+      )
+      if (!attach.ok && attach.error !== 'ALREADY_INVITED') {
+        console.warn(
+          '[referral] register attach skipped',
+          phone.slice(0, 3) + '****',
+          attach.error,
+        )
+      } else if (attach.ok) {
+        user = await prisma.user.findUniqueOrThrow({ where: { id: user.id } })
+      }
+    }
   } else {
     user = await prisma.user.update({
       where: { id: user.id },
@@ -273,7 +310,7 @@ async function loginOrRegisterByPhone(phone: string) {
   }
 
   const token = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' })
-  return { token, user }
+  return { token, user, isNewUser }
 }
 
 const app = express()
@@ -606,7 +643,11 @@ app.post('/auth/sms/login', async (req, res) => {
     return
   }
 
-  const { token, user } = await loginOrRegisterByPhone(phone)
+  const { inviteCode, deviceFingerprint } = parsed.data
+  const { token, user } = await loginOrRegisterByPhone(phone, {
+    inviteCode,
+    deviceFingerprint,
+  })
   res.json({
     token,
     user: userJson(user),
@@ -642,7 +683,11 @@ app.post('/auth/oneclick/login', async (req, res) => {
   }
 
   console.log('[oneclick] login ok', maskPhone11(normalized))
-  const { token, user } = await loginOrRegisterByPhone(normalized)
+  const { inviteCode, deviceFingerprint } = parsed.data
+  const { token, user } = await loginOrRegisterByPhone(normalized, {
+    inviteCode,
+    deviceFingerprint,
+  })
   res.json({
     token,
     user: userJson(user),
@@ -687,17 +732,19 @@ app.get('/api/referral/me', async (req, res) => {
     const inviteCode = await ensureUserInviteCode(prisma, userId)
     const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } })
     const inviteCount = await prisma.referral.count({
-      where: { inviterId: userId },
+      where: { inviterId: userId, status: 'completed' },
     })
+    const notices = await listInviterNotices(prisma, userId)
     res.json({
       inviteCode,
-      inviteUrl: buildInviteUrl(inviteCode),
+      inviteUrl: buildInviteDownloadUrl(inviteCode),
       referralRewardMonths: user.referralRewardMonths,
       referralMaxRewardMonths: REFERRAL_MAX_REWARD_MONTHS,
       inviteCount,
       invitedByBound: Boolean(user.invitedByUserId),
       canEarnMoreReferral:
         user.referralRewardMonths < REFERRAL_MAX_REWARD_MONTHS,
+      notices,
     })
   } catch (e) {
     console.error('[referral/me]', e)
@@ -741,6 +788,76 @@ app.post('/api/referral/bind', async (req, res) => {
   } catch (e) {
     console.error('[referral/bind]', e)
     res.status(500).json({ error: '绑定邀请码失败' })
+  }
+})
+
+const ReferralNoticeAckSchema = z.object({
+  ids: z.array(z.string().min(1).max(64)),
+})
+
+app.post('/api/referral/notices/ack', async (req, res) => {
+  const token = authHeader(req)
+  if (!token) {
+    res.status(401).json({ error: '未登录' })
+    return
+  }
+  const userId = userIdFromToken(token)
+  if (!userId) {
+    res.status(401).json({ error: '无效令牌' })
+    return
+  }
+  const parsed = ReferralNoticeAckSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: '参数无效' })
+    return
+  }
+  try {
+    await ackInviterNotices(prisma, userId, parsed.data.ids)
+    res.json({ ok: true })
+  } catch (e) {
+    console.error('[referral/notices/ack]', e)
+    res.status(500).json({ error: '确认通知失败' })
+  }
+})
+
+app.post('/api/referral/complete', async (req, res) => {
+  const token = authHeader(req)
+  if (!token) {
+    res.status(401).json({ error: '未登录' })
+    return
+  }
+  const userId = userIdFromToken(token)
+  if (!userId) {
+    res.status(401).json({ error: '无效令牌' })
+    return
+  }
+  try {
+    const result = await completeReferralOnFirstRecord(
+      prisma,
+      userId,
+      extendMembershipExpires,
+    )
+    if (!result.ok) {
+      res.status(400).json({ error: '邀请奖励已领取' })
+      return
+    }
+    if (!result.completed) {
+      res.json({ ok: true, completed: false })
+      return
+    }
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } })
+    res.json({
+      ok: true,
+      completed: true,
+      inviteeRewarded: result.inviteeRewarded,
+      inviteeMessage: result.inviteeRewarded
+        ? '你通过好友邀请加入，已获得 1 个月会员体验'
+        : null,
+      user: userJson(user),
+    })
+  } catch (e) {
+    console.error('[referral/complete]', e)
+    res.status(500).json({ error: '领取邀请奖励失败' })
   }
 })
 

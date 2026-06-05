@@ -1,3 +1,26 @@
+const PENDING_INVITE_KEY = 'kuaiji_pending_invite_code'
+
+/** 方案 B：下载页 /download?invite= 写入 localStorage，供 APK 首次启动读取 */
+function captureInviteFromUrl() {
+  try {
+    const params = new URLSearchParams(window.location.search)
+    const raw =
+      params.get('invite') || params.get('ref') || params.get('code')
+    if (!raw) return
+    const code = String(raw)
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '')
+    if (code.length >= 4) {
+      localStorage.setItem(PENDING_INVITE_KEY, code)
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+captureInviteFromUrl()
+
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, '&amp;')

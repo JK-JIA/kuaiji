@@ -88,6 +88,12 @@ export function canvasToJpegBlob(
   })
 }
 
+export function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    canvas.toBlob((b) => resolve(b), 'image/png')
+  })
+}
+
 /**
  * 在隔离 iframe 内对节点截图 → JPEG（用于筛选账单等纯内联样式 DOM，跳过 importNode）。
  */

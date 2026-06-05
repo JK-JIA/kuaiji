@@ -27,6 +27,14 @@ import {
   sendSmsCode,
   setStoredMembershipExpires,
 } from '../api/ledgerClient'
+import { getDeviceFingerprint } from '../utils/deviceFingerprint'
+import { clearReferralInviteCache } from '../utils/referralInviteCache'
+
+const INVITER_NOTICE_POPUP_SESSION_KEY = 'kuaiji_inviter_notice_popup_seen'
+import {
+  readPendingInviteCode,
+  writePendingInviteCode,
+} from '../utils/referralInvite'
 
 type AuthContextValue = {
   apiBase: string | undefined
@@ -161,7 +169,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const smsLogin = useCallback(
     async (phone: string, code: string) => {
       if (!apiBase) throw new Error('未配置 VITE_API_URL')
-      const r = await apiSmsLogin(apiBase, phone, code)
+      const inviteCode = readPendingInviteCode() ?? undefined
+      const deviceFingerprint = await getDeviceFingerprint()
+      const r = await apiSmsLogin(apiBase, phone, code, {
+        inviteCode,
+        deviceFingerprint,
+      })
+      writePendingInviteCode(null)
       applySession(
         r.token,
         r.email,
@@ -177,7 +191,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const oneClickLogin = useCallback(
     async (accessToken: string) => {
       if (!apiBase) throw new Error('未配置 VITE_API_URL')
-      const r = await apiOneClickLogin(apiBase, accessToken)
+      const inviteCode = readPendingInviteCode() ?? undefined
+      const deviceFingerprint = await getDeviceFingerprint()
+      const r = await apiOneClickLogin(apiBase, accessToken, {
+        inviteCode,
+        deviceFingerprint,
+      })
+      writePendingInviteCode(null)
       applySession(
         r.token,
         r.email,
@@ -229,6 +249,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [apiBase, token, applyMe])
 
   const logout = useCallback(() => {
+    clearReferralInviteCache()
+    try {
+      sessionStorage.removeItem(INVITER_NOTICE_POPUP_SESSION_KEY)
+    } catch {
+      /* ignore */
+    }
     clearSession()
     setToken(null)
     setEmail(null)

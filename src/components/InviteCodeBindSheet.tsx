@@ -24,12 +24,24 @@ export function InviteCodeBindSheet({ open, onClose, onBind, onScan }: Props) {
       <div
         role="dialog"
         aria-modal="true"
-        className="w-full max-w-md rounded-2xl bg-kj-surface p-5 shadow-xl"
+        className="relative w-full max-w-md rounded-2xl bg-kj-surface p-5 pt-4 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-base font-bold text-kj-primary">填写邀请码</h2>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="关闭"
+          className="absolute right-3 top-3 flex h-7 w-7 items-center justify-center rounded-full text-kj-muted transition-colors hover:bg-kj-bg hover:text-kj-secondary"
+        >
+          <span className="text-lg leading-none" aria-hidden>
+            ×
+          </span>
+        </button>
+        <h2 className="pr-8 text-base font-bold text-kj-primary">填写邀请码</h2>
         <p className="mt-2 text-xs leading-relaxed text-kj-secondary">
-          下载后首次使用可填写好友邀请码。每位用户仅可被邀请一次，绑定后不可更换。
+          填写好友邀请码可
+          <span className="font-semibold text-[#008055]">免费获得 1 个月会员</span>
+          。每位用户仅可被邀请一次，绑定后不可更换。
         </p>
         <input
           type="text"
@@ -68,13 +80,6 @@ export function InviteCodeBindSheet({ open, onClose, onBind, onScan }: Props) {
           className="mt-2 w-full rounded-xl bg-[#2ecc71] py-2.5 text-sm font-semibold text-white disabled:opacity-50"
         >
           {busy ? '提交中…' : '确认绑定'}
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          className="mt-2 w-full py-2 text-sm text-kj-muted"
-        >
-          暂不填写
         </button>
       </div>
     </div>

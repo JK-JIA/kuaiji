@@ -9,8 +9,11 @@ import {
   useState,
 } from 'react'
 import {
+  completeReferralReward,
   fetchLedger,
   putLedger,
+  REFERRAL_INVITEE_TOAST_KEY,
+  REFERRAL_NOTICES_CHANGED_EVENT,
 } from '../api/ledgerClient'
 import { getDefaultFieldDefs } from '../constants/defaultLedgerFields'
 import { normalizeBuiltinFieldLabels } from '../constants/mergeBuiltinFields'
@@ -454,6 +457,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
 
   const saveRecord = useCallback(
     async (rec: LedgerRecord) => {
+      const isFirstRecord = records.length === 0
       const aid = getAmountFieldId(fields)
       const exp = aid ? parseMoney(rec.values[aid] ?? '') : 0
       let next = rec
@@ -509,6 +513,33 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           setCustomerCatalog(customerCatalogForSave)
         }
         await refresh()
+        if (isFirstRecord) {
+          void completeReferralReward(apiBase, token)
+            .then((r) => {
+              if (r.completed && r.user) {
+                window.dispatchEvent(
+                  new CustomEvent('kuaiji-membership-updated'),
+                )
+              }
+              if (r.completed && r.inviteeMessage?.trim()) {
+                try {
+                  sessionStorage.setItem(
+                    REFERRAL_INVITEE_TOAST_KEY,
+                    r.inviteeMessage.trim(),
+                  )
+                  window.dispatchEvent(
+                    new CustomEvent('kuaiji-referral-toast'),
+                  )
+                  window.dispatchEvent(
+                    new Event(REFERRAL_NOTICES_CHANGED_EVENT),
+                  )
+                } catch {
+                  /* ignore */
+                }
+              }
+            })
+            .catch(() => {})
+        }
         return newAutoPrompts
       }
 

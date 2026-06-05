@@ -5,9 +5,13 @@ import type { FieldDef, ProductCatalogEntry } from '../types'
 import { useAuth } from '../context/AuthContext'
 import { useLedger } from '../context/LedgerContext'
 import { TRIGGER_ANDROID_UPDATE_CHECK } from '../components/AppUpdateGate'
+import { InviteCodeAlreadyBoundSheet } from '../components/InviteCodeAlreadyBoundSheet'
 import { InviteCodeBindSheet } from '../components/InviteCodeBindSheet'
 import { InviteCodeScanModal } from '../components/InviteCodeScanModal'
+import { AppNotificationsSheet } from '../components/AppNotificationsSheet'
 import { ReferralInviteSheet } from '../components/ReferralInviteSheet'
+import { useReferralNotices } from '../context/ReferralNoticesContext'
+import { preloadReferralInvite } from '../utils/referralInviteCache'
 import { APP_VERSION } from '../version'
 import { getStoredPhone } from '../api/ledgerClient'
 import {
@@ -494,8 +498,12 @@ export function SettingsPage() {
   const [proBenefitsOpen, setProBenefitsOpen] = useState(false)
   const [proRedeemOpen, setProRedeemOpen] = useState(false)
   const [referralInviteOpen, setReferralInviteOpen] = useState(false)
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const { unreadCount: noticeUnreadCount, refresh: refreshNotices } =
+    useReferralNotices()
   const [inviteScanOpen, setInviteScanOpen] = useState(false)
   const [inviteBindOpen, setInviteBindOpen] = useState(false)
+  const [inviteAlreadyBoundOpen, setInviteAlreadyBoundOpen] = useState(false)
   const [newProductName, setNewProductName] = useState('')
   const [newProductUnit, setNewProductUnit] = useState('斤')
   /** 正在编辑计量单位的商品 id（此时禁用左滑删除） */
@@ -583,6 +591,15 @@ export function SettingsPage() {
 
   const fontSizeLabel = useMemo(() => fontSizePresetLabel(fontPct), [fontPct])
   const profileNickname = useMemo(() => displayNickname(userProfile), [userProfile])
+
+  useEffect(() => {
+    if (!token || !apiBase) return
+    void preloadReferralInvite(apiBase, token, profileNickname)
+  }, [token, apiBase, profileNickname])
+
+  useEffect(() => {
+    if (token && apiBase) void refreshNotices()
+  }, [token, apiBase, refreshNotices])
   const needsAccountLogin = Boolean(apiBase && !token)
 
   useEffect(() => {
@@ -1139,7 +1156,14 @@ export function SettingsPage() {
           <>
             <SettingsHeaderIconButton
               label="通知"
-              onClick={() => alert('通知功能即将上线')}
+              badgeCount={token ? noticeUnreadCount : 0}
+              onClick={() => {
+                if (!token) {
+                  openPanel('account')
+                  return
+                }
+                setNotificationsOpen(true)
+              }}
             >
               <IconBell className="h-5 w-5" />
             </SettingsHeaderIconButton>
@@ -1151,7 +1175,7 @@ export function SettingsPage() {
                   return
                 }
                 if (invitedByBound) {
-                  alert('您已绑定过邀请码，每位用户仅可被邀请一次')
+                  setInviteAlreadyBoundOpen(true)
                   return
                 }
                 setInviteScanOpen(true)
@@ -1197,12 +1221,18 @@ export function SettingsPage() {
           onCancelMembership={cancelMembership}
         />
 
+        <AppNotificationsSheet
+          open={notificationsOpen}
+          onClose={() => setNotificationsOpen(false)}
+        />
+
         {token && apiBase ? (
           <ReferralInviteSheet
             open={referralInviteOpen}
             onClose={() => setReferralInviteOpen(false)}
             apiBase={apiBase}
             token={token}
+            inviterDisplayName={profileNickname}
           />
         ) : null}
 
@@ -1225,6 +1255,11 @@ export function SettingsPage() {
           }}
         />
 
+        <InviteCodeAlreadyBoundSheet
+          open={inviteAlreadyBoundOpen}
+          onClose={() => setInviteAlreadyBoundOpen(false)}
+        />
+
         <InviteCodeBindSheet
           open={inviteBindOpen}
           onClose={() => setInviteBindOpen(false)}
@@ -1240,7 +1275,7 @@ export function SettingsPage() {
           <SettingsInsetList>
             <SettingsNavRowButton
               first
-              last={!token || invitedByBound}
+              last={!token}
               icon={<IconSparkles className="h-[18px] w-[18px]" />}
               title="邀请好友"
               subtitle={
@@ -1256,13 +1291,19 @@ export function SettingsPage() {
                 setReferralInviteOpen(true)
               }}
             />
-            {token && !invitedByBound ? (
+            {token ? (
               <SettingsNavRowButton
                 last
                 icon={<IconScan className="h-[18px] w-[18px]" />}
                 title="填写邀请码"
-                subtitle="被好友邀请下载后可绑定，仅一次机会"
-                onClick={() => setInviteBindOpen(true)}
+                subtitle="填写好友邀请码，免费获得 1 个月会员（仅一次机会）"
+                onClick={() => {
+                  if (invitedByBound) {
+                    setInviteAlreadyBoundOpen(true)
+                    return
+                  }
+                  setInviteBindOpen(true)
+                }}
               />
             ) : null}
           </SettingsInsetList>

@@ -28,6 +28,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(KuaijiPermissionsPlugin.class);
         registerPlugin(NumberAuthPlugin.class);
         registerPlugin(AlipayPlugin.class);
+        registerPlugin(ReferralBridgePlugin.class);
         super.onCreate(savedInstanceState);
         applyWebViewSettings();
         new Handler(Looper.getMainLooper()).post(this::applyWebViewSettings);

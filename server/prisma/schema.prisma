@@ -23,6 +23,8 @@ model User {
   invitedAt                  DateTime?
   /** 通过邀请累计获得的会员月数（上限 12） */
   referralRewardMonths       Int       @default(0)
+  /** 注册设备指纹，用于防薅羊毛 */
+  deviceFingerprint          String?
   createdAt                   DateTime  @default(now())
   ledger              Ledger?
   referralsGiven      Referral[] @relation("ReferralsGiven")
@@ -30,16 +32,26 @@ model User {
 }
 
 model Referral {
-  id          String   @id @default(cuid())
-  inviterId   String
-  inviteeId   String   @unique
-  inviteCode  String
-  grantedDays Int      @default(30)
-  createdAt   DateTime @default(now())
-  inviter     User     @relation("ReferralsGiven", fields: [inviterId], references: [id], onDelete: Cascade)
-  invitee     User     @relation("ReferralReceived", fields: [inviteeId], references: [id], onDelete: Cascade)
+  id                String    @id @default(cuid())
+  inviterId         String
+  inviteeId         String    @unique
+  inviteCode        String
+  grantedDays       Int       @default(30)
+  /** pending=已注册绑定；completed=被邀请人完成首笔记账并已发奖 */
+  status            String    @default("pending")
+  deviceFingerprint String?
+  completedAt       DateTime?
+  inviteeRewarded   Boolean   @default(false)
+  inviterRewarded   Boolean   @default(false)
+  /** 邀请人是否已读「好友已注册」类通知 */
+  inviterNotifiedPending Boolean @default(false)
+  inviterNotified   Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  inviter           User      @relation("ReferralsGiven", fields: [inviterId], references: [id], onDelete: Cascade)
+  invitee           User      @relation("ReferralReceived", fields: [inviteeId], references: [id], onDelete: Cascade)
 
   @@index([inviterId])
+  @@index([status])
 }
 
 model Ledger {

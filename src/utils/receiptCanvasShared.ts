@@ -586,6 +586,19 @@ async function drawQrWithLogo(
   }
 }
 
+/** 居中绘制带 logo 的二维码（邀请海报、宣传图等） */
+export async function receiptDrawCenterQr(
+  ctx: CanvasRenderingContext2D,
+  y: number,
+  size: number,
+  url: string,
+): Promise<number> {
+  const qrX = (RECEIPT_W - size) / 2
+  const qrImg = await createQrImage(url, size * 3)
+  await drawQrWithLogo(ctx, qrX, y, size, qrImg)
+  return y + size
+}
+
 export async function receiptDrawFooter(
   ctx: CanvasRenderingContext2D,
   y: number,

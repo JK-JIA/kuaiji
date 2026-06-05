@@ -116,6 +116,15 @@ export type MeResponse = {
   referralRewardMonths?: number
 }
 
+export type ReferralNotice = {
+  id: string
+  message: string
+  kind?: 'registered' | 'completed'
+  createdAt?: string
+}
+
+export const REFERRAL_NOTICES_CHANGED_EVENT = 'kuaiji-referral-notices-changed'
+
 export type ReferralMeResponse = {
   inviteCode: string
   inviteUrl: string
@@ -124,6 +133,17 @@ export type ReferralMeResponse = {
   inviteCount: number
   invitedByBound: boolean
   canEarnMoreReferral: boolean
+  notices?: ReferralNotice[]
+}
+
+export const REFERRAL_INVITEE_TOAST_KEY = 'kuaiji_referral_invitee_toast'
+
+export type ReferralCompleteResponse = {
+  ok: true
+  completed: boolean
+  inviteeRewarded?: boolean
+  inviteeMessage?: string | null
+  user?: MeResponse
 }
 
 export type ReferralBindResponse = {
@@ -217,6 +237,40 @@ export async function bindReferralCode(
   return (await res.json()) as ReferralBindResponse
 }
 
+export async function completeReferralReward(
+  base: string,
+  token: string,
+): Promise<ReferralCompleteResponse> {
+  const res = await fetch(`${base.replace(/\/$/, '')}/api/referral/complete`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  })
+  if (!res.ok) throw new Error(await parseErr(res))
+  return (await res.json()) as ReferralCompleteResponse
+}
+
+export async function ackReferralNotices(
+  base: string,
+  token: string,
+  ids: string[],
+): Promise<void> {
+  const res = await fetch(
+    `${base.replace(/\/$/, '')}/api/referral/notices/ack`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ids }),
+    },
+  )
+  if (!res.ok) throw new Error(await parseErr(res))
+}
+
 /** 新用户优惠：免费领取 1 个月会员（每账号一次） */
 export async function claimWelcomeMembership(
   base: string,
@@ -287,6 +341,7 @@ export async function sendSmsCode(base: string, phone: string): Promise<void> {
 export async function apiOneClickLogin(
   base: string,
   accessToken: string,
+  opts?: { inviteCode?: string; deviceFingerprint?: string },
 ): Promise<{
   token: string
   email: string
@@ -295,10 +350,17 @@ export async function apiOneClickLogin(
   welcomeMembershipClaimed: boolean
   invitedByBound: boolean
 }> {
+  const body: Record<string, string> = {
+    accessToken: accessToken.trim(),
+  }
+  if (opts?.inviteCode?.trim()) body.inviteCode = opts.inviteCode.trim()
+  if (opts?.deviceFingerprint?.trim()) {
+    body.deviceFingerprint = opts.deviceFingerprint.trim()
+  }
   const res = await fetch(`${base.replace(/\/$/, '')}/auth/oneclick/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ accessToken: accessToken.trim() }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(await parseErr(res))
   const j = (await res.json()) as {
@@ -315,6 +377,7 @@ export async function apiSmsLogin(
   base: string,
   phone: string,
   code: string,
+  opts?: { inviteCode?: string; deviceFingerprint?: string },
 ): Promise<{
   token: string
   email: string
@@ -323,10 +386,18 @@ export async function apiSmsLogin(
   welcomeMembershipClaimed: boolean
   invitedByBound: boolean
 }> {
+  const body: Record<string, string> = {
+    phone: phone.trim(),
+    code: code.trim(),
+  }
+  if (opts?.inviteCode?.trim()) body.inviteCode = opts.inviteCode.trim()
+  if (opts?.deviceFingerprint?.trim()) {
+    body.deviceFingerprint = opts.deviceFingerprint.trim()
+  }
   const res = await fetch(`${base.replace(/\/$/, '')}/auth/sms/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone: phone.trim(), code: code.trim() }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(await parseErr(res))
   const j = (await res.json()) as {
