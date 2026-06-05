@@ -107,6 +107,26 @@ export async function buildSiteAdminOverview(prisma: PrismaClient) {
   const paidOrders = orders.filter((o) => o.status === 'paid')
   const pendingOrders = orders.filter((o) => o.status === 'pending')
 
+  const [feedbackTotal, feedbackRows] = await Promise.all([
+    prisma.userFeedback.count(),
+    prisma.userFeedback.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    }),
+  ])
+
+  const feedbackUserIds = [
+    ...new Set(feedbackRows.map((f) => f.userId).filter(Boolean)),
+  ] as string[]
+  const feedbackUsers =
+    feedbackUserIds.length > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: feedbackUserIds } },
+          select: { id: true, email: true, phone: true },
+        })
+      : []
+  const feedbackUserById = new Map(feedbackUsers.map((u) => [u.id, u]))
+
   return {
     generatedAt: now.toISOString(),
     usersTotal,
@@ -116,6 +136,7 @@ export async function buildSiteAdminOverview(prisma: PrismaClient) {
     membershipExpiredCount,
     membershipOrdersPaid: paidOrders.length,
     membershipOrdersUnpaid: pendingOrders.length,
+    feedbackTotal,
     userAccounts: userAccounts.map((u) => ({
       email: u.email,
       phone: u.phone,
@@ -137,5 +158,20 @@ export async function buildSiteAdminOverview(prisma: PrismaClient) {
       }
     }),
     members: members.slice(0, 80),
+    recentFeedback: feedbackRows.map((f) => {
+      const u = f.userId ? feedbackUserById.get(f.userId) : undefined
+      return {
+        id: f.id,
+        category: f.category,
+        content: f.content,
+        contact: f.contact,
+        appVersion: f.appVersion,
+        platform: f.platform,
+        status: f.status,
+        createdAt: f.createdAt.toISOString(),
+        userEmail: u?.email ?? null,
+        userPhone: u?.phone ?? null,
+      }
+    }),
   }
 }

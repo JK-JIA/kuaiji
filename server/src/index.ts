@@ -166,6 +166,35 @@ const BillParseSchema = z.object({
 })
 
 const lastSmsSend = new Map<string, number>()
+const lastFeedbackByIp = new Map<string, number[]>()
+
+const FEEDBACK_CATEGORIES = ['bug', 'feature', 'other'] as const
+
+const FeedbackSchema = z.object({
+  category: z.enum(FEEDBACK_CATEGORIES),
+  content: z.string().trim().min(5).max(5000),
+  contact: z.string().trim().max(120).optional(),
+  appVersion: z.string().trim().max(32).optional(),
+  platform: z.string().trim().max(32).optional(),
+})
+
+function clientIp(req: express.Request): string {
+  const xf = String(req.headers['x-forwarded-for'] || '')
+    .split(',')[0]
+    .trim()
+  return xf || req.socket.remoteAddress || 'unknown'
+}
+
+function feedbackRateLimited(ip: string): boolean {
+  const now = Date.now()
+  const windowMs = 60 * 60 * 1000
+  const maxPerHour = 6
+  const prev = (lastFeedbackByIp.get(ip) || []).filter((t) => now - t < windowMs)
+  if (prev.length >= maxPerHour) return true
+  prev.push(now)
+  lastFeedbackByIp.set(ip, prev)
+  return false
+}
 
 function authHeader(req: express.Request): string | null {
   const h = req.headers.authorization
@@ -711,6 +740,46 @@ app.get('/api/me', async (req, res) => {
     return
   }
   res.json(userJson(user))
+})
+
+app.post('/api/feedback', async (req, res) => {
+  const ip = clientIp(req)
+  if (feedbackRateLimited(ip)) {
+    res.status(429).json({ error: '提交过于频繁，请稍后再试' })
+    return
+  }
+
+  const parsed = FeedbackSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: '请填写有效的反馈内容' })
+    return
+  }
+
+  let userId: string | null = null
+  const token = authHeader(req)
+  if (token) {
+    userId = userIdFromToken(token)
+  }
+
+  const { category, content, contact, appVersion, platform } = parsed.data
+  try {
+    await prisma.userFeedback.create({
+      data: {
+        userId,
+        category,
+        content,
+        contact: contact?.trim() || null,
+        appVersion: appVersion?.trim() || null,
+        platform: platform?.trim() || null,
+      },
+    })
+    res.json({ ok: true })
+  } catch (e) {
+    console.error('[feedback]', e)
+    res.status(500).json({
+      error: e instanceof Error ? e.message : '提交失败，请稍后重试',
+    })
+  }
 })
 
 const ReferralBindSchema = z.object({

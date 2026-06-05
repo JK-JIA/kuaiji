@@ -10,10 +10,11 @@ import { InviteCodeBindSheet } from '../components/InviteCodeBindSheet'
 import { InviteCodeScanModal } from '../components/InviteCodeScanModal'
 import { AppNotificationsSheet } from '../components/AppNotificationsSheet'
 import { ReferralInviteSheet } from '../components/ReferralInviteSheet'
+import { FeedbackSheet } from '../components/FeedbackSheet'
 import { useReferralNotices } from '../context/ReferralNoticesContext'
 import { preloadReferralInvite } from '../utils/referralInviteCache'
 import { APP_VERSION } from '../version'
-import { getStoredPhone } from '../api/ledgerClient'
+import { getStoredPhone, getApiBase, submitFeedback } from '../api/ledgerClient'
 import {
   FONT_SIZE_DEFAULT,
   FONT_SIZE_MAX,
@@ -69,6 +70,7 @@ import {
   IconFields,
   IconFontSize,
   IconImportExport,
+  IconMessage,
   IconMoon,
   IconScan,
 } from './settings/settingsIcons'
@@ -504,6 +506,7 @@ export function SettingsPage() {
   const [inviteScanOpen, setInviteScanOpen] = useState(false)
   const [inviteBindOpen, setInviteBindOpen] = useState(false)
   const [inviteAlreadyBoundOpen, setInviteAlreadyBoundOpen] = useState(false)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [newProductName, setNewProductName] = useState('')
   const [newProductUnit, setNewProductUnit] = useState('斤')
   /** 正在编辑计量单位的商品 id（此时禁用左滑删除） */
@@ -1270,6 +1273,16 @@ export function SettingsPage() {
           onBind={bindReferral}
         />
 
+        <FeedbackSheet
+          open={feedbackOpen}
+          onClose={() => setFeedbackOpen(false)}
+          onSubmit={async (payload) => {
+            const base = apiBase ?? getApiBase()
+            if (!base) throw new Error('未配置服务器地址，无法提交反馈')
+            await submitFeedback(base, payload, token)
+          }}
+        />
+
         <section>
           <SettingsGroupLabel>会员与邀请</SettingsGroupLabel>
           <SettingsInsetList>
@@ -1379,6 +1392,20 @@ export function SettingsPage() {
               title="字体大小"
               value={fontSizeLabel}
               onClick={() => openPanel('display')}
+            />
+          </SettingsInsetList>
+        </section>
+
+        <section>
+          <SettingsGroupLabel>帮助与反馈</SettingsGroupLabel>
+          <SettingsInsetList>
+            <SettingsNavRowButton
+              first
+              last
+              icon={<IconMessage className="h-[18px] w-[18px]" />}
+              title="意见反馈"
+              subtitle="功能建议、问题反馈"
+              onClick={() => setFeedbackOpen(true)}
             />
           </SettingsInsetList>
         </section>

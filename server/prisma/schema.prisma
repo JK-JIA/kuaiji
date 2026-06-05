@@ -97,3 +97,18 @@ model MembershipOrder {
 
   @@index([userId])
 }
+
+model UserFeedback {
+  id         String   @id @default(cuid())
+  userId     String?
+  category   String
+  content    String   @db.Text
+  contact    String?
+  appVersion String?
+  platform   String?
+  status     String   @default("open")
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([status])
+}

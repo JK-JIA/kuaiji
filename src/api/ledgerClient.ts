@@ -744,3 +744,30 @@ export async function parseBillLedger(
   }
   return { httpStatus: res.status, result: data }
 }
+
+export type FeedbackCategory = 'bug' | 'feature' | 'other'
+
+/** 用户意见反馈（登录可选；有 token 时会关联账号） */
+export async function submitFeedback(
+  base: string,
+  payload: {
+    category: FeedbackCategory
+    content: string
+    contact?: string
+    appVersion?: string
+    platform?: string
+  },
+  token?: string | null,
+): Promise<{ ok: true }> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+  if (token) headers.Authorization = `Bearer ${token}`
+  const res = await fetch(`${base.replace(/\/$/, '')}/api/feedback`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw new Error(await parseErr(res))
+  return (await res.json()) as { ok: true }
+}

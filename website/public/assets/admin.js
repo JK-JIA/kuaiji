@@ -304,6 +304,7 @@ function renderStats(o) {
     ['membershipExpiredCount', '已过期会员'],
     ['membershipOrdersPaid', '已支付订单'],
     ['membershipOrdersUnpaid', '未支付订单'],
+    ['feedbackTotal', '用户反馈'],
   ]
   grid.innerHTML = boxes
     .map(([k, label]) => {
@@ -389,6 +390,42 @@ function renderMembers(o) {
     .join('')
 }
 
+function feedbackCategoryLabel(category) {
+  if (category === 'feature') return '功能建议'
+  if (category === 'bug') return '问题反馈'
+  if (category === 'other') return '其他'
+  return String(category || '—')
+}
+
+function renderFeedback(o) {
+  const tbody = document.querySelector('#feedback-table tbody')
+  const msg = document.getElementById('feedback-msg')
+  const rows = Array.isArray(o.recentFeedback) ? o.recentFeedback : []
+  const total = o.feedbackTotal ?? rows.length
+  msg.textContent = `共 ${total} 条反馈`
+  msg.classList.remove('err')
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7">暂无用户反馈</td></tr>'
+    return
+  }
+  tbody.innerHTML = rows
+    .map((r) => {
+      const content = String(r.content || '')
+      const short =
+        content.length > 80 ? `${content.slice(0, 80)}…` : content
+      return `<tr>
+        <td>${escapeHtml(fmtTime(r.createdAt))}</td>
+        <td>${escapeHtml(feedbackCategoryLabel(r.category))}</td>
+        <td>${escapeHtml(r.userEmail || '—')}</td>
+        <td>${escapeHtml(r.userPhone || '—')}</td>
+        <td>${escapeHtml(r.contact || '—')}</td>
+        <td>${escapeHtml(r.appVersion || '—')}</td>
+        <td title="${escapeHtml(content)}">${escapeHtml(short)}</td>
+      </tr>`
+    })
+    .join('')
+}
+
 function showStatsConfigError(targetEl) {
   targetEl.innerHTML = statsConfigHintHtml()
   targetEl.classList.add('err')
@@ -398,6 +435,7 @@ async function loadOverviewPanels() {
   const statsMsg = document.getElementById('stats-msg')
   const ordersMsg = document.getElementById('orders-msg')
   const membersMsg = document.getElementById('members-msg')
+  const feedbackMsg = document.getElementById('feedback-msg')
   const statsGrid = document.getElementById('stats-grid')
 
   if (!statsEnabled) {
@@ -405,6 +443,10 @@ async function loadOverviewPanels() {
     showStatsConfigError(statsMsg)
     ordersMsg.innerHTML = ''
     membersMsg.innerHTML = ''
+    if (feedbackMsg) {
+      feedbackMsg.innerHTML = ''
+      showStatsConfigError(feedbackMsg)
+    }
     return
   }
 
@@ -412,11 +454,13 @@ async function loadOverviewPanels() {
   statsMsg.classList.remove('err')
   ordersMsg.textContent = ''
   membersMsg.textContent = ''
+  if (feedbackMsg) feedbackMsg.textContent = '加载中…'
   try {
     overviewCache = await fetchOverview()
     renderStats(overviewCache)
     renderOrders(overviewCache)
     renderMembers(overviewCache)
+    renderFeedback(overviewCache)
   } catch (e) {
     const msg = e instanceof Error ? e.message : '加载失败'
     statsGrid.innerHTML = ''
@@ -426,6 +470,10 @@ async function loadOverviewPanels() {
     ordersMsg.classList.add('err')
     membersMsg.textContent = msg
     membersMsg.classList.add('err')
+    if (feedbackMsg) {
+      feedbackMsg.textContent = msg
+      feedbackMsg.classList.add('err')
+    }
   }
 }
 
@@ -438,6 +486,8 @@ function switchTab(name) {
   })
   if (name !== 'upload' && overviewCache === null && statsEnabled) {
     loadOverviewPanels()
+  } else if (name === 'feedback' && overviewCache && statsEnabled) {
+    renderFeedback(overviewCache)
   }
 }
 
@@ -496,6 +546,11 @@ document.querySelectorAll('.admin-tab').forEach((b) => {
 })
 
 document.getElementById('btn-refresh-stats').addEventListener('click', () => {
+  overviewCache = null
+  loadOverviewPanels()
+})
+
+document.getElementById('btn-refresh-feedback')?.addEventListener('click', () => {
   overviewCache = null
   loadOverviewPanels()
 })

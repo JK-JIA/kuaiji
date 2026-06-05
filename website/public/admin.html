@@ -57,6 +57,7 @@
           <button type="button" class="admin-tab" data-tab="stats">数据概览</button>
           <button type="button" class="admin-tab" data-tab="orders">购买记录</button>
           <button type="button" class="admin-tab" data-tab="members">会员有效期</button>
+          <button type="button" class="admin-tab" data-tab="feedback">用户反馈</button>
         </div>
 
         <div class="admin-card admin-panel active" id="panel-upload">
@@ -178,6 +179,31 @@
                   <th>邮箱</th>
                   <th>到期时间</th>
                   <th>状态</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="admin-card admin-panel" id="panel-feedback">
+          <div class="panel-head-row">
+            <h2 class="panel-title">用户反馈</h2>
+            <button type="button" class="btn-outline" id="btn-refresh-feedback">刷新</button>
+          </div>
+          <p class="admin-hint">来自 App 设置页「意见反馈」的留言，最近 100 条。</p>
+          <p class="form-msg" id="feedback-msg"></p>
+          <div style="overflow-x:auto">
+            <table class="data-table" id="feedback-table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>类型</th>
+                  <th>用户</th>
+                  <th>手机</th>
+                  <th>联系方式</th>
+                  <th>版本</th>
+                  <th>内容</th>
                 </tr>
               </thead>
               <tbody></tbody>
