@@ -94,32 +94,42 @@ export function parseSpokenRecordDate(
   if (/(?:今天|今日)/.test(t)) return formatYmd(reference)
   if (/(?:昨天|昨日)/.test(t)) return formatYmd(addCalendarDays(reference, -1))
   if (/前天/.test(t)) return formatYmd(addCalendarDays(reference, -2))
-  if (/(?:明天|明日)/.test(t)) return formatYmd(addCalendarDays(reference, 1))
+  if (/(?:明天|明日)/.test(t)) return formatYmd(reference)
 
-  const full = t.match(
-    /(\d{4})\s*年\s*(\d{1,2}|[零〇一二三四五六七八九十两]+)\s*月\s*(\d{1,2}|[零〇一二三四五六七八九十两]+)\s*(?:日|号)?/,
-  )
+  const skipMonthDay = hasMarketStallLocationPattern(t)
+
+  const full = !skipMonthDay
+    ? t.match(
+        /(\d{4})\s*年\s*(\d{1,2}|[零〇一二三四五六七八九十两]+)\s*月\s*(\d{1,2}|[零〇一二三四五六七八九十两]+)\s*(?:日|号)?/,
+      )
+    : null
   if (full) {
     const y = parseInt(full[1]!, 10)
     const md = parseMonthDay(full[2]!, full[3]!, y)
     if (md) return md
   }
 
-  const mdNum = t.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*(?:日|号)/)
+  const mdNum = !skipMonthDay
+    ? t.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*(?:日|号)/)
+    : null
   if (mdNum) {
     const md = parseMonthDay(mdNum[1]!, mdNum[2]!, year)
     if (md) return md
   }
 
-  const mdCn = t.match(
-    /([零〇一二三四五六七八九十两]+)\s*月\s*([零〇一二三四五六七八九十两]+)\s*(?:日|号)/,
-  )
+  const mdCn = !skipMonthDay
+    ? t.match(
+        /([零〇一二三四五六七八九十两]+)\s*月\s*([零〇一二三四五六七八九十两]+)\s*(?:日|号)/,
+      )
+    : null
   if (mdCn) {
     const md = parseMonthDay(mdCn[1]!, mdCn[2]!, year)
     if (md) return md
   }
 
-  const dayOnly = t.match(/(?<![\d])(\d{1,2})\s*(?:日|号)(?!\s*斤)/)
+  const dayOnly = !skipMonthDay
+    ? t.match(/(?<![\d])(\d{1,2})\s*(?:日|号)(?!\s*斤)/)
+    : null
   if (dayOnly) {
     const d = parseInt(dayOnly[1]!, 10)
     const md = toYmd(year, reference.getMonth() + 1, d)
@@ -131,6 +141,25 @@ export function parseSpokenRecordDate(
 
 export function isValidRecordDateYmd(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(s.trim())
+}
+
+export function clampRecordDateToToday(
+  ymd: string,
+  reference: Date = new Date(),
+): string {
+  const s = ymd.trim()
+  const today = formatYmd(reference)
+  if (!isValidRecordDateYmd(s)) return today
+  return s > today ? today : s
+}
+
+function hasMarketStallLocationPattern(t: string): boolean {
+  return (
+    /\d+\s*排\s*\d+\s*(?:号|好)?/.test(t) ||
+    /[零〇一二三四五六七八九十两]+\s*排\s*(?:[零〇一二三四五六七八九十两]+|\d+)\s*(?:号|好)?/.test(
+      t,
+    )
+  )
 }
 
 function utteranceHasMonthDayWithoutYear(utterance: string): boolean {
@@ -149,18 +178,24 @@ export function resolveVoiceRecordDate(
   aiDate?: string | null,
   reference: Date = new Date(),
 ): string {
+  const t = utterance.normalize('NFKC')
   const fromSpeech = parseSpokenRecordDate(utterance, reference)
-  if (fromSpeech) return fromSpeech
+  if (fromSpeech) return clampRecordDateToToday(fromSpeech, reference)
+
+  if (hasMarketStallLocationPattern(t)) {
+    return formatYmd(reference)
+  }
+
   const ai = aiDate?.trim()
   if (ai && isValidRecordDateYmd(ai)) {
     if (utteranceHasMonthDayWithoutYear(utterance)) {
       const parts = ai.split('-').map((x) => parseInt(x, 10))
       if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
         const fixed = toYmd(reference.getFullYear(), parts[1]!, parts[2]!)
-        if (fixed) return fixed
+        if (fixed) return clampRecordDateToToday(fixed, reference)
       }
     }
-    return ai
+    return clampRecordDateToToday(ai, reference)
   }
   return formatYmd(reference)
 }

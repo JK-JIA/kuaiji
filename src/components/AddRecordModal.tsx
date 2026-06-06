@@ -28,6 +28,7 @@ import {
   hasProductCatalog,
 } from '../utils/productCatalogHelpers'
 import { QuantityUnitSelect } from './QuantityUnitSelect'
+import { clampRecordDateToToday } from '../utils/spokenRecordDate'
 import {
   applyVoiceFillFirstLine,
   buildLedgerRecordForSave,
@@ -126,6 +127,10 @@ export function AddRecordModal({
 
   const [recordDate, setRecordDate] = useState(() =>
     format(new Date(), 'yyyy-MM-dd'),
+  )
+  const applyRecordDate = useCallback(
+    (next: string) => setRecordDate(clampRecordDateToToday(next)),
+    [],
   )
   const [values, setValues] = useState<Record<string, string>>(() =>
     emptyLedgerFieldValues(sortedFields),
@@ -248,7 +253,7 @@ export function AddRecordModal({
 
     if (recordToEdit && prodId && qtyId) {
       lastVoicePrefillKeyRef.current = 0
-      setRecordDate(recordToEdit.date)
+      setRecordDate(clampRecordDateToToday(recordToEdit.date))
       setValues(rootValuesFromRecord(sortedFields, recordToEdit.values))
       const da = recordToEdit.dealAmount
       setDealInput(
@@ -314,7 +319,7 @@ export function AddRecordModal({
     ) {
       lastVoicePrefillKeyRef.current = voiceFormPrefillKey
       setVoicePanelOpen(true)
-      setRecordDate(
+      applyRecordDate(
         voiceFormPrefill.recordDate ?? format(new Date(), 'yyyy-MM-dd'),
       )
       setValues({
@@ -344,7 +349,7 @@ export function AddRecordModal({
       (!voiceFormPrefill || voiceFormPrefillKey === 0)
     ) {
       lastVoicePrefillKeyRef.current = 0
-      setRecordDate(format(new Date(), 'yyyy-MM-dd'))
+      applyRecordDate(format(new Date(), 'yyyy-MM-dd'))
       setValues(emptyLedgerFieldValues(sortedFields))
       setDealInput('')
       setLines([createEmptyLineForm()])
@@ -531,7 +536,7 @@ export function AddRecordModal({
                         ),
                       )
                     }
-                    if (recordDate) setRecordDate(recordDate)
+                    if (recordDate) applyRecordDate(recordDate)
                     setFormError(null)
                   }}
                   onFillFirstLine={(product, quantity) => {
@@ -1052,7 +1057,7 @@ export function AddRecordModal({
       open={datePickerOpen}
       onClose={() => setDatePickerOpen(false)}
       value={recordDate}
-      onChangeValue={setRecordDate}
+      onChangeValue={applyRecordDate}
       recordDates={recordDates}
       onConfirm={() => {}}
       confirmLabel="完成"

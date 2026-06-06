@@ -26,6 +26,7 @@ import {
   type LineTripleLastEdited,
   type LineTripleTouched,
 } from './recordHelpers'
+import { clampRecordDateToToday } from './spokenRecordDate'
 
 export type LedgerLineForm = {
   id: string
@@ -406,7 +407,7 @@ export function buildLedgerRecordForSave(
 
   return {
     id: recordToEdit?.id ?? crypto.randomUUID(),
-    date: recordDate,
+    date: clampRecordDateToToday(recordDate),
     createdAt: recordToEdit?.createdAt ?? Date.now(),
     values: mergedValues,
     lineItems,

@@ -1,4 +1,4 @@
-import { addDays, format, subDays } from 'date-fns'
+import { format, subDays } from 'date-fns'
 
 const CN_DIGIT: Record<string, number> = {
   零: 0,
@@ -80,11 +80,15 @@ export function parseSpokenRecordDate(
   if (/(?:今天|今日)/.test(t)) return format(reference, 'yyyy-MM-dd')
   if (/(?:昨天|昨日)/.test(t)) return format(subDays(reference, 1), 'yyyy-MM-dd')
   if (/前天/.test(t)) return format(subDays(reference, 2), 'yyyy-MM-dd')
-  if (/(?:明天|明日)/.test(t)) return format(addDays(reference, 1), 'yyyy-MM-dd')
+  if (/(?:明天|明日)/.test(t)) return format(reference, 'yyyy-MM-dd')
 
-  const full = t.match(
-    /(\d{4})\s*年\s*(\d{1,2}|[零〇一二三四五六七八九十两]+)\s*月\s*(\d{1,2}|[零〇一二三四五六七八九十两]+)\s*(?:日|号)?/,
-  )
+  const skipMonthDay = hasMarketStallLocationPattern(t)
+
+  const full = !skipMonthDay
+    ? t.match(
+        /(\d{4})\s*年\s*(\d{1,2}|[零〇一二三四五六七八九十两]+)\s*月\s*(\d{1,2}|[零〇一二三四五六七八九十两]+)\s*(?:日|号)?/,
+      )
+    : null
   if (full) {
     const y = parseInt(full[1]!, 10)
     const md = parseMonthDay(full[2]!, full[3]!, y)
@@ -92,24 +96,28 @@ export function parseSpokenRecordDate(
   }
 
   /** 「3月5日」等未说年份 → 今年 reference 年 */
-  const mdNum = t.match(
-    /(\d{1,2})\s*月\s*(\d{1,2})\s*(?:日|号)/,
-  )
+  const mdNum = !skipMonthDay
+    ? t.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*(?:日|号)/)
+    : null
   if (mdNum) {
     const md = parseMonthDay(mdNum[1]!, mdNum[2]!, year)
     if (md) return md
   }
 
-  const mdCn = t.match(
-    /([零〇一二三四五六七八九十两]+)\s*月\s*([零〇一二三四五六七八九十两]+)\s*(?:日|号)/,
-  )
+  const mdCn = !skipMonthDay
+    ? t.match(
+        /([零〇一二三四五六七八九十两]+)\s*月\s*([零〇一二三四五六七八九十两]+)\s*(?:日|号)/,
+      )
+    : null
   if (mdCn) {
     const md = parseMonthDay(mdCn[1]!, mdCn[2]!, year)
     if (md) return md
   }
 
   /** 仅「5号」「5日」→ 当月 */
-  const dayOnly = t.match(/(?<![\d])(\d{1,2})\s*(?:日|号)(?!\s*斤)/)
+  const dayOnly = !skipMonthDay
+    ? t.match(/(?<![\d])(\d{1,2})\s*(?:日|号)(?!\s*斤)/)
+    : null
   if (dayOnly) {
     const d = parseInt(dayOnly[1]!, 10)
     const md = toYmd(year, reference.getMonth() + 1, d)
@@ -121,6 +129,27 @@ export function parseSpokenRecordDate(
 
 export function isValidRecordDateYmd(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(s.trim())
+}
+
+/** 记账日期不得超过今天（含语音误把「6排7号」听成「6月7号」的情况） */
+export function clampRecordDateToToday(
+  ymd: string,
+  reference: Date = new Date(),
+): string {
+  const s = ymd.trim()
+  const today = format(reference, 'yyyy-MM-dd')
+  if (!isValidRecordDateYmd(s)) return today
+  return s > today ? today : s
+}
+
+/** 批发市场摊位「几排几号」，不应解析为月日 */
+function hasMarketStallLocationPattern(t: string): boolean {
+  return (
+    /\d+\s*排\s*\d+\s*(?:号|好)?/.test(t) ||
+    /[零〇一二三四五六七八九十两]+\s*排\s*(?:[零〇一二三四五六七八九十两]+|\d+)\s*(?:号|好)?/.test(
+      t,
+    )
+  )
 }
 
 /** 原话是否只说了月日、未说四位数年份 */
@@ -135,14 +164,19 @@ function utteranceHasMonthDayWithoutYear(utterance: string): boolean {
   )
 }
 
-/** 口语日期优先，其次 AI 返回，否则今天 */
+/** 口语日期优先，其次 AI 返回，否则今天；结果不超过今天 */
 export function resolveVoiceRecordDate(
   utterance: string,
   aiDate?: string | null,
   reference: Date = new Date(),
 ): string {
+  const t = utterance.normalize('NFKC')
   const fromSpeech = parseSpokenRecordDate(utterance, reference)
-  if (fromSpeech) return fromSpeech
+  if (fromSpeech) return clampRecordDateToToday(fromSpeech, reference)
+
+  if (hasMarketStallLocationPattern(t)) {
+    return format(reference, 'yyyy-MM-dd')
+  }
 
   const ai = aiDate?.trim()
   if (ai && isValidRecordDateYmd(ai)) {
@@ -150,10 +184,10 @@ export function resolveVoiceRecordDate(
       const parts = ai.split('-').map((x) => parseInt(x, 10))
       if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
         const fixed = toYmd(reference.getFullYear(), parts[1]!, parts[2]!)
-        if (fixed) return fixed
+        if (fixed) return clampRecordDateToToday(fixed, reference)
       }
     }
-    return ai
+    return clampRecordDateToToday(ai, reference)
   }
   return format(reference, 'yyyy-MM-dd')
 }

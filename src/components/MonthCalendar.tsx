@@ -18,6 +18,8 @@ export type MonthCalendarProps = {
   value: string
   onChange: (next: string) => void
   recordDates?: Set<string>
+  /** 可选的最大日期 yyyy-MM-dd，默认今天（不可选未来） */
+  maxDate?: string
   /** 弹窗内嵌时略紧凑 */
   compact?: boolean
   /** 底部显示「今天」快捷 */
@@ -29,12 +31,14 @@ export function MonthCalendar({
   value,
   onChange,
   recordDates,
+  maxDate,
   compact = false,
   showQuickToday = false,
   className = '',
 }: MonthCalendarProps) {
   const today = new Date()
   const todayStr = format(today, 'yyyy-MM-dd')
+  const maxDateStr = maxDate ?? todayStr
 
   const [viewMonth, setViewMonth] = useState(() =>
     startOfMonth(parseISO(value + 'T12:00:00')),
@@ -119,15 +123,21 @@ export function MonthCalendar({
           const isToday = keyStr === todayStr
           const isSelected = isSameDay(d, selectedDate)
           const hasRecord = recordDates?.has(keyStr)
+          const isFuture = keyStr > maxDateStr
 
           return (
             <div key={keyStr} className="flex items-center justify-center p-px">
               <button
                 type="button"
-                onClick={() => onChange(keyStr)}
+                disabled={isFuture}
+                onClick={() => {
+                  if (!isFuture) onChange(keyStr)
+                }}
                 className={[
                   dayBtn,
-                  isSelected
+                  isFuture
+                    ? 'cursor-not-allowed text-stone-300'
+                    : isSelected
                     ? 'bg-stone-900 text-white shadow-sm'
                     : isToday
                       ? 'bg-stone-100 text-kj-primary ring-1 ring-stone-300'
