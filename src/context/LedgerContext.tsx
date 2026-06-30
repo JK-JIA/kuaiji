@@ -55,6 +55,7 @@ import {
 } from '../utils/productCatalogHelpers'
 import { catalogsEqual } from '../utils/productCatalogSync'
 import {
+  applyReconcilePayment,
   getAmountFieldId,
   migrateRecordsToCurrentFieldIds,
   parseMoney,
@@ -81,6 +82,9 @@ type RecordsContextValue = {
   saveRecord: (rec: LedgerRecord) => Promise<CustomerAutoPromptItem[]>
   removeRecord: (id: string) => Promise<void>
   setRecordPayment: (id: string, payload: ReconcilePayload) => Promise<void>
+  applyBulkRecordPayments: (
+    updates: Array<{ id: string; payload: ReconcilePayload }>,
+  ) => Promise<void>
   restoreFullBackup: (fields: FieldDef[], records: LedgerRecord[]) => Promise<void>
 }
 
@@ -598,27 +602,11 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
 
   const setRecordPayment = useCallback(
     async (id: string, payload: ReconcilePayload) => {
-      const aid = getAmountFieldId(fields)
-
       if (useRemoteLedger && apiBase && token) {
         if (payload.kind !== 'amount') return
         const r = records.find((x) => x.id === id)
         if (!r) return
-        const exp = aid ? parseMoney(r.values[aid] ?? '') : 0
-        const rounded = Math.round(payload.cumulativeReceived * 100) / 100
-        const recv =
-          exp > 0
-            ? Math.max(0, Math.min(exp, rounded))
-            : Math.max(0, rounded)
-        const settled =
-          exp > 0
-            ? recv >= exp - 0.005
-            : payload.markSettled === true
-        const updated: LedgerRecord = {
-          ...r,
-          receivedAmount: recv,
-          settled,
-        }
+        const updated = applyReconcilePayment(r, fields, payload)
         const list = records.map((x) => (x.id === id ? updated : x))
         await putLedger(apiBase, token, {
           fields,
@@ -631,23 +619,51 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
 
       const r = await db.records.get(id)
       if (!r) return
-      const exp = aid ? parseMoney(r.values[aid] ?? '') : 0
 
       if (payload.kind === 'amount') {
-        const rounded = Math.round(payload.cumulativeReceived * 100) / 100
-        const recv =
-          exp > 0
-            ? Math.max(0, Math.min(exp, rounded))
-            : Math.max(0, rounded)
-        const settled =
-          exp > 0
-            ? recv >= exp - 0.005
-            : payload.markSettled === true
-        await addRecord({
-          ...r,
-          receivedAmount: recv,
-          settled,
+        await addRecord(applyReconcilePayment(r, fields, payload))
+      }
+      await refresh()
+    },
+    [
+      fields,
+      records,
+      ledgerExtras,
+      useRemoteLedger,
+      apiBase,
+      token,
+      refresh,
+    ],
+  )
+
+  const applyBulkRecordPayments = useCallback(
+    async (updates: Array<{ id: string; payload: ReconcilePayload }>) => {
+      if (updates.length === 0) return
+      const updateMap = new Map(updates.map((u) => [u.id, u.payload]))
+
+      const applyPayment = (
+        r: LedgerRecord,
+        payload: ReconcilePayload,
+      ): LedgerRecord => applyReconcilePayment(r, fields, payload)
+
+      if (useRemoteLedger && apiBase && token) {
+        const list = records.map((r) => {
+          const payload = updateMap.get(r.id)
+          return payload ? applyPayment(r, payload) : r
         })
+        await putLedger(apiBase, token, {
+          fields,
+          records: list,
+          ...ledgerExtras(),
+        })
+        await refresh()
+        return
+      }
+
+      for (const { id, payload } of updates) {
+        const r = await db.records.get(id)
+        if (!r) continue
+        await addRecord(applyPayment(r, payload))
       }
       await refresh()
     },
@@ -893,8 +909,26 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   )
 
   const recordsValue = useMemo(
-    () => ({ ready, records, refresh, saveRecord, removeRecord, setRecordPayment, restoreFullBackup }),
-    [ready, records, refresh, saveRecord, removeRecord, setRecordPayment, restoreFullBackup],
+    () => ({
+      ready,
+      records,
+      refresh,
+      saveRecord,
+      removeRecord,
+      setRecordPayment,
+      applyBulkRecordPayments,
+      restoreFullBackup,
+    }),
+    [
+      ready,
+      records,
+      refresh,
+      saveRecord,
+      removeRecord,
+      setRecordPayment,
+      applyBulkRecordPayments,
+      restoreFullBackup,
+    ],
   )
 
   const catalogValue = useMemo(

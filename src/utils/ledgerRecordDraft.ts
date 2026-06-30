@@ -413,6 +413,8 @@ export function buildLedgerRecordForSave(
     lineItems,
     settled: (liveRecord?.settled ?? recordToEdit?.settled) === true,
     receivedAmount: liveRecord?.receivedAmount ?? recordToEdit?.receivedAmount,
+    paymentUpdatedAt:
+      liveRecord?.paymentUpdatedAt ?? recordToEdit?.paymentUpdatedAt,
     dealAmount: nextDeal,
   }
 }

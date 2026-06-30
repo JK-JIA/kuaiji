@@ -24,6 +24,8 @@ const LEXICON_SOFT_CAP = 5000
 const PY_AMBIGUOUS_GAP = 0.04
 /** 拼音层：达到此相似度才允许替换为账本用语 */
 const PY_MIN_REPLACE_SCORE = 0.94
+/** 商品目录内字形相近（如 榴莲酥→榴莲薯）允许的最低相似度 */
+const CATALOG_CHAR_REPLACE = 0.65
 /** 与记一笔「最近常用」一致：按出现频次取前 N 个购买方 */
 const FREQUENT_BUYER_TOP_N = 3
 
@@ -85,6 +87,50 @@ export function fuzzyScore(a: string, b: string): number {
   const dist = levenshtein(A, B)
   const maxLen = Math.max(A.length, B.length)
   return 1 - dist / maxLen
+}
+
+/** 仅一字之差且等长（如 榴莲酥↔榴莲薯），常见于语音识别误字 */
+export function isSingleHanCharVariant(a: string, b: string): boolean {
+  const A = normalizeToken(a)
+  const B = normalizeToken(b)
+  if (A.length !== B.length || A.length < 2) return false
+  if (A === B) return false
+  let diffs = 0
+  for (let i = 0; i < A.length; i++) {
+    if (A[i] !== B[i]) diffs++
+  }
+  return diffs === 1
+}
+
+function findUniqueCatalogNearMatch(
+  raw: string,
+  catalog: ProductCatalogEntry[],
+): ProductCatalogEntry | null {
+  const r = normalizeToken(raw)
+  if (!r) return null
+  let matched: ProductCatalogEntry | null = null
+  for (const e of catalog) {
+    const terms = [e.name, ...(e.aliases ?? [])]
+    for (const term of terms) {
+      const tk = normalizeToken(term)
+      if (!tk || tk === r) continue
+      if (!isSingleHanCharVariant(raw, term)) continue
+      if (matched && normalizeToken(matched.name) !== normalizeToken(e.name)) {
+        return null
+      }
+      matched = e
+    }
+  }
+  return matched
+}
+
+function minReplaceScoreForCandidate(
+  candidate: string | null,
+  catalogNorms: Set<string>,
+): number {
+  return candidate && catalogNorms.has(normalizeToken(candidate))
+    ? CATALOG_CHAR_REPLACE
+    : HIGH_REPLACE
 }
 
 function bestMatch(
@@ -567,6 +613,24 @@ export function applyVoiceHistoryFuzzyMatch(input: {
             result: hit.name,
           })
         }
+        continue
+      }
+      const near = findUniqueCatalogNearMatch(raw, productCatalog)
+      if (near) {
+        nextLines[i]!.product = near.name
+        if (i === 0) nextValues[prodId] = near.name
+        skipProductFuzzyPinyin.add(i)
+        productSteps.push({
+          lineIndex: i,
+          stage: 'charFuzzy',
+          raw,
+          result: near.name,
+          score: fuzzyScore(raw, near.name),
+        })
+        if (shouldAutoLearnAlias(raw, near.name)) {
+          aliasAttachCandidates.push({ canonical: near.name, alias: raw })
+        }
+        continue
       }
     }
 
@@ -586,7 +650,13 @@ export function applyVoiceHistoryFuzzyMatch(input: {
         )
       }
       if (productsMerged.length >= MIN_DISTINCT_PRODUCTS) {
-        if (score >= HIGH_REPLACE && best && best !== raw && !ambiguous) {
+        const minReplace = minReplaceScoreForCandidate(best, preferredCatalogNorms)
+        const canReplace =
+          score >= minReplace ||
+          (best &&
+            preferredCatalogNorms.has(normalizeToken(best)) &&
+            isSingleHanCharVariant(raw, best))
+        if (canReplace && best && best !== raw && !ambiguous) {
           nextLines[i]!.product = best
           if (i === 0) nextValues[prodId] = best
           productSteps.push({
@@ -611,29 +681,31 @@ export function applyVoiceHistoryFuzzyMatch(input: {
             `第 ${i + 1} 行商品与账本常用名差异较大，请核对`,
           )
         }
-      } else if (
-        best &&
-        best !== raw &&
-        score >= HIGH_REPLACE &&
-        !ambiguous
-      ) {
-        nextLines[i]!.product = best
-        if (i === 0) nextValues[prodId] = best
-        productSteps.push({
-          lineIndex: i,
-          stage: 'charFuzzy',
-          raw,
-          result: best,
-          score,
-        })
-        if (shouldAutoLearnAlias(raw, best)) {
-          aliasAttachCandidates.push({ canonical: best, alias: raw })
-        }
-        if (score < REPLACE_CONFIRM_BELOW) {
-          addProductHint(
-            i,
-            `第 ${i + 1} 行商品已按账本用语修正，请确认`,
-          )
+      } else if (best && best !== raw && !ambiguous) {
+        const minReplace = minReplaceScoreForCandidate(best, preferredCatalogNorms)
+        const canReplace =
+          score >= minReplace ||
+          (preferredCatalogNorms.has(normalizeToken(best)) &&
+            isSingleHanCharVariant(raw, best))
+        if (canReplace) {
+          nextLines[i]!.product = best
+          if (i === 0) nextValues[prodId] = best
+          productSteps.push({
+            lineIndex: i,
+            stage: 'charFuzzy',
+            raw,
+            result: best,
+            score,
+          })
+          if (shouldAutoLearnAlias(raw, best)) {
+            aliasAttachCandidates.push({ canonical: best, alias: raw })
+          }
+          if (score < REPLACE_CONFIRM_BELOW) {
+            addProductHint(
+              i,
+              `第 ${i + 1} 行商品已按账本用语修正，请确认`,
+            )
+          }
         }
       }
     }

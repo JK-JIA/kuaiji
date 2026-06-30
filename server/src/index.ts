@@ -4,7 +4,6 @@ import bcrypt from 'bcryptjs'
 import cors from 'cors'
 import express from 'express'
 import http from 'http'
-import jwt from 'jsonwebtoken'
 import { z } from 'zod'
 import {
   aliyunOneClickConfigured,
@@ -15,6 +14,11 @@ import {
   sendAliyunSmsVerifyCode,
   verifyAliyunSmsCode,
 } from './aliyunSms.js'
+import {
+  issueAuthTokens,
+  userIdForTokenRefresh,
+  userIdFromAccessToken,
+} from './authTokens.js'
 import {
   attachAsrWebSocket,
   volcAsrEnvReady,
@@ -124,6 +128,10 @@ const OneClickLoginSchema = z.object({
   deviceFingerprint: z.string().max(128).optional(),
 })
 
+const RefreshSchema = z.object({
+  refreshToken: z.string().min(10).max(4096).optional(),
+})
+
 const RedeemSchema = z.object({
   code: z.string().min(4).max(64),
 })
@@ -203,12 +211,7 @@ function authHeader(req: express.Request): string | null {
 }
 
 function userIdFromToken(token: string): string | null {
-  try {
-    const p = jwt.verify(token, JWT_SECRET) as { sub?: string }
-    return typeof p.sub === 'string' ? p.sub : null
-  } catch {
-    return null
-  }
+  return userIdFromAccessToken(token, JWT_SECRET)
 }
 
 function normalizeCnPhone(raw: string): string | null {
@@ -338,8 +341,8 @@ async function loginOrRegisterByPhone(
     })
   }
 
-  const token = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' })
-  return { token, user, isNewUser }
+  const { token, refreshToken } = issueAuthTokens(user.id, JWT_SECRET)
+  return { token, refreshToken, user, isNewUser }
 }
 
 const app = express()
@@ -581,9 +584,10 @@ app.post('/auth/register', async (req, res) => {
       },
     },
   })
-  const token = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' })
+  const { token, refreshToken } = issueAuthTokens(user.id, JWT_SECRET)
   res.status(201).json({
     token,
+    refreshToken,
     user: userJson(user),
   })
 })
@@ -600,9 +604,39 @@ app.post('/auth/login', async (req, res) => {
     res.status(401).json({ error: '账号或密码错误' })
     return
   }
-  const token = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '30d' })
+  const { token, refreshToken } = issueAuthTokens(user.id, JWT_SECRET)
   res.json({
     token,
+    refreshToken,
+    user: userJson(user),
+  })
+})
+
+app.post('/auth/refresh', async (req, res) => {
+  const parsed = RefreshSchema.safeParse(req.body ?? {})
+  const refreshToken = parsed.success ? parsed.data.refreshToken : undefined
+  const accessToken = authHeader(req)
+
+  const userId = userIdForTokenRefresh({
+    refreshToken,
+    accessToken,
+    jwtSecret: JWT_SECRET,
+  })
+  if (!userId) {
+    res.status(401).json({ error: '无效令牌' })
+    return
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  if (!user) {
+    res.status(404).json({ error: '用户不存在' })
+    return
+  }
+
+  const tokens = issueAuthTokens(user.id, JWT_SECRET)
+  res.json({
+    token: tokens.token,
+    refreshToken: tokens.refreshToken,
     user: userJson(user),
   })
 })
@@ -673,12 +707,13 @@ app.post('/auth/sms/login', async (req, res) => {
   }
 
   const { inviteCode, deviceFingerprint } = parsed.data
-  const { token, user } = await loginOrRegisterByPhone(phone, {
+  const { token, refreshToken, user } = await loginOrRegisterByPhone(phone, {
     inviteCode,
     deviceFingerprint,
   })
   res.json({
     token,
+    refreshToken,
     user: userJson(user),
   })
 })
@@ -713,12 +748,13 @@ app.post('/auth/oneclick/login', async (req, res) => {
 
   console.log('[oneclick] login ok', maskPhone11(normalized))
   const { inviteCode, deviceFingerprint } = parsed.data
-  const { token, user } = await loginOrRegisterByPhone(normalized, {
+  const { token, refreshToken, user } = await loginOrRegisterByPhone(normalized, {
     inviteCode,
     deviceFingerprint,
   })
   res.json({
     token,
+    refreshToken,
     user: userJson(user),
   })
 })

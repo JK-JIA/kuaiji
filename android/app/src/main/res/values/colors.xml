@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#2ECC71</color>
+    <color name="colorPrimaryDark">#27AE60</color>
+    <color name="colorAccent">#2ECC71</color>
+
+    <color name="permission_dialog_bg">#FFFFFF</color>
+    <color name="permission_title">#1C1917</color>
+    <color name="permission_message">#57534E</color>
+    <color name="permission_icon_tint">#1A7F4C</color>
+    <color name="permission_icon_bg">#ECFDF5</color>
+    <color name="permission_btn_allow">#2ECC71</color>
+    <color name="permission_btn_allow_pressed">#27AE60</color>
+    <color name="permission_btn_cancel_bg">#F5F5F4</color>
+    <color name="permission_btn_cancel_text">#44403C</color>
+    <color name="permission_btn_cancel_stroke">#E7E5E4</color>
+</resources>

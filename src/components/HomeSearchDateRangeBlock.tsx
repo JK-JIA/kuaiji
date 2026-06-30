@@ -48,6 +48,8 @@ export type HomeSearchDateRangeBlockProps = {
   minDate: string
   maxDate: string
   onChange: (from: string, to: string) => void
+  /** 点选「不限制 / 本周 / 本月 / 本年」时触发，便于父级立即应用搜索 */
+  onQuickSelect?: (from: string, to: string) => void
 }
 
 function fmtCn(ymd: string): string {
@@ -79,6 +81,7 @@ export function HomeSearchDateRangeBlock({
   minDate,
   maxDate,
   onChange,
+  onQuickSelect,
 }: HomeSearchDateRangeBlockProps) {
   const [picker, setPicker] = useState<null | 'from' | 'to'>(null)
 
@@ -95,13 +98,30 @@ export function HomeSearchDateRangeBlock({
   const weekEnd = format(endOfWeek(today, { weekStartsOn: 1 }), 'yyyy-MM-dd')
   const monthStart = format(startOfMonth(today), 'yyyy-MM-dd')
   const monthEnd = format(endOfMonth(today), 'yyyy-MM-dd')
+  const yearStart = format(startOfYear(today), 'yyyy-MM-dd')
+  const yearEnd = format(endOfYear(today), 'yyyy-MM-dd')
 
-  const quick = useMemo<'none' | 'week' | 'month' | 'custom'>(() => {
+  const quick = useMemo<'none' | 'week' | 'month' | 'year' | 'custom'>(() => {
     if (!dateFrom && !dateTo) return 'none'
     if (dateFrom === weekStart && dateTo === weekEnd) return 'week'
     if (dateFrom === monthStart && dateTo === monthEnd) return 'month'
+    if (dateFrom === yearStart && dateTo === yearEnd) return 'year'
     return 'custom'
-  }, [dateFrom, dateTo, weekStart, weekEnd, monthStart, monthEnd])
+  }, [
+    dateFrom,
+    dateTo,
+    weekStart,
+    weekEnd,
+    monthStart,
+    monthEnd,
+    yearStart,
+    yearEnd,
+  ])
+
+  const pickQuick = (from: string, to: string) => {
+    onChange(from, to)
+    onQuickSelect?.(from, to)
+  }
 
   const pill = (active: boolean) =>
     active
@@ -124,23 +144,30 @@ export function HomeSearchDateRangeBlock({
         <button
           type="button"
           className={pill(quick === 'none')}
-          onClick={() => onChange('', '')}
+          onClick={() => pickQuick('', '')}
         >
           不限制
         </button>
         <button
           type="button"
           className={pill(quick === 'week')}
-          onClick={() => onChange(weekStart, weekEnd)}
+          onClick={() => pickQuick(weekStart, weekEnd)}
         >
           本周
         </button>
         <button
           type="button"
           className={pill(quick === 'month')}
-          onClick={() => onChange(monthStart, monthEnd)}
+          onClick={() => pickQuick(monthStart, monthEnd)}
         >
           本月
+        </button>
+        <button
+          type="button"
+          className={pill(quick === 'year')}
+          onClick={() => pickQuick(yearStart, yearEnd)}
+        >
+          本年
         </button>
       </div>
 

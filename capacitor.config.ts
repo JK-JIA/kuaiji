@@ -3,7 +3,7 @@ import { APP_VERSION } from './src/version'
 
 const config: CapacitorConfig = {
   appId: 'com.example.kuaiji',
-  appName: 'kuaiji',
+  appName: '批发快记',
   webDir: 'dist',
   plugins: {
     CapacitorUpdater: {

@@ -39,6 +39,7 @@ services:
       - '3001:3001'
     environment:
       NODE_ENV: production
+      TZ: Asia/Shanghai
       PORT: '3001'
       DATABASE_URL: mysql://ledger:ledger@db:3306/ledger
       JWT_SECRET: ${JWT_SECRET:-please-change-this-secret-min-32-characters-long}

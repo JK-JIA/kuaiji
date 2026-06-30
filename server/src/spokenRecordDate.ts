@@ -173,6 +173,22 @@ function utteranceHasMonthDayWithoutYear(utterance: string): boolean {
   )
 }
 
+function utteranceMentionsCalendarDate(utterance: string): boolean {
+  const t = utterance.normalize('NFKC')
+  if (/(?:今天|今日|昨天|昨日|前天|明天|明日)/.test(t)) return true
+  if (/\d{4}\s*年/.test(t)) return true
+  if (/\d{1,2}\s*月\s*\d{1,2}\s*(?:日|号)/.test(t)) return true
+  if (
+    /[零〇一二三四五六七八九十两]+\s*月\s*[零〇一二三四五六七八九十两]+\s*(?:日|号)/.test(
+      t,
+    )
+  ) {
+    return true
+  }
+  if (/(?<![\d])(\d{1,2})\s*(?:日|号)(?!\s*斤)/.test(t)) return true
+  return false
+}
+
 export function resolveVoiceRecordDate(
   utterance: string,
   aiDate?: string | null,
@@ -183,6 +199,10 @@ export function resolveVoiceRecordDate(
   if (fromSpeech) return clampRecordDateToToday(fromSpeech, reference)
 
   if (hasMarketStallLocationPattern(t)) {
+    return formatYmd(reference)
+  }
+
+  if (!utteranceMentionsCalendarDate(utterance)) {
     return formatYmd(reference)
   }
 

@@ -560,7 +560,7 @@ public class NumberAuthPlugin extends Plugin {
                         .setPageBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT))
                         .setDialogWidth(1)
                         .setDialogHeight(1)
-                        .setDialogAlpha(0.01f)
+                        .setDialogAlpha(0f)
                         .setDialogOffsetX(0)
                         .setDialogOffsetY(0)
                         .setTapAuthPageMaskClosePage(false)
@@ -574,11 +574,12 @@ public class NumberAuthPlugin extends Plugin {
     /** 授权页唤起后自动点「一键登录」，用户几乎无感 */
     private void scheduleAutoConfirmLogin() {
         if (maskProbeOnly) return;
-        mainHandler.postDelayed(this::tryAutoClickAuthLogin, 0);
-        mainHandler.postDelayed(this::tryAutoClickAuthLogin, 60);
-        mainHandler.postDelayed(this::tryAutoClickAuthLogin, 150);
+        mainHandler.post(this::tryAutoClickAuthLogin);
+        mainHandler.postDelayed(this::tryAutoClickAuthLogin, 16);
+        mainHandler.postDelayed(this::tryAutoClickAuthLogin, 48);
+        mainHandler.postDelayed(this::tryAutoClickAuthLogin, 96);
+        mainHandler.postDelayed(this::tryAutoClickAuthLogin, 180);
         mainHandler.postDelayed(this::tryAutoClickAuthLogin, 320);
-        mainHandler.postDelayed(this::tryAutoClickAuthLogin, 600);
     }
 
     private void tryAutoClickAuthLogin() {
@@ -1147,6 +1148,61 @@ public class NumberAuthPlugin extends Plugin {
         signalWarmUpDone();
     }
 
+    private boolean canReuseAccelerate() {
+        return accelerateDone
+                && System.currentTimeMillis() - accelerateDoneAt < PRELOGIN_CACHE_TTL_MS;
+    }
+
+    private void startLoginTokenFlow(PhoneNumberAuthHelper helper, Activity activity) {
+        applyKuaijiAuthUi(helper);
+        helper.setProtocolChecked(true);
+        helper.setAuthListener(
+                new TokenResultListener() {
+                    @Override
+                    public void onTokenSuccess(String s) {
+                        try {
+                            TokenRet ret = TokenRet.fromJson(s);
+                            if (ResultCode.CODE_START_AUTHPAGE_SUCCESS.equals(ret.getCode())) {
+                                scheduleAutoConfirmLogin();
+                                return;
+                            }
+                            if (ResultCode.CODE_SUCCESS.equals(ret.getCode())
+                                    && !TextUtils.isEmpty(ret.getToken())) {
+                                helper.hideLoginLoading();
+                                helper.quitLoginPage();
+                                finishLoginAuthActivityIfAny();
+                                finishLogin(true, ret.getToken(), null);
+                                helper.setAuthListener(null);
+                            }
+                        } catch (Exception e) {
+                            helper.hideLoginLoading();
+                            helper.quitLoginPage();
+                            finishLoginAuthActivityIfAny();
+                            finishLogin(false, null, e.getMessage());
+                            helper.setAuthListener(null);
+                        }
+                    }
+
+                    @Override
+                    public void onTokenFailed(String s) {
+                        helper.hideLoginLoading();
+                        String msg = s;
+                        try {
+                            TokenRet ret = TokenRet.fromJson(s);
+                            if (ResultCode.CODE_ERROR_USER_CANCEL.equals(ret.getCode())) {
+                                msg = "USER_CANCEL";
+                            }
+                        } catch (Exception ignored) {
+                        }
+                        helper.quitLoginPage();
+                        finishLoginAuthActivityIfAny();
+                        finishLogin(false, null, msg);
+                        helper.setAuthListener(null);
+                    }
+                });
+        helper.getLoginToken(activity, LOGIN_TIMEOUT_MS);
+    }
+
     @PluginMethod
     public void login(PluginCall call) {
         String secret = resolveSecret(call);
@@ -1159,57 +1215,17 @@ public class NumberAuthPlugin extends Plugin {
 
         pendingCall = call;
         lastAuthSecret = secret;
-        invalidatePreLoginCache();
         activity.runOnUiThread(
                 () -> {
                     PhoneNumberAuthHelper helper = getOrCreateHelper();
                     helper.setAuthSDKInfo(secret);
-                    applyKuaijiAuthUi(helper);
-                    helper.setProtocolChecked(true);
-                    helper.setAuthListener(
-                            new TokenResultListener() {
-                                @Override
-                                public void onTokenSuccess(String s) {
-                                    try {
-                                        TokenRet ret = TokenRet.fromJson(s);
-                                        if (ResultCode.CODE_START_AUTHPAGE_SUCCESS.equals(
-                                                ret.getCode())) {
-                                            scheduleAutoConfirmLogin();
-                                            return;
-                                        }
-                                        if (ResultCode.CODE_SUCCESS.equals(ret.getCode())
-                                                && !TextUtils.isEmpty(ret.getToken())) {
-                                            helper.hideLoginLoading();
-                                            helper.quitLoginPage();
-                                            finishLogin(true, ret.getToken(), null);
-                                            helper.setAuthListener(null);
-                                        }
-                                    } catch (Exception e) {
-                                        helper.hideLoginLoading();
-                                        helper.quitLoginPage();
-                                        finishLogin(false, null, e.getMessage());
-                                        helper.setAuthListener(null);
-                                    }
-                                }
-
-                                @Override
-                                public void onTokenFailed(String s) {
-                                    helper.hideLoginLoading();
-                                    String msg = s;
-                                    try {
-                                        TokenRet ret = TokenRet.fromJson(s);
-                                        if (ResultCode.CODE_ERROR_USER_CANCEL.equals(
-                                                ret.getCode())) {
-                                            msg = "USER_CANCEL";
-                                        }
-                                    } catch (Exception ignored) {
-                                    }
-                                    finishLogin(false, null, msg);
-                                    helper.setAuthListener(null);
-                                    helper.quitLoginPage();
-                                }
-                            });
-                    helper.getLoginToken(activity, LOGIN_TIMEOUT_MS);
+                    if (!canReuseAccelerate()) {
+                        invalidatePreLoginCache();
+                        resetAuthPageState(helper);
+                    } else {
+                        dbg("login: 复用预取号，跳过 reset");
+                    }
+                    startLoginTokenFlow(helper, activity);
                 });
     }
 
@@ -1237,8 +1253,8 @@ public class NumberAuthPlugin extends Plugin {
     }
 
     /**
-     * 静默登录：直接通过 accelerateLoginPage 拿 token，不弹授权页，无闪屏。
-     * 若预取 token 不可用则 reject("SILENT_UNAVAILABLE")，前端降级到 login()。
+     * 静默登录：复用预取号后走透明授权页自动取 token，尽量不闪屏。
+     * 不可用时 reject("SILENT_UNAVAILABLE")，前端降级到 login()。
      */
     @PluginMethod
     public void loginSilent(PluginCall call) {
@@ -1252,62 +1268,53 @@ public class NumberAuthPlugin extends Plugin {
 
         pendingCall = call;
         lastAuthSecret = secret;
-        invalidatePreLoginCache();
         activity.runOnUiThread(
                 () -> {
                     PhoneNumberAuthHelper helper = getOrCreateHelper();
                     helper.setAuthSDKInfo(secret);
-                    helper.setProtocolChecked(true);
 
-                    PreLoginResultListener listener =
+                    Runnable startToken =
+                            () -> {
+                                dbg("loginSilent: 透明取 token");
+                                startLoginTokenFlow(helper, activity);
+                            };
+
+                    if (canReuseAccelerate()) {
+                        startToken.run();
+                        return;
+                    }
+
+                    dbg("loginSilent: 先预取号再取 token");
+                    invokeAccelerateLoginPage(
+                            helper,
                             new PreLoginResultListener() {
                                 @Override
-                                public void onTokenSuccess(String tokenOrVendor) {
-                                    // accelerateLoginPage 成功时 tokenOrVendor 即为 accessToken
-                                    if (!TextUtils.isEmpty(tokenOrVendor)
-                                            && !tokenOrVendor.contains("CMCC")
-                                            && !tokenOrVendor.contains("CUCC")
-                                            && !tokenOrVendor.contains("CTCC")
-                                            && tokenOrVendor.length() > 20) {
-                                        finishLoginSilent(true, tokenOrVendor, null);
-                                    } else {
-                                        // 拿到的是运营商标识而非 token，降级
-                                        finishLoginSilent(false, null, "SILENT_UNAVAILABLE");
-                                    }
+                                public void onTokenSuccess(String vendor) {
+                                    carrierVendor =
+                                            !TextUtils.isEmpty(vendor) ? vendor : carrierVendor;
+                                    accelerateDone = true;
+                                    accelerateDoneAt = System.currentTimeMillis();
+                                    startToken.run();
                                 }
 
                                 @Override
                                 public void onTokenFailed(String vendor, String msg) {
+                                    dbg("loginSilent accelerate failed: " + truncate(msg, 160));
                                     finishLoginSilent(false, null, "SILENT_UNAVAILABLE");
                                 }
-                            };
-
-                    dbg("loginSilent: accelerateLoginPage（官方 API）");
-                    helper.accelerateLoginPage(LOGIN_TIMEOUT_MS, listener);
+                            });
                 });
     }
 
     private void finishLoginSilent(boolean ok, String token, String err) {
+        if (ok && token != null) {
+            finishLogin(true, token, null);
+            return;
+        }
         PluginCall call = pendingCall;
         pendingCall = null;
         if (call == null) return;
-
-        Runnable done =
-                () -> {
-                    if (ok && token != null) {
-                        JSObject ret = new JSObject();
-                        ret.put("accessToken", token);
-                        call.resolve(ret);
-                    } else {
-                        call.reject(err != null ? err : "SILENT_UNAVAILABLE", "静默登录不可用");
-                    }
-                };
-        Activity activity = getActivity();
-        if (activity != null) {
-            activity.runOnUiThread(done);
-        } else {
-            done.run();
-        }
+        call.reject(err != null ? err : "SILENT_UNAVAILABLE", "静默登录不可用");
     }
 
     @PluginMethod

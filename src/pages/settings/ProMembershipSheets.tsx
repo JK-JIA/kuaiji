@@ -395,6 +395,7 @@ export function ProRedeemSheet({
   }
 
   const nativePay = apiBase && hasToken && isAlipayPayNative()
+  const showPurchasePlans = apiBase && hasToken
   const displayPlans = plans.length > 0 ? plans : DEFAULT_MEMBERSHIP_PLANS
 
   const cancelMembership = () => {
@@ -433,8 +434,8 @@ export function ProRedeemSheet({
                     ? `会员有效至 ${expiryLabel}，可继续兑换延长。`
                     : '您已是专业版会员。'
                   : hasToken
-                    ? isAlipayPayNative()
-                      ? '可选支付宝购买，或输入兑换码开通。'
+                    ? showPurchasePlans
+                      ? '可选下方套餐支付宝购买，或输入兑换码开通。'
                       : '输入会员兑换码即可开通云端同步等功能。'
                     : '兑换前请先登录账号。'}
             </p>
@@ -475,28 +476,47 @@ export function ProRedeemSheet({
           </div>
         ) : null}
 
-        {nativePay ? (
+        {showPurchasePlans ? (
           <div className="mb-4 space-y-2">
-            <p className="text-[12px] font-medium text-kj-muted">支付宝购买</p>
-            {displayPlans.map((plan) => (
+            <p className="text-[12px] font-medium text-kj-muted">会员套餐</p>
+            {displayPlans.map((plan) => {
+              const canPayNow = nativePay && alipayPayEnabled
+              return (
               <button
                 key={plan.id}
                 type="button"
-                disabled={purchaseBusy !== null || !alipayPayEnabled}
-                onClick={() => void purchase(plan.id)}
+                disabled={purchaseBusy !== null || (nativePay && !alipayPayEnabled)}
+                onClick={() => {
+                  if (!nativePay) {
+                    setPayMsg('请在 Android 应用内使用支付宝购买')
+                    return
+                  }
+                  void purchase(plan.id)
+                }}
                 className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-kj-surface/5 px-4 py-3 text-left transition-colors hover:bg-white/5 disabled:opacity-50"
               >
                 <span className="text-[15px] font-medium text-amber-100/95">
                   专业版 · {plan.label}
                 </span>
                 <span className="text-[15px] font-semibold text-amber-300">
-                  {purchaseBusy === plan.id ? '支付中…' : `¥${plan.priceYuan}`}
+                  {purchaseBusy === plan.id
+                    ? '支付中…'
+                    : canPayNow
+                      ? `¥${plan.priceYuan}`
+                      : `¥${plan.priceYuan}`}
                 </span>
               </button>
-            ))}
+              )
+            })}
+            {!nativePay && !payMsg ? (
+              <p className="text-[11px] leading-relaxed text-kj-muted">
+                当前环境无法直接支付，请使用 Android 客户端购买；或使用下方兑换码开通。
+              </p>
+            ) : null}
             {payMsg ? (
               <p className="text-[12px] leading-relaxed text-amber-200/90">{payMsg}</p>
             ) : null}
+            {nativePay ? (
             <div className="rounded-xl border border-white/10 bg-black/20">
               <button
                 type="button"
@@ -533,16 +553,17 @@ export function ProRedeemSheet({
                 </div>
               ) : null}
             </div>
-            {!payMsg && !plansLoaded ? (
+            ) : null}
+            {nativePay && !payMsg && !plansLoaded ? (
               <p className="text-[11px] leading-relaxed text-kj-muted">正在加载支付配置…</p>
-            ) : !payMsg && !alipayPayEnabled ? (
+            ) : nativePay && !payMsg && !alipayPayEnabled ? (
               <p className="text-[11px] leading-relaxed text-amber-200/80">
                 {alipayWarnings[0] ??
                   (alipayAppId?.startsWith('202100')
                     ? `服务端 APPID 为正式应用 ${alipayAppId}，沙箱支付需改为 9021000164606067 及沙箱系统默认密钥（不是桌面「应用私钥RSA2048」那套）。`
                     : '服务端支付宝未配置或未更新。请在服务器 git pull 后 docker compose up -d --build，并在 .env 配置沙箱 ALIPAY_*。')}
               </p>
-            ) : !payMsg ? (
+            ) : nativePay && !payMsg ? (
               <p className="text-[11px] leading-relaxed text-kj-muted">
                 沙箱测试请使用支付宝沙箱版 App 与沙箱买家账号。出错请展开「支付诊断日志」复制发开发。
               </p>

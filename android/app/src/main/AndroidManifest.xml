@@ -31,7 +31,7 @@
             android:exported="false"
             android:launchMode="singleTop"
             android:screenOrientation="behind"
-            android:theme="@style/Theme.AppCompat.DayNight.NoActionBar" />
+            android:theme="@style/KuaijiLoginAuthTheme" />
 
         <activity
             android:name="com.mobile.auth.gatewayauth.activity.AuthWebVeiwActivity"
@@ -46,7 +46,7 @@
             android:exported="false"
             android:launchMode="singleTop"
             android:screenOrientation="behind"
-            android:theme="@style/Theme.AppCompat.DayNight.NoActionBar" />
+            android:theme="@style/KuaijiLoginAuthTheme" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

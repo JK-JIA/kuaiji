@@ -745,7 +745,7 @@ export function StatsPage() {
           <section className="mx-4 mb-6">
             <div className="mb-1 flex items-center justify-between gap-2">
               <h2 className="text-sm font-semibold text-kj-primary">
-                商品销售占比
+                {buyerFieldName}汇总与未核账
               </h2>
               <StatsChartsFilter
                 filterRef={statsFilterRef}
@@ -766,8 +766,8 @@ export function StatsPage() {
                 }}
               />
             </div>
-            <p className="mb-3 text-[11px] leading-relaxed text-kj-secondary">
-              切换饼图或列表查看;数量按商品目录换算(默认斤)。可在下方选择其他统计单位。
+            <p className="mb-3 mt-1 text-[11px] leading-relaxed text-kj-secondary">
+              横轴为购买方,柱状图展示总数量(按所选统计单位)、总金额与未核账。
             </p>
             {statUnitOptions.length > 1 ? (
               <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
@@ -785,6 +785,76 @@ export function StatsPage() {
                 </select>
               </div>
             ) : null}
+            {!hasBuyerStatsSection ? (
+              <div className="rounded-2xl border border-dashed border-kj-border bg-kj-surface py-8 text-center text-sm text-kj-secondary">
+                {!amountId
+                  ? '需多行商品明细;未核账需金额列'
+                  : buyerProductRows.length === 0
+                    ? '需多行商品明细'
+                    : rangeMode === 'custom'
+                      ? '该时段暂无数据'
+                      : '本周期暂无数据'}
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-2xl border border-kj-border bg-kj-surface shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-kj-border px-3 py-2.5">
+                  <StatsShareViewModeSwitch
+                    mode={buyerStatsView}
+                    onChange={setBuyerStatsView}
+                    chartLabel="柱状图"
+                    listLabel="列表"
+                  />
+                  {buyerStatsView === 'list' ? (
+                    <button
+                      type="button"
+                      onClick={() => setStatsDetailModal('buyerProduct')}
+                      className="ml-auto shrink-0 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-[#1a7f4c] hover:bg-emerald-100"
+                    >
+                      大屏查看
+                    </button>
+                  ) : null}
+                </div>
+                {buyerStatsView === 'chart' ? (
+                  <div className="p-3 pt-2">
+                    <StatsBuyerSummaryChart
+                      rows={sortedBuyerSummaryRows}
+                      amountId={Boolean(amountId)}
+                      emptyMessage="暂无购买方数据"
+                      onBuyerClick={(buyer) => drillToBills({ buyer })}
+                    />
+                  </div>
+                ) : (
+                  <div className="max-h-[min(52vh,22rem)] overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] px-2 pb-2 pt-1 sm:px-3">
+                    <BuyerSummaryTable
+                      buyerFieldName={buyerFieldName}
+                      rows={sortedBuyerSummaryRows}
+                      amountId={amountId}
+                      totalJin={totalBuyerJin}
+                      qtyUnitLabel={qtyUnitLabel}
+                      totalAmt={totalBuyerAmt}
+                      totalOutstanding={totalBuyerOutstanding}
+                      maxJin={maxBuyerJin}
+                      maxAmt={maxBuyerAmt}
+                      maxOutstanding={maxBuyerOutstanding}
+                      sort={buyerSummarySort}
+                      onSortKey={toggleBuyerSummarySort}
+                      onBuyerClick={(buyer) => drillToBills({ buyer })}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+
+          <section className="mx-4 mb-10">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold text-kj-primary">
+                商品销售占比
+              </h2>
+            </div>
+            <p className="mb-3 text-[11px] leading-relaxed text-kj-secondary">
+              切换饼图或列表查看;数量按商品目录换算,统计单位与上方购买方汇总一致。
+            </p>
             <div className="overflow-hidden rounded-2xl border border-kj-border bg-kj-surface shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-kj-border px-3 py-2.5">
                 <StatsShareViewModeSwitch
@@ -867,74 +937,6 @@ export function StatsPage() {
                 </div>
               )}
             </div>
-          </section>
-
-          <section className="mx-4 mb-10">
-            <h2 className="text-sm font-semibold text-kj-primary">
-              {buyerFieldName}汇总与未核账
-            </h2>
-            <p className="mb-3 mt-1 text-[11px] leading-relaxed text-kj-secondary">
-              横轴为购买方,柱状图展示总数量(与上方所选单位一致)、总金额与未核账。
-            </p>
-            {!hasBuyerStatsSection ? (
-              <div className="rounded-2xl border border-dashed border-kj-border bg-kj-surface py-8 text-center text-sm text-kj-secondary">
-                {!amountId
-                  ? '需多行商品明细;未核账需金额列'
-                  : buyerProductRows.length === 0
-                    ? '需多行商品明细'
-                    : rangeMode === 'custom'
-                      ? '该时段暂无数据'
-                      : '本周期暂无数据'}
-              </div>
-            ) : (
-              <div className="overflow-hidden rounded-2xl border border-kj-border bg-kj-surface shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-kj-border px-3 py-2.5">
-                  <StatsShareViewModeSwitch
-                    mode={buyerStatsView}
-                    onChange={setBuyerStatsView}
-                    chartLabel="柱状图"
-                    listLabel="列表"
-                  />
-                  {buyerStatsView === 'list' ? (
-                    <button
-                      type="button"
-                      onClick={() => setStatsDetailModal('buyerProduct')}
-                      className="ml-auto shrink-0 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-[#1a7f4c] hover:bg-emerald-100"
-                    >
-                      大屏查看
-                    </button>
-                  ) : null}
-                </div>
-                {buyerStatsView === 'chart' ? (
-                  <div className="p-3 pt-2">
-                    <StatsBuyerSummaryChart
-                      rows={sortedBuyerSummaryRows}
-                      amountId={Boolean(amountId)}
-                      emptyMessage="暂无购买方数据"
-                      onBuyerClick={(buyer) => drillToBills({ buyer })}
-                    />
-                  </div>
-                ) : (
-                  <div className="max-h-[min(52vh,22rem)] overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch] px-2 pb-2 pt-1 sm:px-3">
-                    <BuyerSummaryTable
-                      buyerFieldName={buyerFieldName}
-                      rows={sortedBuyerSummaryRows}
-                      amountId={amountId}
-                      totalJin={totalBuyerJin}
-                      qtyUnitLabel={qtyUnitLabel}
-                      totalAmt={totalBuyerAmt}
-                      totalOutstanding={totalBuyerOutstanding}
-                      maxJin={maxBuyerJin}
-                      maxAmt={maxBuyerAmt}
-                      maxOutstanding={maxBuyerOutstanding}
-                      sort={buyerSummarySort}
-                      onSortKey={toggleBuyerSummarySort}
-                      onBuyerClick={(buyer) => drillToBills({ buyer })}
-                    />
-                  </div>
-                )}
-              </div>
-            )}
           </section>
 
 

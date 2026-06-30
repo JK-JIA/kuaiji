@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { format } from 'date-fns'
+import { zhCN } from 'date-fns/locale'
 import type { FieldDef, LedgerRecord, ReconcilePayload } from '../types'
 import {
   getAmountFieldId,
@@ -6,6 +8,7 @@ import {
   getOutstanding,
   getReceivedAmount,
   parseNonNegativeMoney,
+  recordHasReconcileHistory,
   sanitizeUnsignedDecimalInput,
 } from '../utils/recordHelpers'
 
@@ -41,6 +44,15 @@ export function ReconcileModal({
   }, [open, record?.id, out, record])
 
   if (!open || !record) return null
+
+  const isEditReconcile = recordHasReconcileHistory(record, fields)
+  const lastPaymentLabel = record.paymentUpdatedAt
+    ? format(new Date(record.paymentUpdatedAt), 'yyyy-MM-dd HH:mm', {
+        locale: zhCN,
+      })
+    : isEditReconcile
+      ? '时间未记录'
+      : null
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -92,7 +104,14 @@ export function ReconcileModal({
         onSubmit={handleSubmit}
         className="relative z-10 w-full max-w-md rounded-t-3xl border border-kj-border-strong bg-kj-surface p-5 shadow-xl sm:rounded-2xl"
       >
-        <h3 className="text-lg font-semibold text-kj-primary">核账 / 收款</h3>
+        <h3 className="text-lg font-semibold text-kj-primary">
+          {isEditReconcile ? '改核账' : '核账 / 收款'}
+        </h3>
+        {lastPaymentLabel && (
+          <p className="mt-1 text-xs text-kj-muted">
+            上次核账：{lastPaymentLabel}
+          </p>
+        )}
         <p className="mt-1 text-xs text-stone-500">
           {exp > 0
             ? '填写本次实收：不少于 0，不超过上方「未收」；累计收满应收后本单自动标为已结清（灰色）。'

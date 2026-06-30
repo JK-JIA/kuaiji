@@ -30,6 +30,8 @@ export interface LedgerRecord {
   settled?: boolean
   /** 核账累计实收（与「金额」应收对比）；仅通过「核账」维护，勿与约定价混淆 */
   receivedAmount?: number
+  /** 最近一次核账/改核账的时间戳（毫秒） */
+  paymentUpdatedAt?: number
   /**
    * 总价 / 优惠后实收价（元），与各行明细合计（应收）可不同；真实已收现金在「核账」里登记。
    */

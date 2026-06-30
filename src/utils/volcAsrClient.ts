@@ -3,6 +3,7 @@ import type { AsrProviderId } from './asrProvider'
 import { APP_VERSION } from '../version'
 import { asrDiagLog } from './asrDiagLog'
 import { formatAsrUserFacingError } from './asrUserFacingError'
+import { ensureMicrophoneForVoice } from './microphonePermissionFlow'
 
 function floatTo16BitPCM(float32: Float32Array): Int16Array {
   const out = new Int16Array(float32.length)
@@ -163,6 +164,7 @@ export function startVolcAsrSession(
         if (sessionResolved) return
         asrDiagLog('收到 ready，请求麦克风…')
         try {
+          await ensureMicrophoneForVoice()
           stream = await navigator.mediaDevices.getUserMedia({
             audio: {
               echoCancellation: true,

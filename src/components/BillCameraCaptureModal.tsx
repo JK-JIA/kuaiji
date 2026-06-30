@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
+  ensureCameraPermission,
   ensurePhotosPermission,
-  requestBillCameraPermissions,
 } from '../plugins/kuaijiPermissions'
 import {
   applyCameraZoom,
@@ -22,6 +22,17 @@ type Props = {
 
 type Phase = 'camera' | 'review' | 'recognizing'
 type FocusPoint = { x: number; y: number; key: number }
+
+const PINCH_ZOOM_MIN = 1
+const PINCH_ZOOM_MAX = 5
+
+function touchDistance(touches: { clientX: number; clientY: number }[]): number {
+  if (touches.length < 2) return 0
+  return Math.hypot(
+    touches[1].clientX - touches[0].clientX,
+    touches[1].clientY - touches[0].clientY,
+  )
+}
 
 export function BillCameraCaptureModal({
   open,
@@ -49,12 +60,18 @@ export function BillCameraCaptureModal({
   const [focusPoint, setFocusPoint] = useState<FocusPoint | null>(null)
   const [zoomLevel, setZoomLevel] = useState(1)
   const [zoomRange, setZoomRange] = useState<CameraZoomRange | null>(null)
+  /** 设备不支持光学变焦时的画面缩放（双指捏合） */
+  const [visualZoom, setVisualZoom] = useState(1)
 
   const pointersRef = useRef(new Map<number, { x: number; y: number }>())
   const pinchStartRef = useRef<{ dist: number; zoom: number } | null>(null)
   const tapStartRef = useRef<{ x: number; y: number; pointerId: number } | null>(
     null,
   )
+  const pinchZoomValueRef = useRef(1)
+  const pinchRafRef = useRef<number | null>(null)
+  const pendingPinchZoomRef = useRef<number | null>(null)
+  const touchTapRef = useRef<{ x: number; y: number } | null>(null)
 
   const clearCapturedPreview = useCallback(() => {
     if (capturedUrlRef.current) {
@@ -76,9 +93,16 @@ export function BillCameraCaptureModal({
     setTorchSupported(false)
     setZoomLevel(1)
     setZoomRange(null)
+    setVisualZoom(1)
     pointersRef.current.clear()
     pinchStartRef.current = null
     tapStartRef.current = null
+    touchTapRef.current = null
+    if (pinchRafRef.current) {
+      cancelAnimationFrame(pinchRafRef.current)
+      pinchRafRef.current = null
+    }
+    pendingPinchZoomRef.current = null
   }, [])
 
   const cancelRecognize = useCallback(() => {
@@ -100,9 +124,16 @@ export function BillCameraCaptureModal({
     setFocusPoint(null)
     setZoomLevel(1)
     setZoomRange(null)
+    setVisualZoom(1)
     pointersRef.current.clear()
     pinchStartRef.current = null
     tapStartRef.current = null
+    touchTapRef.current = null
+    if (pinchRafRef.current) {
+      cancelAnimationFrame(pinchRafRef.current)
+      pinchRafRef.current = null
+    }
+    pendingPinchZoomRef.current = null
     if (focusTimerRef.current) {
       clearTimeout(focusTimerRef.current)
       focusTimerRef.current = null
@@ -118,11 +149,54 @@ export function BillCameraCaptureModal({
       const track = streamRef.current?.getVideoTracks()[0]
       const range = zoomRange
       if (!track || !range) return
-      const applied = await applyCameraZoom(track, level, range)
+      const applied = await applyCameraZoom(
+        track,
+        Math.min(PINCH_ZOOM_MAX, level),
+        range,
+      )
       setZoomLevel(applied)
     },
     [zoomRange],
   )
+
+  const applyVisualZoom = useCallback((level: number) => {
+    setVisualZoom(
+      Math.min(PINCH_ZOOM_MAX, Math.max(PINCH_ZOOM_MIN, level)),
+    )
+  }, [])
+
+  const setPinchZoom = useCallback(
+    (level: number) => {
+      const capped = Math.min(
+        PINCH_ZOOM_MAX,
+        Math.max(PINCH_ZOOM_MIN, level),
+      )
+      if (zoomRange) {
+        void applyZoom(capped)
+      } else {
+        applyVisualZoom(capped)
+      }
+    },
+    [applyVisualZoom, applyZoom, zoomRange],
+  )
+
+  const schedulePinchZoom = useCallback(
+    (level: number) => {
+      pendingPinchZoomRef.current = level
+      if (pinchRafRef.current != null) return
+      pinchRafRef.current = requestAnimationFrame(() => {
+        pinchRafRef.current = null
+        const next = pendingPinchZoomRef.current
+        pendingPinchZoomRef.current = null
+        if (next != null) setPinchZoom(next)
+      })
+    },
+    [setPinchZoom],
+  )
+
+  useEffect(() => {
+    pinchZoomValueRef.current = zoomRange ? zoomLevel : visualZoom
+  }, [visualZoom, zoomLevel, zoomRange])
 
   const applyTorch = useCallback(async (on: boolean) => {
     const track = streamRef.current?.getVideoTracks()[0]
@@ -167,8 +241,8 @@ export function BillCameraCaptureModal({
     setCameraStarting(true)
     setCameraError(null)
     try {
-      const perms = await requestBillCameraPermissions()
-      if (!perms.camera) {
+      const cameraOk = await ensureCameraPermission()
+      if (!cameraOk) {
         setCameraError('需要相机权限才能拍照，或使用相册选图')
         return false
       }
@@ -285,14 +359,28 @@ export function BillCameraCaptureModal({
     [],
   )
 
+  const updatePinchFromDistance = useCallback(
+    (dist: number) => {
+      const start = pinchStartRef.current
+      if (!start || dist <= 8 || start.dist <= 8) return
+      const ratio = dist / start.dist
+      schedulePinchZoom(start.zoom * ratio)
+    },
+    [schedulePinchZoom],
+  )
+
   const handlePreviewPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (phase !== 'camera' || !cameraReady) return
       e.currentTarget.setPointerCapture(e.pointerId)
       pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
       if (pointersRef.current.size === 2) {
-        pinchStartRef.current = { dist: pinchDistance(), zoom: zoomLevel }
+        pinchStartRef.current = {
+          dist: pinchDistance(),
+          zoom: pinchZoomValueRef.current,
+        }
         tapStartRef.current = null
+        touchTapRef.current = null
       } else if (pointersRef.current.size === 1) {
         tapStartRef.current = {
           x: e.clientX,
@@ -301,7 +389,7 @@ export function BillCameraCaptureModal({
         }
       }
     },
-    [cameraReady, phase, pinchDistance, zoomLevel],
+    [cameraReady, phase, pinchDistance],
   )
 
   const handlePreviewPointerMove = useCallback(
@@ -310,12 +398,8 @@ export function BillCameraCaptureModal({
       if (!pointersRef.current.has(e.pointerId)) return
       pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
 
-      if (pointersRef.current.size >= 2 && pinchStartRef.current && zoomRange) {
-        const dist = pinchDistance()
-        if (dist > 8 && pinchStartRef.current.dist > 8) {
-          const ratio = dist / pinchStartRef.current.dist
-          void applyZoom(pinchStartRef.current.zoom * ratio)
-        }
+      if (pointersRef.current.size >= 2 && pinchStartRef.current) {
+        updatePinchFromDistance(pinchDistance())
         return
       }
 
@@ -325,7 +409,7 @@ export function BillCameraCaptureModal({
         if (Math.hypot(dx, dy) > 12) tapStartRef.current = null
       }
     },
-    [applyZoom, cameraReady, phase, pinchDistance, zoomRange],
+    [cameraReady, phase, pinchDistance, updatePinchFromDistance],
   )
 
   const handlePreviewPointerUp = useCallback(
@@ -355,6 +439,61 @@ export function BillCameraCaptureModal({
     [],
   )
 
+  useEffect(() => {
+    const el = previewRef.current
+    if (!el || phase !== 'camera' || !cameraReady) return
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        pinchStartRef.current = {
+          dist: touchDistance([...e.touches]),
+          zoom: pinchZoomValueRef.current,
+        }
+        touchTapRef.current = null
+        tapStartRef.current = null
+      } else if (e.touches.length === 1) {
+        touchTapRef.current = {
+          x: e.touches[0].clientX,
+          y: e.touches[0].clientY,
+        }
+      }
+    }
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length >= 2 && pinchStartRef.current) {
+        e.preventDefault()
+        updatePinchFromDistance(touchDistance([...e.touches]))
+      } else if (touchTapRef.current && e.touches.length === 1) {
+        const dx = e.touches[0].clientX - touchTapRef.current.x
+        const dy = e.touches[0].clientY - touchTapRef.current.y
+        if (Math.hypot(dx, dy) > 12) touchTapRef.current = null
+      }
+    }
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinchStartRef.current = null
+      const tap = touchTapRef.current
+      if (tap && e.touches.length === 0 && e.changedTouches.length === 1) {
+        const t = e.changedTouches[0]
+        if (Math.hypot(t.clientX - tap.x, t.clientY - tap.y) < 12) {
+          void focusAtClientPoint(t.clientX, t.clientY)
+        }
+      }
+      if (e.touches.length === 0) touchTapRef.current = null
+    }
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true })
+    el.addEventListener('touchmove', onTouchMove, { passive: false })
+    el.addEventListener('touchend', onTouchEnd, { passive: true })
+    el.addEventListener('touchcancel', onTouchEnd, { passive: true })
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart)
+      el.removeEventListener('touchmove', onTouchMove)
+      el.removeEventListener('touchend', onTouchEnd)
+      el.removeEventListener('touchcancel', onTouchEnd)
+    }
+  }, [cameraReady, focusAtClientPoint, phase, updatePinchFromDistance])
+
   const handleCapture = useCallback(async () => {
     const video = videoRef.current
     if (!video || !cameraReady || capturing) return
@@ -370,7 +509,16 @@ export function BillCameraCaptureModal({
       canvas.height = h
       const ctx = canvas.getContext('2d')
       if (!ctx) throw new Error('拍照失败')
-      ctx.drawImage(video, 0, 0, w, h)
+      const scale = zoomRange ? 1 : visualZoom
+      if (scale > 1) {
+        const sw = w / scale
+        const sh = h / scale
+        const sx = (w - sw) / 2
+        const sy = (h - sh) / 2
+        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h)
+      } else {
+        ctx.drawImage(video, 0, 0, w, h)
+      }
 
       const blob = await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob(
@@ -387,7 +535,7 @@ export function BillCameraCaptureModal({
     } finally {
       setCapturing(false)
     }
-  }, [cameraReady, capturing, enterReview])
+  }, [cameraReady, capturing, enterReview, visualZoom, zoomRange])
 
   const handleRetake = useCallback(() => {
     clearCapturedPreview()
@@ -451,15 +599,24 @@ export function BillCameraCaptureModal({
   const showLiveCamera = phase === 'camera'
   const showReview = phase === 'review' && capturedUrl
   const showRecognizing = phase === 'recognizing'
+  const displayZoom = zoomRange ? zoomLevel : visualZoom
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black">
+    <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-black">
       {showLiveCamera ? (
         <video
           ref={videoRef}
           className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-150 ${
             cameraReady ? 'opacity-100' : 'opacity-0'
           }`}
+          style={
+            !zoomRange && visualZoom > 1
+              ? {
+                  transform: `scale(${visualZoom})`,
+                  transformOrigin: 'center center',
+                }
+              : undefined
+          }
           playsInline
           muted
           autoPlay
@@ -582,7 +739,7 @@ export function BillCameraCaptureModal({
               <input
                 type="range"
                 min={zoomRange.min}
-                max={zoomRange.max}
+                max={Math.min(zoomRange.max, PINCH_ZOOM_MAX)}
                 step={zoomRange.step}
                 value={zoomLevel}
                 onChange={(e) => void applyZoom(Number(e.target.value))}
@@ -611,11 +768,13 @@ export function BillCameraCaptureModal({
                 {zoomLevel.toFixed(1)}x
               </button>
             </div>
+          ) : displayZoom > 1 ? (
+            <div className="rounded-full bg-black/45 px-3 py-1.5 text-[11px] font-medium tabular-nums text-white/85">
+              {displayZoom.toFixed(1)}x
+            </div>
           ) : null}
           <p className="text-center text-xs text-white/70">
-            {zoomRange
-              ? '双指捏合可缩放 · 轻触画面对焦'
-              : '画面不清晰时，轻触要对焦的位置'}
+            双指捏合可缩放 · 轻触画面对焦
           </p>
           <button
             type="button"

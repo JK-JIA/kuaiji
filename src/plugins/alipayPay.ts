@@ -15,7 +15,9 @@ export interface AlipayPayPlugin {
 export const AlipayPay = registerPlugin<AlipayPayPlugin>('AlipayPay')
 
 export function isAlipayPayNative(): boolean {
-  return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'
+  if (!Capacitor.isNativePlatform()) return false
+  if (Capacitor.isPluginAvailable('AlipayPay')) return true
+  return Capacitor.getPlatform() === 'android'
 }
 
 /** 9000 = 支付成功（同步结果，最终以服务端 notify / 查单为准） */

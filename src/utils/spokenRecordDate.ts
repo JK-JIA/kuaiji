@@ -164,6 +164,23 @@ function utteranceHasMonthDayWithoutYear(utterance: string): boolean {
   )
 }
 
+/** 原话是否提到日历意义上的日期（与 parseSpokenRecordDate 规则对齐） */
+function utteranceMentionsCalendarDate(utterance: string): boolean {
+  const t = utterance.normalize('NFKC')
+  if (/(?:今天|今日|昨天|昨日|前天|明天|明日)/.test(t)) return true
+  if (/\d{4}\s*年/.test(t)) return true
+  if (/\d{1,2}\s*月\s*\d{1,2}\s*(?:日|号)/.test(t)) return true
+  if (
+    /[零〇一二三四五六七八九十两]+\s*月\s*[零〇一二三四五六七八九十两]+\s*(?:日|号)/.test(
+      t,
+    )
+  ) {
+    return true
+  }
+  if (/(?<![\d])(\d{1,2})\s*(?:日|号)(?!\s*斤)/.test(t)) return true
+  return false
+}
+
 /** 口语日期优先，其次 AI 返回，否则今天；结果不超过今天 */
 export function resolveVoiceRecordDate(
   utterance: string,
@@ -175,6 +192,11 @@ export function resolveVoiceRecordDate(
   if (fromSpeech) return clampRecordDateToToday(fromSpeech, reference)
 
   if (hasMarketStallLocationPattern(t)) {
+    return format(reference, 'yyyy-MM-dd')
+  }
+
+  /** 未在口语里提到日期时，一律用本机日历今天（勿信服务端/AI 默认，避免 UTC 与账单印刷日） */
+  if (!utteranceMentionsCalendarDate(utterance)) {
     return format(reference, 'yyyy-MM-dd')
   }
 

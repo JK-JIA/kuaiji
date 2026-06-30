@@ -10,6 +10,7 @@ import { BillCameraCaptureModal, type BillRecognizeResult } from '../components/
 import { CalendarPickerModal } from '../components/CalendarPickerModal'
 import { HomeSearchDateRangeBlock } from '../components/HomeSearchDateRangeBlock'
 import { ReconcileModal } from '../components/ReconcileModal'
+import { BulkReconcileModal } from '../components/BulkReconcileModal'
 import { CustomerAutoAddedModal } from '../components/CustomerAutoAddedModal'
 import type { CustomerAutoPromptItem } from '../utils/customerAutoPrompt'
 import { RecordCard } from '../components/RecordCard'
@@ -60,6 +61,7 @@ import {
   renderSearchResultBillPngBlob,
 } from '../utils/searchResultBillPng'
 import { openAppTutorial } from '../utils/appTutorial'
+import { resolveBulkReconcileCustomer } from '../utils/bulkReconcile'
 
 export function HomePage() {
   const location = useLocation()
@@ -77,6 +79,7 @@ export function HomePage() {
     saveRecord,
     removeRecord,
     setRecordPayment,
+    applyBulkRecordPayments,
     productCatalog,
     asrHotwordsSuppressed,
     voiceProductCorrections,
@@ -85,6 +88,7 @@ export function HomePage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editingRecord, setEditingRecord] = useState<LedgerRecord | null>(null)
   const [reconcileId, setReconcileId] = useState<string | null>(null)
+  const [bulkReconcileOpen, setBulkReconcileOpen] = useState(false)
   const [jumpOpen, setJumpOpen] = useState(false)
   const [jumpDate, setJumpDate] = useState(() =>
     format(new Date(), 'yyyy-MM-dd'),
@@ -581,14 +585,23 @@ export function HomePage() {
   }
 
   const applyHomeSearch = useCallback(
-    (reconcileOverride?: ReconcileFilter) => {
+    (
+      reconcileOverride?: ReconcileFilter,
+      dateOverride?: { from: string; to: string },
+    ) => {
       const reconcile =
         reconcileOverride !== undefined
           ? reconcileOverride
           : searchDraftReconcile
+      const from = dateOverride?.from ?? searchDraftDateFrom
+      const to = dateOverride?.to ?? searchDraftDateTo
+      if (dateOverride) {
+        setSearchDraftDateFrom(from)
+        setSearchDraftDateTo(to)
+      }
       setAppliedSearchQuery(searchDraftQuery.trim())
-      setAppliedSearchDateFrom(searchDraftDateFrom.trim())
-      setAppliedSearchDateTo(searchDraftDateTo.trim())
+      setAppliedSearchDateFrom(from.trim())
+      setAppliedSearchDateTo(to.trim())
       setAppliedSearchReconcile(reconcile)
       setSearchDraftReconcile(reconcile)
     },
@@ -766,6 +779,34 @@ export function HomePage() {
       appliedDateTo,
       appliedSearchReconcile,
     ],
+  )
+
+  const bulkReconcileTarget = useMemo(
+    () =>
+      homeSearchModeActive
+        ? resolveBulkReconcileCustomer(recordsForHomeTimeline, fields)
+        : null,
+    [homeSearchModeActive, recordsForHomeTimeline, fields],
+  )
+
+  const handleBulkReconcileConfirm = useCallback(
+    async (
+      _paymentAmount: number,
+      allocations: Array<{ recordId: string; nextReceived: number }>,
+    ) => {
+      await applyBulkRecordPayments(
+        allocations.map((item) => ({
+          id: item.recordId,
+          payload: {
+            kind: 'amount',
+            cumulativeReceived: item.nextReceived,
+          },
+        })),
+      )
+      setSavedHighlightId(null)
+      setReconcileHighlightId(allocations[allocations.length - 1]?.recordId ?? null)
+    },
+    [applyBulkRecordPayments],
   )
 
   const exportSearchCsv = useCallback(async () => {
@@ -1090,6 +1131,9 @@ export function HomePage() {
                 setSearchDraftDateFrom(from)
                 setSearchDraftDateTo(to)
               }}
+              onQuickSelect={(from, to) => {
+                applyHomeSearch(undefined, { from, to })
+              }}
             />
           </div>
         )}
@@ -1099,6 +1143,17 @@ export function HomePage() {
               {activeSearchSummaryText}
             </p>
             <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              {bulkReconcileTarget &&
+                bulkReconcileTarget.totalOutstanding > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setBulkReconcileOpen(true)}
+                    className="w-full rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-amber-700 active:bg-amber-800 sm:w-auto"
+                    aria-label={`为${bulkReconcileTarget.buyerLabel}批量核账`}
+                  >
+                    客户核账
+                  </button>
+                )}
               <button
                 type="button"
                 onClick={() => setExportSearchSheetOpen(true)}
@@ -1486,6 +1541,19 @@ export function HomePage() {
         fields={fields}
         onClose={() => setReconcileId(null)}
         onConfirm={(id, payload) => void handleReconcileConfirm(id, payload)}
+      />
+
+      <BulkReconcileModal
+        open={bulkReconcileOpen && bulkReconcileTarget !== null}
+        buyerLabel={bulkReconcileTarget?.buyerLabel ?? ''}
+        pendingRecords={bulkReconcileTarget?.pendingRecords ?? []}
+        fields={fields}
+        totalOutstanding={bulkReconcileTarget?.totalOutstanding ?? 0}
+        pendingCount={bulkReconcileTarget?.pendingCount ?? 0}
+        onClose={() => setBulkReconcileOpen(false)}
+        onConfirm={(paymentAmount, allocations) =>
+          void handleBulkReconcileConfirm(paymentAmount, allocations)
+        }
       />
 
       <CalendarPickerModal

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { ensureCameraPermission } from '../plugins/kuaijiPermissions'
 import { parseInviteCodeFromText, normalizeInviteCode } from '../utils/referralInvite'
 
 type Props = {
@@ -61,6 +62,11 @@ export function InviteCodeScanModal({
       }
       if (!navigator.mediaDevices?.getUserMedia) {
         setCameraError('无法打开相机，请手动输入邀请码')
+        return
+      }
+      const cameraOk = await ensureCameraPermission()
+      if (!cameraOk) {
+        setCameraError('需要相机权限才能扫码，请手动输入邀请码')
         return
       }
       try {

@@ -1,6 +1,7 @@
 import type { ProductCatalogEntry } from '../types'
 import {
   fuzzyScore,
+  isSingleHanCharVariant,
   normalizeToken,
   scoreAliasLearnPotential,
 } from './voiceHistoryFuzzy'
@@ -296,10 +297,12 @@ export function shouldAutoLearnAlias(
   if (
     rawA.length <= 4 &&
     rawC.length <= 4 &&
-    !shareHanCharacters(rawA, rawC)
+    !shareHanCharacters(rawA, rawC) &&
+    !isSingleHanCharVariant(aliasCandidate, canonicalName)
   ) {
     return false
   }
+  if (isSingleHanCharVariant(aliasCandidate, canonicalName)) return true
   return fuzzyScore(aliasCandidate, canonicalName) >= ALIAS_AUTO_MIN_SCORE
 }
 

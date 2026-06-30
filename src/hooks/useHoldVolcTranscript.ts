@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { messageIfPremiumFeatureBlocked } from '../utils/premiumGate'
 import { formatAsrUserFacingError } from '../utils/asrUserFacingError'
+import { ensureMicrophoneForVoice } from '../utils/microphonePermissionFlow'
 import { readAsrProvider } from '../utils/asrProvider'
 import { startVolcAsrSession } from '../utils/volcAsrClient'
 
@@ -148,6 +149,17 @@ export function useHoldVolcTranscript({
       if (!apiBase?.trim() || !token) return
       setHint(null)
       setRecording(true)
+      try {
+        await ensureMicrophoneForVoice()
+      } catch (e) {
+        setRecording(false)
+        setHint(
+          formatAsrUserFacingError(
+            e instanceof Error ? e.message : '无法使用麦克风',
+          ),
+        )
+        return
+      }
       try {
         let endedNotified = false
         const asrProvider = readAsrProvider()

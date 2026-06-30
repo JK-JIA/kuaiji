@@ -9,26 +9,32 @@ export interface KuaijiPermissionsPlugin {
   requestCamera(): Promise<{ granted: boolean }>
   requestPhotos(): Promise<{ granted: boolean }>
   requestCameraAndPhotos(): Promise<BillCameraPermissionResult>
+  getMicrophoneStatus(): Promise<{
+    granted: boolean
+    canRequest: boolean
+    blocked?: boolean
+  }>
+  requestMicrophone(): Promise<{ granted: boolean; blocked?: boolean }>
 }
 
 export const KuaijiPermissions = registerPlugin<KuaijiPermissionsPlugin>(
   'KuaijiPermissions',
 )
 
-/** 首次点相机图标：申请相机 + 相册；已授权则不再弹窗（不在此调用 getUserMedia，避免与拍照界面重复打开相机） */
-export async function requestBillCameraPermissions(): Promise<BillCameraPermissionResult> {
+/** 打开相机界面时仅申请相机权限（不在此调用 getUserMedia，避免与拍照界面重复打开相机） */
+export async function ensureCameraPermission(): Promise<boolean> {
   if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
     try {
-      const r = await KuaijiPermissions.requestCameraAndPhotos()
-      return { camera: Boolean(r.camera), photos: Boolean(r.photos) }
+      const r = await KuaijiPermissions.requestCamera()
+      return Boolean(r.granted)
     } catch {
-      return { camera: false, photos: false }
+      return false
     }
   }
-  return { camera: true, photos: true }
+  return true
 }
 
-/** 相册选图前检查（权限应在首次进入时已申请） */
+/** 点击相册选图时再申请图库权限 */
 export async function ensurePhotosPermission(): Promise<boolean> {
   if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
     try {

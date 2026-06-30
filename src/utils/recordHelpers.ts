@@ -3,6 +3,7 @@ import type {
   LedgerRecord,
   LineItemRow,
   ProductCatalogEntry,
+  ReconcilePayload,
 } from '../types'
 import { DEFAULT_FIELD_KEYS } from '../types'
 import {
@@ -634,4 +635,48 @@ export function expandProductLines(
       lineValues: lineValuesForContext(record, lineItem),
     }),
   )
+}
+
+/** 是否已有核账记录（含旧数据仅有 settled / receivedAmount） */
+export function recordHasReconcileHistory(
+  record: LedgerRecord,
+  fields: FieldDef[],
+): boolean {
+  const aid = getAmountFieldId(fields)
+  const exp = aid ? getExpectedAmount(record, aid) : 0
+  const rec = getReceivedAmount(record, exp)
+  return rec > 0 || record.settled === true || record.paymentUpdatedAt != null
+}
+
+/** 应用核账结果；仅在实收或结清状态变化时更新 paymentUpdatedAt */
+export function applyReconcilePayment(
+  record: LedgerRecord,
+  fields: FieldDef[],
+  payload: ReconcilePayload,
+): LedgerRecord {
+  if (payload.kind !== 'amount') return record
+
+  const aid = getAmountFieldId(fields)
+  const exp = aid ? parseMoney(record.values[aid] ?? '') : 0
+  const rounded = Math.round(payload.cumulativeReceived * 100) / 100
+  const recv =
+    exp > 0
+      ? Math.max(0, Math.min(exp, rounded))
+      : Math.max(0, rounded)
+  const settled =
+    exp > 0 ? recv >= exp - 0.005 : payload.markSettled === true
+  const prevRecv = getReceivedAmount(record, exp)
+  const prevSettled = record.settled === true
+  const paymentChanged =
+    Math.abs(recv - prevRecv) > 0.005 ||
+    (exp <= 0 && settled !== prevSettled)
+
+  return {
+    ...record,
+    receivedAmount: recv,
+    settled,
+    paymentUpdatedAt: paymentChanged
+      ? Date.now()
+      : record.paymentUpdatedAt,
+  }
 }

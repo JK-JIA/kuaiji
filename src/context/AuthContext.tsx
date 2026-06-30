@@ -16,16 +16,21 @@ import {
   cancelMembership,
   claimWelcomeMembership,
   clearSession,
+  ensureFreshAccessToken,
   fetchMe,
   getApiBase,
   getStoredEmail,
   getStoredMembershipExpires,
   getStoredToken,
   membershipActiveFromIso,
+  onAuthTokensChanged,
   persistSession,
   redeemMembership,
+  refreshAccessToken,
   sendSmsCode,
   setStoredMembershipExpires,
+  startProactiveTokenRefresh,
+  stopProactiveTokenRefresh,
 } from '../api/ledgerClient'
 import { getDeviceFingerprint } from '../utils/deviceFingerprint'
 import { clearReferralInviteCache } from '../utils/referralInviteCache'
@@ -91,8 +96,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       _phone?: string | null,
       welcomeClaimed?: boolean,
       invitedBound?: boolean,
+      refreshToken?: string | null,
     ) => {
-      persistSession(t, em, mem ?? null, _phone ?? null)
+      persistSession(t, em, mem ?? null, _phone ?? null, refreshToken ?? undefined)
       setToken(t)
       setEmail(em)
       setMembershipExpiresAt(mem ?? null)
@@ -117,9 +123,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshProfile = useCallback(async () => {
     if (!apiBase || !token) return
-    const me = await fetchMe(apiBase, token)
+    const me = await fetchMe(apiBase, getStoredToken() ?? token)
     applyMe(me)
   }, [apiBase, token, applyMe])
+
+  useEffect(() => {
+    return onAuthTokensChanged((access, _refresh) => {
+      setToken(access)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!apiBase || !token) {
+      stopProactiveTokenRefresh()
+      return
+    }
+    startProactiveTokenRefresh(apiBase)
+  }, [apiBase, token])
 
   useEffect(() => {
     if (!apiBase || !token) {
@@ -127,11 +147,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return
     }
     setProfileLoaded(false)
-    void refreshProfile()
-      .catch(() => {
-        /* 离线或令牌失效时保留本地缓存 */
-      })
-      .finally(() => setProfileLoaded(true))
+    void (async () => {
+      await ensureFreshAccessToken(apiBase)
+      try {
+        await refreshProfile()
+      } catch {
+        const renewed = await refreshAccessToken(apiBase)
+        if (renewed) {
+          try {
+            await refreshProfile()
+          } catch {
+            /* 离线时保留本地缓存 */
+          }
+        }
+      }
+    })().finally(() => setProfileLoaded(true))
   }, [apiBase, token, refreshProfile])
 
   const login = useCallback(
@@ -145,6 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         r.phone,
         r.welcomeMembershipClaimed,
         r.invitedByBound,
+        r.refreshToken,
       )
     },
     [apiBase, applySession],
@@ -161,6 +192,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         r.phone,
         r.welcomeMembershipClaimed,
         r.invitedByBound,
+        r.refreshToken,
       )
     },
     [apiBase, applySession],
@@ -183,6 +215,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         r.phone,
         r.welcomeMembershipClaimed,
         r.invitedByBound,
+        r.refreshToken,
       )
     },
     [apiBase, applySession],
@@ -205,6 +238,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         r.phone,
         r.welcomeMembershipClaimed,
         r.invitedByBound,
+        r.refreshToken,
       )
     },
     [apiBase, applySession],

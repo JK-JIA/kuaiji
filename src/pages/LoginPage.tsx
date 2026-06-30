@@ -358,8 +358,12 @@ export function LoginPage() {
   }
 
   async function finishLogin() {
-    await refreshProfile()
     navigate('/', { replace: true })
+    try {
+      await refreshProfile()
+    } catch {
+      /* 进入首页后再同步资料，避免登录后黑屏等待 */
+    }
   }
 
   async function handleOneClickLogin() {
@@ -379,8 +383,11 @@ export function LoginPage() {
     setErrorMsg('')
     try {
       let accessToken: string
-      // 预取号后走授权页取 token（静默 accelerate 无法稳定拿到掩码/ token）
-      ;({ accessToken } = await NumberAuth.login())
+      try {
+        ;({ accessToken } = await NumberAuth.loginSilent())
+      } catch {
+        ;({ accessToken } = await NumberAuth.login())
+      }
       await oneClickLogin(accessToken)
       await finishLogin()
     } catch (e) {
